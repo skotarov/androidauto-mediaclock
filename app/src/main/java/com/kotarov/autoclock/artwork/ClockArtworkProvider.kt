@@ -17,10 +17,13 @@ class ClockArtworkProvider : ContentProvider() {
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor? {
         val context = context ?: return null
         val now = LocalDateTime.now()
-        val modeSegment = uri.pathSegments.firstOrNull() ?: "digital"
+        val modeSegment = uri.pathSegments.firstOrNull() ?: MODE_CLOCK
+        val weatherText = "--°C"
         val bitmap = when (modeSegment) {
-            "analog" -> ClockRenderer.renderAnalog(now)
-            else -> ClockRenderer.renderDigital(now)
+            MODE_ANALOG -> ClockRenderer.renderAnalog(now)
+            MODE_WEATHER -> ClockRenderer.renderWeather(now, weatherText)
+            MODE_BOTH -> ClockRenderer.renderClockWeather(now, weatherText)
+            else -> ClockRenderer.renderClock(now)
         }
 
         val outputDir = File(context.cacheDir, "clock-artwork").apply { mkdirs() }
@@ -57,6 +60,10 @@ class ClockArtworkProvider : ContentProvider() {
 
     companion object {
         const val AUTHORITY = "com.kotarov.autoclock.artwork"
+        private const val MODE_CLOCK = "clock"
+        private const val MODE_ANALOG = "analog"
+        private const val MODE_WEATHER = "weather"
+        private const val MODE_BOTH = "both"
         private val FILE_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd_HHmm")
 
         fun artworkUri(mode: String, now: LocalDateTime = LocalDateTime.now()): Uri {
