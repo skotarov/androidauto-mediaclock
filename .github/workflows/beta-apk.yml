@@ -36,17 +36,17 @@ jobs:
       - name: Copy APK with friendly filename
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk dist/AutoClock-2-v0.12-beta.apk
+          cp app/build/outputs/apk/debug/app-debug.apk dist/AutoClock-2-v0.13-beta.apk
 
       - name: Create or update public beta download
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if ! gh release view v0.12.0-beta >/dev/null 2>&1; then
-            gh release create v0.12.0-beta \
+          if ! gh release view v0.13.0-beta >/dev/null 2>&1; then
+            gh release create v0.13.0-beta \
               --target "$GITHUB_SHA" \
-              --title "Auto Clock 2 — beta 0.12.0" \
-              --notes "Compact analog layout lowered to avoid top crop, weather icon and temperature aligned with tight optical spacing, crisp negative outline on text to hide analog hands, no text box." \
+              --title "Auto Clock 2 — beta 0.13.0" \
+              --notes "Default seconds progress OFF; simpler three core visuals with one optional add-on; Auto weather chooses nearest fresh NOAA aviation METAR station using one-shot approximate location and shows source, with labeled Open-Meteo model fallback." \
               --prerelease
           fi
-          gh release upload v0.12.0-beta dist/AutoClock-2-v0.12-beta.apk --clobber
+          gh release upload v0.13.0-beta dist/AutoClock-2-v0.13-beta.apk --clobber
