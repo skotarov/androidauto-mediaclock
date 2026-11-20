@@ -1,6 +1,7 @@
 package com.kotarov.autoclock.media
 
 import android.content.Intent
+import android.content.SharedPreferences
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -31,6 +32,28 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private lateinit var session: MediaSessionCompat
     private var running = false
     private var mode = Mode.DIGITAL
+    private lateinit var prefs: SharedPreferences
+
+    // SharedPreferences changes from the phone UI arrive in the same process.
+    // Debounce related weather cache writes into a single metadata refresh.
+    private val settingsRefresh = Runnable {
+        mode = savedMode()
+        notifyChildrenChanged(ROOT_ID)
+        publishClock()
+        publishPlaybackState()
+        if (running) requestWeatherIfNecessary()
+    }
+    private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == KEY_MODE || key == KEY_HIDE_MEDIA_TEXT ||
+            key == KEY_LAYOUT || key == KEY_PROGRESS_ANIMATED ||
+            key == WeatherStore.KEY_CITY || key == "weather_cached_city" ||
+            key == "weather_fetched_at" || key == "weather_code" ||
+            key == "weather_temperature_bits" || key == "weather_is_day"
+        ) {
+            handler.removeCallbacks(settingsRefresh)
+            handler.postDelayed(settingsRefresh, 120L)
+        }
+    }
 
     private val minuteTick = object : Runnable {
         override fun run() {
@@ -47,6 +70,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     override fun onCreate() {
         super.onCreate()
+        prefs = getSharedPreferences(PREFERENCES, MODE_PRIVATE)
         mode = savedMode()
         session = MediaSessionCompat(this, "AutoClockV2").apply {
             setFlags(
@@ -98,6 +122,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             isActive = true
         }
         sessionToken = session.sessionToken
+        prefs.registerOnSharedPreferenceChangeListener(prefsListener)
         publishClock()
         publishPlaybackState()
     }
@@ -131,7 +156,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 .setIconUri(
                     ClockArtworkProvider.artworkUri(
                         option.artwork, now,
-                        if (option.usesWeather) revision else 0L
+                        if (option.usesWeather) revision else 0L,
+                        compactLayout()
                     )
                 )
                 .build()
@@ -146,10 +172,18 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     override fun onDestroy() {
         running = false
         handler.removeCallbacks(minuteTick)
+        handler.removeCallbacks(settingsRefresh)
+        prefs.unregisterOnSharedPreferenceChangeListener(prefsListener)
         session.isActive = false
         session.release()
         super.onDestroy()
     }
+
+    private fun compactLayout(): Boolean =
+        prefs.getString(KEY_LAYOUT, "compact") != "standard"
+
+    private fun animateProgress(): Boolean =
+        prefs.getBoolean(KEY_PROGRESS_ANIMATED, true)
 
     private fun savedMode(): Mode {
         val key = getSharedPreferences(PREFERENCES, MODE_PRIVATE).getString(KEY_MODE, null)
@@ -219,7 +253,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             else -> date
         }
         val artwork = ClockArtworkProvider.artworkUri(
-            mode.artwork, now, weather?.observedAtMs ?: 0L
+            mode.artwork, now, weather?.observedAtMs ?: 0L, compactLayout()
         )
 
         // Android Auto decides whether to render a media title at all.
@@ -242,10 +276,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
         session.setQueueTitle(displayedAlbum)
         session.setQueue(listOf(MediaSessionCompat.QueueItem(description, mode.queueId)))
-        session.setMetadata(
-            MediaMetadataCompat.Builder()
+        val metadata = MediaMetadataCompat.Builder()
                 .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, mode.id)
-                .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, MinuteProgress.DURATION_MS)
                 .putString(MediaMetadataCompat.METADATA_KEY_TITLE, displayedTitle)
                 .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, displayedSubtitle)
                 .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, displayedAlbum)
@@ -255,8 +287,10 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 .putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ART_URI, artwork.toString())
                 .putString(MediaMetadataCompat.METADATA_KEY_ART_URI, artwork.toString())
                 .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON_URI, artwork.toString())
-                .build()
+        if (animateProgress()) metadata.putLong(
+            MediaMetadataCompat.METADATA_KEY_DURATION, MinuteProgress.DURATION_MS
         )
+        session.setMetadata(metadata.build())
     }
 
     private fun publishPlaybackState() {
@@ -264,7 +298,10 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         // A start at HH:mm:24 starts at ~24/60 instead of the beginning.
         val nowWallMs = System.currentTimeMillis()
         val nowElapsedMs = SystemClock.elapsedRealtime()
-        val currentSecondPositionMs = MinuteProgress.positionMs(nowWallMs)
+        val progressEnabled = animateProgress()
+        val currentSecondPositionMs = if (progressEnabled)
+            MinuteProgress.positionMs(nowWallMs)
+        else PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN
         val actions = PlaybackStateCompat.ACTION_PLAY or
             PlaybackStateCompat.ACTION_PAUSE or
             PlaybackStateCompat.ACTION_STOP or
@@ -280,7 +317,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                     if (running) PlaybackStateCompat.STATE_PLAYING
                     else PlaybackStateCompat.STATE_PAUSED,
                     currentSecondPositionMs,
-                    if (running) 1f else 0f,
+                    if (running && progressEnabled) 1f else 0f,
                     nowElapsedMs
                 )
                 .setActions(actions)
@@ -311,6 +348,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         const val PREFERENCES = "clock_settings"
         const val KEY_MODE = "display_mode"
         const val KEY_HIDE_MEDIA_TEXT = "hide_media_text"
+        const val KEY_LAYOUT = "clock_layout"
+        const val KEY_PROGRESS_ANIMATED = "progress_animated"
         private const val INVISIBLE_TEXT = "\u00A0"
         private const val ROOT_ID = "auto_clock_root"
         private val TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm", Locale("bg", "BG"))
