@@ -11,39 +11,42 @@ media card next to navigation, not a replacement for a real audio player.
 > guaranteed supported API for a general-purpose custom clock in the media
 > card. Not intended for Play Store publication as a music app.
 
-## Three primary visual styles (v0.10)
+## Clear visual choices (v0.11)
 
-Select **one main visual style**, then its corresponding additional information.
-Settings keep the last detail option for each main style independently.
+The phone settings screen now shows **three main radio buttons**:
 
-| Main style | Details | Emphasis |
+- **Аналогов часовник** — clean analog dial and hands, no text by default
+- **Цифров часовник** — clean large HH:mm, no dial or weather by default
+- **Времето** — large weather symbol and temperature, no clock by default
+
+Under the selected radio option, there are exactly **two independent
+checkboxes**. Leave both unchecked for the pure main style:
+
+| Primary radio | First optional checkbox | Second optional checkbox |
 | --- | --- | --- |
-| Analog clock | Digital time | Analog hands + prominent HH:mm |
-| Analog clock | Digital time and weather | Analog hands, HH:mm and smaller forecast |
-| Analog clock | Weather only | Analog hands with prominent weather, no digital HH:mm |
-| Digital clock | Time only | Large HH:mm with smaller date |
-| Digital clock | Time + weather | Large HH:mm with smaller weather underneath |
-| Weather | Weather only | Large weather symbol, temperature and condition |
-| Weather | Weather + digital time | Large weather symbol and temperature with smaller HH:mm underneath |
+| Аналогов часовник | Добави цифров час | Добави времето |
+| Цифров часовник | Добави аналогов часовник | Добави времето |
+| Времето | Добави аналогов часовник | Добави цифров час |
 
-The main weather style reverses the hierarchy of Digital + Weather:
-the forecast becomes the focal point, not the clock.
+Each radio option has four possible checkbox states (none / first /
+second / both): **12 combinations in total**. The selected checkboxes
+are saved independently for each main style. The Android Auto browser
+shows only the three main styles, avoiding a long confusing catalogue.
+The phone controls add-ons and the active media session refreshes when
+these settings change. The Weather-first layout keeps its weather data
+dominant even when digital time is added.
 
-The Android Auto media browser shows all seven choices. Changes on the
-phone update the live media session via a debounced SharedPreferences
-listener; the car still controls how quickly artwork is redrawn.
-Compact/standard layout, clean media text and animated/static playback
-progress retain their previous settings.
+On first launch, old v0.10 radio choices are migrated to these checkboxes
+without discarding the previous display preference. The existing city,
+compact/standard size, progress and hidden media labels remain unchanged.
 
-Bitmap rendering: 512×512 RGB_565 for content-provider artwork and a
-small 320×320 RGB_565 direct media bitmap for display-change updates.
-The analog dial is positioned above the native Android Auto controls.
-No continuous frame-by-frame rendering is used.
+Bitmap rendering: 512×512 RGB_565 provider artwork, and 320×320 RGB_565
+direct metadata artwork. There is no continuous animation, fake sound,
+location tracking, or wake lock. The clock refreshes each minute while
+active, and weather is requested hourly only for modes that need it.
 
 Weather uses [Open-Meteo](https://open-meteo.com/) for permitted
-non-commercial use. Its city is selected on the phone: there is no GPS
-permission or continuous location service. Forecasts are fetched only
-when a selected mode requires weather, no more than hourly while active.
+non-commercial use. The city is selected on the phone.
 
 ## Minute progress bar
 
@@ -77,11 +80,11 @@ itself is controlled by Android Auto, not by the phone app. Android Auto does no
 ## Install the APK
 
 The latest beta APK is published as
-[AutoClock-2-v0.10-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.10.0-beta)
+[AutoClock-2-v0.11-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.11.0-beta)
 from GitHub Releases after tests pass.
 
-1. Open the public **Releases** page and choose **v0.10.0-beta**.
-2. Under **Assets**, tap **AutoClock-2-v0.10-beta.apk** (not the source ZIP).
+1. Open the public **Releases** page and choose **v0.11.0-beta**.
+2. Under **Assets**, tap **AutoClock-2-v0.11-beta.apk** (not the source ZIP).
 3. Install on the Android phone connected to the car, allowing installation
    from the browser/files app if Android requests permission.
 4. Open Auto Clock 2 on the phone and select the mode and weather city.
@@ -91,6 +94,14 @@ from GitHub Releases after tests pass.
    if needed; return to navigation/split-screen mode.
 
 ### Testing checklist
+
+- [ ] Each main radio has two independent checkboxes, both off means clean style
+- [ ] Clean analog only draws face and hands
+- [ ] Clean digital only draws HH:mm
+- [ ] Clean weather only draws icon, temperature and weather description
+- [ ] Each family remembers its checked add-ons after switching away and back
+- [ ] All twelve combinations render and do not obscure media controls
+
 
 - [ ] Select each of the three main visuals, then every detail option (3 + 2 + 2)
 - [ ] Weather-first text and icon are clearly larger than its optional digital time
