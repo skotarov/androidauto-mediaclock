@@ -88,9 +88,9 @@ object ClockRenderer {
                         drawWeatherRow(canvas, CENTER_X, clockY + analogWeatherOffset * unit,
                             weatherCode, isDay, temperature,
                             ANALOG_WEATHER_TEXT_SIZE * unit, unit)
-                    // For compatibility, basic analog always includes HH:mm.
-                    else -> drawText(canvas, time.format(timeFormat), CENTER_X,
-                        clockY, 46f * unit, white, unit)
+                    // No additions: genuinely clean analog face, with
+                    // hour/minute hands and markings but no digits or weather.
+                    else -> Unit
                 }
             }
             ClockFamily.DIGITAL -> {
