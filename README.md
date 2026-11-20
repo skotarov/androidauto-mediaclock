@@ -13,11 +13,14 @@ media card next to navigation, not a replacement for a real audio player.
 
 ## Features
 
-- Every display mode keeps the same high-contrast analog clock artwork (hour/minute hands, no second hand)
+- Every display mode uses a compact analog clock, shifted up into the area above Android Auto media buttons.
+- The clock-only modes show a bold **HH:mm in the exact centre of the hands**. Weather-only hides the central digits; Clock + Weather includes them.
+- Clock-only dial: centre x=256, y=187, radius=146 on the 512px square. Weather dial: centre x=212, y=187, radius=125 to reserve right-side room for the forecast.
+- No second hand or second-by-second drawing; still updates once per minute.
 - Time and date appear as Android Auto metadata, never as text baked into the artwork
 - Weather codes display as vector icons (sun, moon, cloud, fog, rain, snow and storm)
-- Weather icon **and temperature** are drawn on the upper-right of the analog dial
-  in *all clock modes* by default (not just in the Weather mode)
+- Weather icon **and temperature** are drawn in a dedicated upper-right area
+  **only in Weather and Clock + Weather modes**, without covering the dial.
 - **Clean media labels** is enabled by default: playback metadata uses a
   non-breaking space rather than song title/artist. Users can turn this off
   in the phone settings if the Android Auto host renders placeholders.
@@ -52,16 +55,16 @@ Power consumption still **must be measured on the actual phone**.
 **Limit:** The app cannot suppress Android Auto's built-in media controls or
 guarantee fully hiding the text area. The clean mode sends invisible media
 metadata, but Android Auto may show fallback labels. The media app template
-itself is controlled by Android Auto, not by the phone app.
+itself is controlled by Android Auto, not by the phone app. Android Auto does not reliably expose its compact/full-screen card geometry to this MediaBrowser service, so v0.6 intentionally uses one safe layout for both sizes.
 
 ## Install the APK
 
 The latest beta APK is published as
-[AutoClock-2-v0.5-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.5.0-beta)
+[AutoClock-2-v0.6-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.6.0-beta)
 from GitHub Releases after tests pass.
 
-1. Open the public **Releases** page and choose **v0.5.0-beta**.
-2. Under **Assets**, tap **AutoClock-2-v0.5-beta.apk** (not the source ZIP).
+1. Open the public **Releases** page and choose **v0.6.0-beta**.
+2. Under **Assets**, tap **AutoClock-2-v0.6-beta.apk** (not the source ZIP).
 3. Install on the Android phone connected to the car, allowing installation
    from the browser/files app if Android requests permission.
 4. Open Auto Clock 2 on the phone and select the mode and weather city.
@@ -79,7 +82,9 @@ from GitHub Releases after tests pass.
 - [ ] No song/artist labels appear when 'Само фон' is selected; note whether
   the Android Auto host substitutes an app title or displays blank rows
 - [ ] The Android Auto host still draws its playback controls (by design)
-- [ ] Weather icon + degree value appears at the top-right of the analog face
+- [ ] In analog mode the time is centred at the hands and weather is absent
+- [ ] Dial is entirely above the media transport controls and leaves breathing room at the edges
+- [ ] In Weather and Clock+Weather modes, the forecast sits beside (never over) the dial
 - [ ] The optional 'show media labels' fallback works if the host needs titles
 - [ ] Weather appears after first request, survives weak/offline signal
 - [ ] Weather mode city selection is correct; manual refresh works
