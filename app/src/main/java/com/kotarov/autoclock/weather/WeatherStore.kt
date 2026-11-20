@@ -38,7 +38,8 @@ object WeatherStore {
     data class Snapshot(
         val temperatureC: Double,
         val weatherCode: Int,
-        val observedAtMs: Long
+        val observedAtMs: Long,
+        val isDay: Boolean
     ) {
         val formattedTemperature: String get() = "${temperatureC.roundToInt()}°C"
         val description: String get() = describe(weatherCode)
@@ -62,7 +63,8 @@ object WeatherStore {
             prefs.getLong("weather_temperature_bits", java.lang.Double.doubleToRawLongBits(Double.NaN))
         )
         if (!temp.isFinite()) return null
-        return Snapshot(temp, prefs.getInt("weather_code", -1), fetchedAt)
+        return Snapshot(temp, prefs.getInt("weather_code", -1), fetchedAt,
+            prefs.getBoolean("weather_is_day", true))
     }
 
     /**
@@ -89,20 +91,23 @@ object WeatherStore {
                 prefs.edit()
                     .putString("weather_cached_city", selected.id)
                     .putLong("weather_fetched_at", System.currentTimeMillis())
-                    .putLong("weather_temperature_bits", java.lang.Double.doubleToRawLongBits(reading.first))
-                    .putInt("weather_code", reading.second)
+                    .putLong("weather_temperature_bits", java.lang.Double.doubleToRawLongBits(reading.temperature))
+                    .putInt("weather_code", reading.code)
+                    .putBoolean("weather_is_day", reading.isDay)
                     .apply()
             }
             Handler(Looper.getMainLooper()).post { callback(reading != null) }
         }, "AutoClockWeather").apply { isDaemon = true }.start()
     }
 
-    private fun fetch(city: City): Pair<Double, Int>? {
+    private data class Reading(val temperature: Double, val code: Int, val isDay: Boolean)
+
+    private fun fetch(city: City): Reading? {
         val url = URL(
             "https://api.open-meteo.com/v1/forecast?" +
                 "latitude=${String.format(Locale.US, "%.4f", city.lat)}&" +
                 "longitude=${String.format(Locale.US, "%.4f", city.lon)}&" +
-                "current=temperature_2m,weather_code&timezone=auto&forecast_days=1"
+                "current=temperature_2m,weather_code,is_day&timezone=auto&forecast_days=1"
         )
         val connection = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
@@ -119,10 +124,22 @@ object WeatherStore {
             val temperature = current.optDouble("temperature_2m", Double.NaN)
             val code = current.optInt("weather_code", -1)
             if (!temperature.isFinite() || temperature !in -100.0..70.0) return null
-            return temperature to code
+            return Reading(temperature, code, current.optInt("is_day", 1) == 1)
         } finally {
             connection.disconnect()
         }
+    }
+
+    /** Compact Unicode glyph for Android Auto metadata (vector artwork has its own icon). */
+    fun symbol(code: Int?, isDay: Boolean = true): String = when (code) {
+        0 -> if (isDay) "☀" else "☾"
+        1, 2 -> "⛅"
+        3, -1, null -> "☁"
+        45, 48 -> "≋"
+        51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82 -> "☂"
+        71, 73, 75, 77, 85, 86 -> "❄"
+        95, 96, 99 -> "⚡"
+        else -> "☁"
     }
 
     fun describe(code: Int): String = when (code) {
