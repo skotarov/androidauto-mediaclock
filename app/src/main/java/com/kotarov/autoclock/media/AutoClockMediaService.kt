@@ -51,6 +51,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             key == KEY_MODE || key == KEY_HIDE_MEDIA_TEXT ||
             key == KEY_LAYOUT || key == KEY_PROGRESS_ANIMATED ||
             key == WeatherStore.KEY_CITY || key == "weather_cached_city" ||
+            key == "weather_cached_mode" || key == "weather_station_label" ||
+            key == "weather_source_name" ||
             key == "weather_fetched_at" || key == "weather_code" ||
             key == "weather_temperature_bits" || key == "weather_is_day"
         ) {
@@ -73,7 +75,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     override fun onCreate() {
         super.onCreate()
         prefs = getSharedPreferences(PREFERENCES, MODE_PRIVATE)
-        ClockSelectionStore.migrateIfNeeded(prefs)
+        ClockSelectionStore.migrateSimplifiedIfNeeded(prefs)
         preset = selectedPreset()
         session = MediaSessionCompat(this, "AutoClockV3").apply {
             setFlags(
@@ -201,7 +203,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         prefs.getString(KEY_LAYOUT, "compact") != "standard"
 
     private fun animateProgress(): Boolean =
-        prefs.getBoolean(KEY_PROGRESS_ANIMATED, true)
+        prefs.getBoolean(KEY_PROGRESS_ANIMATED, false)
 
     private fun hideMediaText(): Boolean =
         prefs.getBoolean(KEY_HIDE_MEDIA_TEXT, true)
@@ -258,7 +260,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val subtitle = when {
             preset.family == ClockFamily.WEATHER && preset.hasDigitalTime ->
                 "$time • $description"
-            preset.usesWeather -> description
+            preset.usesWeather -> if (weather != null && weather.autoSelected)
+                "${weather.originLabel} · ${weather.sourceLabel}" else description
             preset.hasDigitalTime -> now.format(DATE_FORMAT)
             else -> preset.label
         }
@@ -287,7 +290,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val art = ClockRenderer.render(
             preset.id, now, weather?.weatherCode, weather?.isDay ?: true,
             weather?.formattedTemperature, compactLayout(),
-            outputSize = 320, condition = description
+            outputSize = 320, condition = description,
+            sourceLabel = weather?.artworkSource
         )
         val metadata = MediaMetadataCompat.Builder()
             .putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, art)
