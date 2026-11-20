@@ -14,7 +14,7 @@ import kotlin.math.sin
  * playback controls on top of this image, so we never bake words into it.
  *
  * Every mode has the same, high-contrast analog clock background.
- * Weather modes add a small vector weather symbol at the upper right.
+ * Active weather data adds a vector weather symbol and temperature to the upper right.
  * The minute hand changes once per minute; no animated second hand.
  */
 object ClockRenderer {
@@ -32,15 +32,16 @@ object ClockRenderer {
         mode: String,
         time: LocalDateTime,
         weatherCode: Int? = null,
-        isDay: Boolean = true
+        isDay: Boolean = true,
+        temperature: String? = null
     ): Bitmap {
         val bitmap = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.RGB_565)
         val canvas = Canvas(bitmap)
         canvas.drawColor(Color.rgb(2, 5, 11))
 
         drawClock(canvas, time)
-        if ((mode == "weather" || mode == "both") && weatherCode != null && weatherCode >= 0) {
-            drawWeatherIcon(canvas, weatherCode, isDay)
+        if (weatherCode != null && weatherCode >= 0) {
+            drawWeatherBadge(canvas, weatherCode, isDay, temperature)
         }
         return bitmap
     }
@@ -107,9 +108,35 @@ object ClockRenderer {
      * Icons are drawn from vectors, not fonts or emoji. They remain legible
      * even if Android Auto desaturates and dims the album art.
      */
+    private fun drawWeatherBadge(
+        canvas: Canvas,
+        code: Int,
+        isDay: Boolean,
+        temperature: String?
+    ) {
+        // Place real weather information above Android Auto's lower-left
+        // media text and transport buttons. The card is part of the bitmap.
+        val rect = android.graphics.RectF(326f, 62f, 485f, 229f)
+        canvas.drawRoundRect(rect, 22f, 22f, fill(Color.rgb(5, 16, 26)))
+        canvas.drawRoundRect(rect, 22f, 22f, stroke(Color.rgb(186, 219, 235), 4f))
+        drawWeatherIcon(canvas, code, isDay)
+        if (!temperature.isNullOrBlank()) {
+            val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.WHITE
+                textSize = 42f
+                textAlign = Paint.Align.CENTER
+                typeface = android.graphics.Typeface.create(
+                    android.graphics.Typeface.SANS_SERIF,
+                    android.graphics.Typeface.BOLD
+                )
+            }
+            canvas.drawText(temperature, 406f, 211f, p)
+        }
+    }
+
     private fun drawWeatherIcon(canvas: Canvas, code: Int?, isDay: Boolean) {
-        val cx = 386f
-        val cy = 119f
+        val cx = 406f
+        val cy = 120f
         when (code) {
             0 -> if (isDay) drawSun(canvas, cx, cy) else drawMoon(canvas, cx, cy)
             1, 2 -> {
