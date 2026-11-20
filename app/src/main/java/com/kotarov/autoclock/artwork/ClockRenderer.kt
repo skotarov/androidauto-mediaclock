@@ -68,15 +68,15 @@ object ClockRenderer {
                     preset.hasDigitalTime && preset.usesWeather -> {
                         drawText(canvas, time.format(timeFormat), CENTER_X,
                             clockY - 24f * unit, 46f * unit, white, unit)
-                        drawWeatherRow(canvas, CENTER_X, clockY + 35f * unit,
+                        drawWeatherRow(canvas, CENTER_X, clockY + 47f * unit,
                             weatherCode, isDay, temperature, 29f * unit, unit)
                     }
                     preset.hasDigitalTime ->
                         drawText(canvas, time.format(timeFormat), CENTER_X,
                             clockY, 46f * unit, white, unit)
                     preset.usesWeather ->
-                        drawWeatherRow(canvas, CENTER_X, clockY,
-                            weatherCode, isDay, temperature, 49f * unit, unit)
+                        drawWeatherRow(canvas, CENTER_X, clockY + 22f * unit,
+                            weatherCode, isDay, temperature, 45f * unit, unit)
                     // Pure analog: hands and markings, no digital text.
                 }
             }
@@ -85,7 +85,7 @@ object ClockRenderer {
                     if (preset.usesWeather) {
                         drawText(canvas, time.format(timeFormat), CENTER_X,
                             clockY - 24f * unit, 46f * unit, white, unit)
-                        drawWeatherRow(canvas, CENTER_X, clockY + 35f * unit,
+                        drawWeatherRow(canvas, CENTER_X, clockY + 47f * unit,
                             weatherCode, isDay, temperature, 29f * unit, unit)
                     } else {
                         drawText(canvas, time.format(timeFormat), CENTER_X,
@@ -111,7 +111,8 @@ object ClockRenderer {
                     drawText(canvas, time.format(timeFormat), CENTER_X,
                         clockY + 45f * unit, 37f * unit, pale, unit)
                 } else {
-                    drawWeatherRow(canvas, CENTER_X, clockY - 9f * unit,
+                    drawWeatherRow(canvas, CENTER_X,
+                        clockY + (if (preset.hasAnalog) 18f else -9f) * unit,
                         weatherCode, isDay, temperature, weatherSize, unit,
                         if (preset.hasAnalog) radius * 2f - 14f else 345f)
                     if (!preset.hasAnalog) {
