@@ -7,9 +7,9 @@ object ClockSelectionStore {
     private const val KEY_SCHEMA_V13 = "display_simplified_v13"
 
     /**
-     * Keep existing weather choices but make the digital time intrinsic to the
-     * analogue base (as requested). Deprecated secondary analog add-ons are
-     * never re-enabled by the simplified screen.
+     * Migration from older flat layouts. Previously forced analogue digits
+     * remain checked for existing installs, but can now be switched off to
+     * get a genuinely clean analogue face.
      */
     fun migrateSimplifiedIfNeeded(prefs: SharedPreferences) {
         migrateIfNeeded(prefs)
@@ -72,9 +72,11 @@ object ClockSelectionStore {
     fun forFamily(prefs: SharedPreferences, family: ClockFamily): ClockPreset =
         when (family) {
             ClockFamily.ANALOG ->
-                if (prefs.getBoolean(ClockPreset.KEY_ANALOG_ADD_WEATHER, false))
-                    ClockPreset.ANALOG_TIME_WEATHER
-                else ClockPreset.ANALOG_TIME
+                ClockPreset.fromAddons(
+                    ClockFamily.ANALOG,
+                    first = prefs.getBoolean(ClockPreset.KEY_ANALOG_ADD_DIGITAL, true),
+                    second = prefs.getBoolean(ClockPreset.KEY_ANALOG_ADD_WEATHER, false)
+                )
             ClockFamily.DIGITAL ->
                 if (prefs.getBoolean(ClockPreset.KEY_DIGITAL_ADD_WEATHER, false))
                     ClockPreset.DIGITAL_TIME_WEATHER
@@ -89,7 +91,7 @@ object ClockSelectionStore {
         val family = preset.family
         prefs.edit()
             .putString(ClockPreset.KEY_FAMILY, family.id)
-            .putBoolean(ClockPreset.KEY_ANALOG_ADD_DIGITAL, true)
+            .putBoolean(ClockPreset.KEY_ANALOG_ADD_DIGITAL, preset.hasDigitalTime)
             .putBoolean(ClockPreset.KEY_ANALOG_ADD_WEATHER,
                 if (family == ClockFamily.ANALOG) preset.usesWeather
                 else prefs.getBoolean(ClockPreset.KEY_ANALOG_ADD_WEATHER, false))
