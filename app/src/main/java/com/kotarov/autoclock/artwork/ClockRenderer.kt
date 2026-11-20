@@ -25,13 +25,13 @@ object ClockRenderer {
     // Move only analog-containing layouts down while keeping their lower edge
     // above the native transport controls.
     private const val CONTENT_CENTER_Y = 190f
-    private const val COMPACT_ANALOG_CENTER_Y = 226f
-    private const val STANDARD_ANALOG_CENTER_Y = 204f
+    private const val COMPACT_ANALOG_CENTER_Y = 216f
+    private const val STANDARD_ANALOG_CENTER_Y = 198f
     private const val COMPACT_RADIUS = 96f
     private const val STANDARD_RADIUS = 122f
     // Shared weather geometry in both analogue variants. The optional time
     // label must never cause the forecast to jump or resize.
-    private const val ANALOG_WEATHER_Y_OFFSET = 47f
+    private const val ANALOG_WEATHER_Y_OFFSET = 39f
     private const val ANALOG_WEATHER_TEXT_SIZE = 29f
     private val timeFormat = DateTimeFormatter.ofPattern("HH:mm")
     private val white = Color.rgb(255, 255, 255)
@@ -47,7 +47,8 @@ object ClockRenderer {
         temperature: String? = null,
         compact: Boolean = true,
         outputSize: Int = SIZE,
-        condition: String? = null
+        condition: String? = null,
+        sourceLabel: String? = null
     ): Bitmap {
         require(outputSize in 192..SIZE) { "Unsupported artwork size" }
         val bitmap = Bitmap.createBitmap(outputSize, outputSize, Bitmap.Config.RGB_565)
@@ -83,7 +84,9 @@ object ClockRenderer {
                         drawWeatherRow(canvas, CENTER_X, clockY + ANALOG_WEATHER_Y_OFFSET * unit,
                             weatherCode, isDay, temperature,
                             ANALOG_WEATHER_TEXT_SIZE * unit, unit)
-                    // Pure analog: hands and markings, no digital text.
+                    // For compatibility, basic analog always includes HH:mm.
+                    else -> drawText(canvas, time.format(timeFormat), CENTER_X,
+                        clockY, 46f * unit, white, unit)
                 }
             }
             ClockFamily.DIGITAL -> {
@@ -128,7 +131,33 @@ object ClockRenderer {
                 }
             }
         }
+        if (preset.usesWeather && !sourceLabel.isNullOrBlank()) {
+            // Source must be visible in Auto even when Android Auto hides
+            // the media title/artist metadata. Draw below the main values.
+            drawSourceLabel(
+                canvas,
+                sourceLabel,
+                CENTER_X,
+                if (preset.hasAnalog) clockY + 94f * unit
+                else CONTENT_CENTER_Y + 118f * unit,
+                unit
+            )
+        }
         return bitmap
+    }
+
+    private fun drawSourceLabel(
+        canvas: Canvas, value: String, x: Float, y: Float, unit: Float
+    ) {
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = pale
+            textAlign = Paint.Align.CENTER
+            textSize = 22f * unit
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        }
+        val width = paint.measureText(value)
+        val scale = minOf(1f, 400f / width)
+        drawText(canvas, value, x, y, 22f * unit * scale, pale, unit)
     }
 
     private fun stroke(color: Int, thickness: Float): Paint =
