@@ -46,7 +46,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(scroll)
 
         root.addView(label("Auto Clock 2", 30f, light, dp(7)))
-        root.addView(label("Аналогов циферблат във всички режими", 17f, muted, dp(20)))
+        root.addView(label("Центриран часовник в безопасната зона над бутоните", 17f, muted, dp(20)))
 
         preview = ImageView(this).apply {
             scaleType = ImageView.ScaleType.FIT_CENTER
@@ -61,8 +61,8 @@ class MainActivity : AppCompatActivity() {
         root.addView(label("Какво да се показва", 21f, light, dp(8)))
 
         val modeOptions = linkedMapOf(
-            "digital" to "Часовник — час и дата",
-            "analog" to "Часовник — аналогов фон",
+            "digital" to "Часовник с цифров час",
+            "analog" to "Аналогов + цифров час (без метео)",
             "weather" to "Времето",
             "both" to "Часовник + време"
         )
@@ -80,6 +80,7 @@ class MainActivity : AppCompatActivity() {
             modeIds[id]?.let {
                 prefs.edit().putString(AutoClockMediaService.KEY_MODE, it).apply()
                 updatePreview()
+                requestWeatherForPreview()
             }
         }
         root.addView(modeGroup)
@@ -103,22 +104,11 @@ class MainActivity : AppCompatActivity() {
             13f, muted, dp(10)
         ))
 
-        val weatherOverlay = CheckBox(this).apply {
-            text = "Иконка и температура върху аналоговия циферблат"
-            textSize = 17f
-            setTextColor(light)
-            isChecked = prefs.getBoolean(
-                AutoClockMediaService.KEY_SHOW_WEATHER_OVERLAY, true
-            )
-            setOnCheckedChangeListener { _, checked ->
-                prefs.edit()
-                    .putBoolean(AutoClockMediaService.KEY_SHOW_WEATHER_OVERLAY, checked)
-                    .apply()
-                updatePreview()
-                if (checked) requestWeatherForPreview()
-            }
-        }
-        root.addView(weatherOverlay)
+        root.addView(label(
+            "Аналогов режим: само часовник и цифров час в центъра. " +
+                "Времето и Часовник + време: по-малък циферблат и отделна метеокарта.",
+            14f, muted, dp(12)
+        ))
 
         root.addView(label("Град за прогнозата", 21f, light, dp(7)))
         root.addView(label(
@@ -199,9 +189,7 @@ class MainActivity : AppCompatActivity() {
         val mode = getSharedPreferences(
             AutoClockMediaService.PREFERENCES, MODE_PRIVATE
         ).getString(AutoClockMediaService.KEY_MODE, "digital")
-        val enabled = mode == "weather" || mode == "both" ||
-            getSharedPreferences(AutoClockMediaService.PREFERENCES, MODE_PRIVATE)
-                .getBoolean(AutoClockMediaService.KEY_SHOW_WEATHER_OVERLAY, true)
+        val enabled = mode == "weather" || mode == "both"
         if (!enabled) return
         WeatherStore.refreshIfDue(this) { success ->
             if (success && !isFinishing && !isDestroyed) {
@@ -245,9 +233,7 @@ class MainActivity : AppCompatActivity() {
             AutoClockMediaService.PREFERENCES, MODE_PRIVATE
         ).getString(AutoClockMediaService.KEY_MODE, "digital")
         val mode = if (key == "digital") "clock" else key ?: "clock"
-        val showWeather = (mode == "weather" || mode == "both") ||
-            getSharedPreferences(AutoClockMediaService.PREFERENCES, MODE_PRIVATE)
-                .getBoolean(AutoClockMediaService.KEY_SHOW_WEATHER_OVERLAY, true)
+        val showWeather = mode == "weather" || mode == "both"
         val weather = if (showWeather) WeatherStore.current(this) else null
         val image = ClockRenderer.render(
             mode, LocalDateTime.now(),
