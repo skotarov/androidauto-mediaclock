@@ -90,7 +90,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                     startClock()
                 }
             })
-            setQueueTitle("Auto Clock")
+            setQueueTitle("Auto Clock 2")
             isActive = true
         }
         sessionToken = session.sessionToken
@@ -221,7 +221,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, mode.id)
                 .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
                 .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, subtitle)
-                .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, "Auto Clock")
+                .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, "Auto Clock 2")
                 .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, title)
                 .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, subtitle)
                 .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_DESCRIPTION, mode.title)
