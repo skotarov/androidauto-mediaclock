@@ -85,6 +85,55 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(modeGroup)
 
+        root.addView(label("Размер на циферблата", 21f, light, dp(8)))
+        root.addView(label(
+            "Android Auto не съобщава надеждно дали картата е малка. " +
+                "Компактният размер е подходящ за екран до навигацията.",
+            14f, muted, dp(7)
+        ))
+        val sizeGroup = RadioGroup(this).apply {
+            orientation = RadioGroup.VERTICAL
+        }
+        val compactRadio = radio("Компактен — повече свободно място").apply {
+            tag = "compact"
+        }
+        val standardRadio = radio("Стандартен — по-голям циферблат").apply {
+            tag = "standard"
+        }
+        sizeGroup.addView(compactRadio)
+        sizeGroup.addView(standardRadio)
+        if (prefs.getString(AutoClockMediaService.KEY_LAYOUT, "compact") == "standard") {
+            sizeGroup.check(standardRadio.id)
+        } else {
+            sizeGroup.check(compactRadio.id)
+        }
+        sizeGroup.setOnCheckedChangeListener { _, checkedId ->
+            val selected = if (checkedId == standardRadio.id) "standard" else "compact"
+            prefs.edit().putString(AutoClockMediaService.KEY_LAYOUT, selected).apply()
+            updatePreview()
+        }
+        root.addView(sizeGroup)
+
+        val progressEnabled = CheckBox(this).apply {
+            text = "Движение на прогрес бара (секунди)"
+            textSize = 17f
+            setTextColor(light)
+            isChecked = prefs.getBoolean(
+                AutoClockMediaService.KEY_PROGRESS_ANIMATED, true
+            )
+            setOnCheckedChangeListener { _, checked ->
+                prefs.edit()
+                    .putBoolean(AutoClockMediaService.KEY_PROGRESS_ANIMATED, checked)
+                    .apply()
+            }
+        }
+        root.addView(progressEnabled)
+        root.addView(label(
+            "Когато е изключено, приложението не подава напредваща позиция " +
+                "или продължителност. Android Auto може все пак да рисува статична линия.",
+            13f, muted, dp(12)
+        ))
+
         val cleanText = CheckBox(this).apply {
             text = "Само фон — скрий надписите за песента"
             textSize = 17f
@@ -105,8 +154,8 @@ class MainActivity : AppCompatActivity() {
         ))
 
         root.addView(label(
-            "Аналогов режим: само часовник и цифров час в центъра. " +
-                "Времето и Часовник + време: по-малък циферблат и отделна метеокарта.",
+            "Часът е без рамка, с леко сияние. В режимите за времето " +
+                "иконката и градусите са на втория ред вътре в циферблата.",
             14f, muted, dp(12)
         ))
 
@@ -161,7 +210,7 @@ class MainActivity : AppCompatActivity() {
             "В Android Auto избери Auto Clock 2 от мултимедийните приложения " +
                 "и натисни Play. Режимът може да се сменя от приложението " +
                 "или с Previous / Next. Промените от телефона се прилагат " +
-                "най-късно при следващата минута.",
+                "веднага към Android Auto, когато медийната услуга е активна.",
             15f, muted, dp(13)
         ))
         root.addView(label(
@@ -235,11 +284,15 @@ class MainActivity : AppCompatActivity() {
         val mode = if (key == "digital") "clock" else key ?: "clock"
         val showWeather = mode == "weather" || mode == "both"
         val weather = if (showWeather) WeatherStore.current(this) else null
+        val compact = getSharedPreferences(
+            AutoClockMediaService.PREFERENCES, MODE_PRIVATE
+        ).getString(AutoClockMediaService.KEY_LAYOUT, "compact") != "standard"
         val image = ClockRenderer.render(
             mode, LocalDateTime.now(),
             weather?.weatherCode,
             weather?.isDay ?: true,
-            weather?.formattedTemperature
+            weather?.formattedTemperature,
+            compact
         )
         preview.setImageBitmap(image)
         previewBitmap?.recycle()
