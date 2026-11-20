@@ -1,4 +1,4 @@
-# Auto Clock 2 — beta 0.14
+# Auto Clock 2 — beta 0.15
 
 An experimental battery-conscious clock for Android Auto's media card next to
 navigation. Android Auto officially reserves the media template for audio apps;
@@ -67,12 +67,24 @@ to Open-Meteo to obtain location-specific weather. The app does not retain a
 history of positions. No ongoing location tracking or background location
 permission.
 
-## Analog dial geometry in v0.14
+## Analog dial geometry in v0.15
 
 The compact 512px artwork centre is now y=208 (previously 216), moving the
 whole analog dial, digital time and optional weather row 8 px up together.
 The standard centre is restored to the v0.12 value y=204 (instead of 198).
 Dial radii, relative layout and weather icon sizes are unchanged.
+
+In v0.15 the analogue weather row moves up independently of the dial:
+compact weather offset 30 px × radius/122 (previously 39); standard
+weather offset 34 px (previously 39). Both analogue variants, with or
+without HH:mm, reuse the same respective offset and font size (29 ×
+radius/122), so turning digital time on/off never makes the weather jump.
+
+With Auto weather, the source station label is positioned just below
+the actual dial edge (compact gap 18 × radius/122 px; standard 16 px),
+instead of inside the dial. Text is measured and shrunk only if
+necessary to stay within dial-relative width. All non-analog layouts
+retain their existing source label placement.
 
 ## Resource and compatibility design
 
@@ -89,7 +101,7 @@ tested on the target phone and Android Auto head unit.
 
 ## Download and install
 
-[AutoClock-2-v0.14-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.14.0-beta)
+[AutoClock-2-v0.15-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.15.0-beta)
 
 1. Open the beta release under **Releases**, then tap the APK under **Assets**.
 2. Install it on the Android phone connected to the car.
