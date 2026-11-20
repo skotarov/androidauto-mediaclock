@@ -44,18 +44,23 @@ class ClockArtworkProvider : ContentProvider() {
             throw FileNotFoundException("Cannot create artwork cache")
         }
         val weatherRevision = uri.getQueryParameter("rev")?.toLongOrNull()?.coerceAtLeast(0L) ?: 0L
-        val destination = File(directory, "$clockMode-$key-$weatherRevision.png")
+        // v5 is a new visual design; never reuse an old image cached by v0.4.
+        val destination = File(directory, "v5-$clockMode-$key-$weatherRevision.png")
 
         synchronized(lock) {
             if (!destination.isFile || destination.length() == 0L) {
                 val temp = File(directory, "inflight-${System.nanoTime()}.tmp")
-                val weather = if (clockMode == "weather" || clockMode == "both") {
+                val showWeather = appContext.getSharedPreferences(
+                    WeatherStore.PREFS, android.content.Context.MODE_PRIVATE
+                ).getBoolean("show_weather_overlay", true)
+                val weather = if (showWeather || clockMode == "weather" || clockMode == "both") {
                     WeatherStore.current(appContext)
                 } else null
                 val bitmap = ClockRenderer.render(
                     clockMode, requestedMinute,
                     weather?.weatherCode,
-                    weather?.isDay ?: true
+                    weather?.isDay ?: true,
+                    weather?.formattedTemperature
                 )
                 try {
                     FileOutputStream(temp).use { out ->
