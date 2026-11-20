@@ -44,7 +44,7 @@ class MainActivity : AppCompatActivity() {
         }
         setContentView(scroll)
 
-        root.addView(label("Auto Clock", 30f, light, dp(7)))
+        root.addView(label("Auto Clock 2", 30f, light, dp(7)))
         root.addView(label("Лек часовник за Android Auto", 17f, muted, dp(20)))
 
         preview = ImageView(this).apply {
@@ -141,6 +141,10 @@ class MainActivity : AppCompatActivity() {
                 "прогнозата — най-много веднъж на час при активен режим за времето. " +
                 "Няма GPS следене, аудио поток или непрекъсната фонова задача.",
             14f, muted, dp(12)
+        ))
+        root.addView(label(
+            "Данни за времето: Open-Meteo.com. Обновяване само при нужда.",
+            13f, Color.GRAY, dp(6)
         ))
         root.addView(label(
             "Екранът в Android Auto се управлява от самия Android Auto. " +
