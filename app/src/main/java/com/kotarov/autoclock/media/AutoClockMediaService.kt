@@ -13,6 +13,7 @@ import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import androidx.media.MediaBrowserServiceCompat
 import com.kotarov.autoclock.artwork.ClockArtworkProvider
+import com.kotarov.autoclock.artwork.ClockRenderer
 import com.kotarov.autoclock.weather.WeatherStore
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -33,11 +34,13 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private var running = false
     private var mode = Mode.DIGITAL
     private lateinit var prefs: SharedPreferences
+    private var artworkGeneration = 0L
 
     // SharedPreferences changes from the phone UI arrive in the same process.
     // Debounce related weather cache writes into a single metadata refresh.
     private val settingsRefresh = Runnable {
         mode = savedMode()
+        artworkGeneration += 1L
         notifyChildrenChanged(ROOT_ID)
         publishClock()
         publishPlaybackState()
@@ -157,7 +160,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                     ClockArtworkProvider.artworkUri(
                         option.artwork, now,
                         if (option.usesWeather) revision else 0L,
-                        compactLayout()
+                        compactLayout(),
+                        artworkGeneration
                     )
                 )
                 .build()
@@ -253,7 +257,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             else -> date
         }
         val artwork = ClockArtworkProvider.artworkUri(
-            mode.artwork, now, weather?.observedAtMs ?: 0L, compactLayout()
+            mode.artwork, now, weather?.observedAtMs ?: 0L,
+            compactLayout(), artworkGeneration
         )
 
         // Android Auto decides whether to render a media title at all.
@@ -276,7 +281,18 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
         session.setQueueTitle(displayedAlbum)
         session.setQueue(listOf(MediaSessionCompat.QueueItem(description, mode.queueId)))
+        // Some Android Auto head units cache content URIs for the whole card.
+        // A small direct Bitmap alongside the URI nudges the media host to
+        // repaint on a phone-side size/mode change without restarting playback.
+        // 320x320 RGB_565 is approximately 200 KiB, avoiding large binder IPC.
+        val artBitmap = ClockRenderer.render(
+            mode.artwork, now, weather?.weatherCode,
+            weather?.isDay ?: true, weather?.formattedTemperature,
+            compactLayout(), outputSize = 320
+        )
         val metadata = MediaMetadataCompat.Builder()
+                .putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, artBitmap)
+                .putBitmap(MediaMetadataCompat.METADATA_KEY_ART, artBitmap)
                 .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, mode.id)
                 .putString(MediaMetadataCompat.METADATA_KEY_TITLE, displayedTitle)
                 .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, displayedSubtitle)
