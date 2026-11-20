@@ -276,9 +276,15 @@ class MainActivity : AppCompatActivity() {
             return
         }
         WeatherStore.refreshIfDue(this, force = force) { success ->
-            if (success && !isFinishing && !isDestroyed) {
+            if (!isFinishing && !isDestroyed) {
                 updateWeatherStatus()
-                updatePreview()
+                if (success) {
+                    updatePreview()
+                } else if (WeatherStore.isAuto(this) && WeatherLocation.permitted(this)) {
+                    weatherStatus.text =
+                        "Авто: няма нова локация или връзка. Провери местоположението " +
+                            "или избери град ръчно."
+                }
             }
         }
     }
