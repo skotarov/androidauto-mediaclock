@@ -115,6 +115,7 @@ class MainActivity : AppCompatActivity() {
                     .putBoolean(AutoClockMediaService.KEY_SHOW_WEATHER_OVERLAY, checked)
                     .apply()
                 updatePreview()
+                if (checked) requestWeatherForPreview()
             }
         }
         root.addView(weatherOverlay)
@@ -138,6 +139,7 @@ class MainActivity : AppCompatActivity() {
                 WeatherStore.setCity(this, it)
                 updateWeatherStatus()
                 updatePreview()
+                requestWeatherForPreview()
             }
         }
         root.addView(cityGroup)
@@ -190,6 +192,23 @@ class MainActivity : AppCompatActivity() {
 
         updateWeatherStatus()
         updatePreview()
+        requestWeatherForPreview()
+    }
+
+    private fun requestWeatherForPreview() {
+        val mode = getSharedPreferences(
+            AutoClockMediaService.PREFERENCES, MODE_PRIVATE
+        ).getString(AutoClockMediaService.KEY_MODE, "digital")
+        val enabled = mode == "weather" || mode == "both" ||
+            getSharedPreferences(AutoClockMediaService.PREFERENCES, MODE_PRIVATE)
+                .getBoolean(AutoClockMediaService.KEY_SHOW_WEATHER_OVERLAY, true)
+        if (!enabled) return
+        WeatherStore.refreshIfDue(this) { success ->
+            if (success && !isFinishing && !isDestroyed) {
+                updateWeatherStatus()
+                updatePreview()
+            }
+        }
     }
 
     private fun radio(title: String): RadioButton = RadioButton(this).apply {
