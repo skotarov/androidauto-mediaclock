@@ -48,7 +48,7 @@ class ClockArtworkProvider : ContentProvider() {
         // Include the layout and release design in the filename, so changing
         // phone settings invalidates both Android Auto and disk artwork caches.
         val layout = if (compact) "compact" else "standard"
-        val destination = File(directory, "v8-$layout-$clockMode-$key-$weatherRevision.png")
+        val destination = File(directory, "v9-$layout-$clockMode-$key-$weatherRevision.png")
 
         synchronized(lock) {
             if (!destination.isFile || destination.length() == 0L) {
@@ -114,14 +114,16 @@ class ClockArtworkProvider : ContentProvider() {
             mode: String,
             now: LocalDateTime = LocalDateTime.now(),
             weatherRevision: Long = 0L,
-            compact: Boolean = true
+            compact: Boolean = true,
+            generation: Long = 0L
         ): Uri = Uri.Builder()
             .scheme("content")
             .authority(AUTHORITY)
             .appendPath(mode)
             .appendPath("clock_${now.format(KEY_FORMAT)}.png")
             .appendQueryParameter("rev", weatherRevision.coerceAtLeast(0L).toString())
-            .appendQueryParameter("style", "v8")
+            .appendQueryParameter("style", "v9")
+            .appendQueryParameter("generation", generation.toString())
             .appendQueryParameter("layout", if (compact) "compact" else "standard")
             .build()
     }
