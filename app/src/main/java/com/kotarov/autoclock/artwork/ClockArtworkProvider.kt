@@ -54,8 +54,8 @@ class ClockArtworkProvider : ContentProvider() {
                 } else null
                 val bitmap = ClockRenderer.render(
                     clockMode, requestedMinute,
-                    weather?.formattedTemperature ?: "--°C",
-                    weather?.description ?: "Няма данни"
+                    weather?.weatherCode,
+                    weather?.isDay ?: true
                 )
                 try {
                     FileOutputStream(temp).use { out ->
