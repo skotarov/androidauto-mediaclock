@@ -11,6 +11,7 @@ import java.io.FileOutputStream
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import com.kotarov.autoclock.weather.WeatherStore
+import com.kotarov.autoclock.media.ClockPreset
 
 /**
  * Android Auto may request the same album art multiple times.
@@ -48,12 +49,12 @@ class ClockArtworkProvider : ContentProvider() {
         // Include the layout and release design in the filename, so changing
         // phone settings invalidates both Android Auto and disk artwork caches.
         val layout = if (compact) "compact" else "standard"
-        val destination = File(directory, "v9-$layout-$clockMode-$key-$weatherRevision.png")
+        val destination = File(directory, "v10-$layout-$clockMode-$key-$weatherRevision.png")
 
         synchronized(lock) {
             if (!destination.isFile || destination.length() == 0L) {
                 val temp = File(directory, "inflight-${System.nanoTime()}.tmp")
-                val weather = if (clockMode == "weather" || clockMode == "both") {
+                val weather = if (ClockPreset.fromId(clockMode).usesWeather) {
                     WeatherStore.current(appContext)
                 } else null
                 val bitmap = ClockRenderer.render(
@@ -61,7 +62,8 @@ class ClockArtworkProvider : ContentProvider() {
                     weather?.weatherCode,
                     weather?.isDay ?: true,
                     weather?.formattedTemperature,
-                    compact
+                    compact,
+                    condition = weather?.description
                 )
                 try {
                     FileOutputStream(temp).use { out ->
@@ -107,7 +109,8 @@ class ClockArtworkProvider : ContentProvider() {
     companion object {
         const val AUTHORITY = "com.kotarov.autoclock2.artwork"
         private const val MAX_FILES = 6
-        private val VALID_MODES = setOf("clock", "analog", "weather", "both")
+        private val VALID_MODES = ClockPreset.entries.map { it.id }.toSet() +
+            setOf("clock", "analog", "weather", "both")
         private val KEY_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd_HHmm")
 
         fun artworkUri(
@@ -122,7 +125,7 @@ class ClockArtworkProvider : ContentProvider() {
             .appendPath(mode)
             .appendPath("clock_${now.format(KEY_FORMAT)}.png")
             .appendQueryParameter("rev", weatherRevision.coerceAtLeast(0L).toString())
-            .appendQueryParameter("style", "v9")
+            .appendQueryParameter("style", "v10")
             .appendQueryParameter("generation", generation.toString())
             .appendQueryParameter("layout", if (compact) "compact" else "standard")
             .build()
