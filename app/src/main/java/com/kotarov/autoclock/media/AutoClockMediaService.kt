@@ -176,8 +176,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     private fun requestWeatherIfNecessary() {
         if (!running || !mode.usesWeather) return
-        WeatherStore.refreshIfDue(this) {
-            if (running && mode.usesWeather) publishClock()
+        WeatherStore.refreshIfDue(this) { success ->
+            if (success && running && mode.usesWeather) publishClock()
         }
     }
 
