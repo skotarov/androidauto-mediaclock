@@ -20,7 +20,7 @@ import java.util.Locale
  * Low-power media browser experiment:
  * - Only one minute-aligned handler while actively selected in Android Auto
  * - No GPS, wakelock, silent audio track, or foreground-service restart
- * - Weather fetched only for a selected weather display, at most hourly
+ * - Weather fetched only when the user enables the weather overlay or selects weather
  *
  * Android Auto's audio-media UI is not intended for standalone clocks.
  * Support for the dashboard card depends on the Android Auto version.
@@ -124,7 +124,12 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 .setMediaId(option.id)
                 .setTitle(option.title)
                 .setSubtitle(option.description)
-                .setIconUri(ClockArtworkProvider.artworkUri(option.artwork, now, revision))
+                .setIconUri(
+                    ClockArtworkProvider.artworkUri(
+                        option.artwork, now,
+                        if (option.usesWeather || showWeatherOverlay()) revision else 0L
+                    )
+                )
                 .build()
             MediaBrowserCompat.MediaItem(
                 description,
@@ -174,10 +179,20 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         handler.postDelayed(minuteTick, 60_000L - now % 60_000L + 150L)
     }
 
+    private fun showWeatherOverlay(): Boolean =
+        getSharedPreferences(PREFERENCES, MODE_PRIVATE)
+            .getBoolean(KEY_SHOW_WEATHER_OVERLAY, true)
+
+    private fun hideMediaText(): Boolean =
+        getSharedPreferences(PREFERENCES, MODE_PRIVATE)
+            .getBoolean(KEY_HIDE_MEDIA_TEXT, true)
+
+    private fun wantsWeather(): Boolean = mode.usesWeather || showWeatherOverlay()
+
     private fun requestWeatherIfNecessary() {
-        if (!running || !mode.usesWeather) return
+        if (!running || !wantsWeather()) return
         WeatherStore.refreshIfDue(this) { success ->
-            if (success && running && mode.usesWeather) publishClock()
+            if (success && running && wantsWeather()) publishClock()
         }
     }
 
@@ -185,7 +200,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     private fun publishClock() {
         val now = LocalDateTime.now()
-        val weather = if (mode.usesWeather) WeatherStore.current(this) else null
+        val weather = if (wantsWeather()) WeatherStore.current(this) else null
         val weatherLabel = if (weather == null) "Няма данни"
         else "${WeatherStore.symbol(weather.weatherCode, weather.isDay)} ${weather.formattedTemperature}"
         val weatherDescription = weather?.description ?: "Няма данни"
@@ -203,29 +218,38 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             else -> date
         }
         val artwork = ClockArtworkProvider.artworkUri(
-            mode.artwork,
-            now,
-            if (mode.usesWeather) weather?.observedAtMs ?: 0L else 0L
+            mode.artwork, now, weather?.observedAtMs ?: 0L
         )
+
+        // Android Auto decides whether to render a media title at all.
+        // Supplying a non-breaking space is a best-effort experiment; some
+        // hosts may replace it with a fallback label or retain an empty area.
+        // Keep the real labels available as a phone-side fallback setting.
+        val cleanArtwork = hideMediaText()
+        val displayedTitle = if (cleanArtwork) INVISIBLE_TEXT else title
+        val displayedSubtitle = if (cleanArtwork) INVISIBLE_TEXT else subtitle
+        val displayedDescription = if (cleanArtwork) INVISIBLE_TEXT else mode.title
+        val displayedAlbum = if (cleanArtwork) INVISIBLE_TEXT else "Auto Clock 2"
 
         val description = MediaDescriptionCompat.Builder()
             .setMediaId(mode.id)
-            .setTitle(title)
-            .setSubtitle(subtitle)
-            .setDescription(mode.title)
+            .setTitle(displayedTitle)
+            .setSubtitle(displayedSubtitle)
+            .setDescription(displayedDescription)
             .setIconUri(artwork)
             .build()
 
+        session.setQueueTitle(displayedAlbum)
         session.setQueue(listOf(MediaSessionCompat.QueueItem(description, mode.queueId)))
         session.setMetadata(
             MediaMetadataCompat.Builder()
                 .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, mode.id)
-                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
-                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, subtitle)
-                .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, "Auto Clock 2")
-                .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, title)
-                .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, subtitle)
-                .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_DESCRIPTION, mode.title)
+                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, displayedTitle)
+                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, displayedSubtitle)
+                .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, displayedAlbum)
+                .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, displayedTitle)
+                .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, displayedSubtitle)
+                .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_DESCRIPTION, displayedDescription)
                 .putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ART_URI, artwork.toString())
                 .putString(MediaMetadataCompat.METADATA_KEY_ART_URI, artwork.toString())
                 .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON_URI, artwork.toString())
@@ -278,6 +302,9 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     companion object {
         const val PREFERENCES = "clock_settings"
         const val KEY_MODE = "display_mode"
+        const val KEY_HIDE_MEDIA_TEXT = "hide_media_text"
+        const val KEY_SHOW_WEATHER_OVERLAY = "show_weather_overlay"
+        private const val INVISIBLE_TEXT = "\u00A0"
         private const val ROOT_ID = "auto_clock_root"
         private val TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm", Locale("bg", "BG"))
         private val DATE_FORMAT = DateTimeFormatter.ofPattern("EEEE, dd.MM.yyyy", Locale("bg", "BG"))
