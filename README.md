@@ -11,32 +11,34 @@ media card next to navigation, not a replacement for a real audio player.
 > guaranteed supported API for a general-purpose custom clock in the media
 > card. Not intended for Play Store publication as a music app.
 
-## Features
+## Features (v0.8)
 
-- Every display mode uses a compact analog clock, shifted up into the area above Android Auto media buttons.
-- The clock-only modes show a bold **HH:mm in the exact centre of the hands**. Weather-only hides the central digits; Clock + Weather includes them.
-- Clock-only dial: centre x=256, y=187, radius=146 on the 512px square. Weather dial: centre x=212, y=187, radius=125 to reserve right-side room for the forecast.
-- No second hand or second-by-second drawing; still updates once per minute.
-- Time and date appear as Android Auto metadata, never as text baked into the artwork
-- Weather codes display as vector icons (sun, moon, cloud, fog, rain, snow and storm)
-- Weather icon **and temperature** are drawn in a dedicated upper-right area
-  **only in Weather and Clock + Weather modes**, without covering the dial.
-- **Clean media labels** is enabled by default: playback metadata uses a
-  non-breaking space rather than song title/artist. Users can turn this off
-  in the phone settings if the Android Auto host renders placeholders.
-- Temperature and condition appear in media metadata and next to the navigation panel
-- Clock + weather combines time, temperature, and an illustrated weather condition
-- Select any mode from Android Auto's media list or the phone settings
-- Phone preview of all four modes
-- Choose forecast city on the phone (Sofia, Stara Zagora, Plovdiv, Varna,
-  Burgas, Ruse, Pleven, Veliko Tarnovo), without location permission
-- Manual weather refresh from the phone
+- All modes use an analog face with clean **HH:mm text and a subtle glyph shadow**.
+  There is no rectangle, badge, padding block or border behind the time.
+- Weather and Clock + Weather modes show a weather **vector symbol and temperature
+  on the second line directly below HH:mm, inside the analog clock face**.
+  Pure analog clock mode does not fetch or display weather.
+- Phone-side clock-size setting:
+  - **Compact** (default) uses dial radius 96 px and centre (256, 196).
+  - **Standard** uses radius 122 px and the same centre.
+  - Android Auto does not reliably report its split/full media-card dimensions,
+    so Compact is the conservative layout for the small card.
+- **Moving progress bar** phone switch (default on). Off: no duration is
+  supplied and the playback-state position is unknown with zero speed.
+  Android Auto may keep its own non-moving progress decoration.
+- Phone changes to mode, city, size, text visibility or progress behavior are
+  **applied immediately to the active media session** through a debounced
+  SharedPreferences listener (without waiting for the next minute).
+  Artwork URIs include layout-specific cache keys; browser contents are refreshed.
+- The media artwork and minute alignment continue to update only once per minute.
+- Weather data via Open-Meteo, hourly only when a weather mode is active.
+- Settings preview, city selection, manual forecast refresh.
 
 Weather uses [Open-Meteo](https://open-meteo.com/) data with attribution,
 no API key for permitted non-commercial use. Network is only needed for
 weather; the clock works without a connection.
 
-## Minute progress bar (v0.7)
+## Minute progress bar (v0.8)
 
 The media "track" is a virtual 60-second minute, not real sound playback.
 The service now sends `MediaMetadataCompat.METADATA_KEY_DURATION = 60_000`
@@ -49,9 +51,22 @@ it sends a fresh position near the beginning of the new minute. The normal
 artwork update and playback-state update are aligned to the same minute timer.
 No wakeups are added between minute boundaries.
 
+If "Движение на прогрес бара" is switched off on the phone, the
+metadata no longer contains a duration and the playback state reports
+unknown position with speed zero.
+
 **Android Auto limitation:** The host owns the progress bar. The state and
 duration give it the information needed to extrapolate progress, but it may
 choose not to show or animate the bar for an audio-less media session.
+
+## Phone settings and Android Auto updates
+
+Open Auto Clock 2 on the phone, while Android Auto is running. Changing the
+display mode, compact/standard dial, moving progress, clean media-label setting,
+or weather city updates the bound Auto Clock media service at once. An Android
+Auto host may still cache album art or delay repainting its view; in such cases
+return to the app in Android Auto. This project cannot control the native
+transport controls or detect the media panel's size with certainty.
 
 ## Battery and memory strategy
 
@@ -77,11 +92,11 @@ itself is controlled by Android Auto, not by the phone app. Android Auto does no
 ## Install the APK
 
 The latest beta APK is published as
-[AutoClock-2-v0.7-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.7.0-beta)
+[AutoClock-2-v0.8-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.8.0-beta)
 from GitHub Releases after tests pass.
 
-1. Open the public **Releases** page and choose **v0.7.0-beta**.
-2. Under **Assets**, tap **AutoClock-2-v0.7-beta.apk** (not the source ZIP).
+1. Open the public **Releases** page and choose **v0.8.0-beta**.
+2. Under **Assets**, tap **AutoClock-2-v0.8-beta.apk** (not the source ZIP).
 3. Install on the Android phone connected to the car, allowing installation
    from the browser/files app if Android requests permission.
 4. Open Auto Clock 2 on the phone and select the mode and weather city.
@@ -91,6 +106,12 @@ from GitHub Releases after tests pass.
    if needed; return to navigation/split-screen mode.
 
 ### Testing checklist
+
+- [ ] Switching Compact and Standard on the phone updates Android Auto without waiting for a minute
+- [ ] HH:mm has no box or border, only a subtle shadow
+- [ ] In weather modes the icon + temperature share a second line **inside** the dial
+- [ ] Moving progress off freezes or removes the progress (the host may keep a static line)
+- [ ] Changing mode or city on the phone updates the car media screen immediately
 
 - [ ] Media progress initially equals the current seconds / 60, rather than 0
 - [ ] Progress moves without second-by-second updates and resets at minute rollover
