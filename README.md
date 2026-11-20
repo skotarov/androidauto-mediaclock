@@ -1,4 +1,4 @@
-# Auto Clock 2 — beta 0.15
+# Auto Clock 2 — beta 0.16
 
 An experimental battery-conscious clock for Android Auto's media card next to
 navigation. Android Auto officially reserves the media template for audio apps;
@@ -7,16 +7,18 @@ guaranteed to support it.
 
 ## Phone settings
 
-The three primary radio styles each have a single optional checkbox:
+The three primary radio styles have optional checkboxes:
 
 | Main style | Without checkbox | With checkbox |
 | --- | --- | --- |
-| Аналогов часовник | Analog dial + centred digital HH:mm | Also add weather |
+| Аналогов часовник | **Pure analog dial and hands** with no checkboxes | Check **Добави цифров час** and/or **Добави времето** |
 | Цифров часовник | Large HH:mm | Also add weather |
 | Времето | Large weather icon, temperature and description | Also add smaller digital HH:mm |
 
 The old multi-add-on combinations are migrated into these simpler options.
-Each main style remembers its checkbox independently.
+Each main style remembers its checkbox(es) independently. Analogue has two
+independent switches, allowing four distinct looks (pure dial, digital time,
+weather, or both). Digital and Weather each have one optional switch.
 
 Other phone settings: Compact/Standard artwork, hide media text, city/source,
 and **Движение на прогрес бара (секунди)**. The progress option now defaults
@@ -67,7 +69,7 @@ to Open-Meteo to obtain location-specific weather. The app does not retain a
 history of positions. No ongoing location tracking or background location
 permission.
 
-## Analog dial geometry in v0.15
+## Analog dial geometry in v0.16
 
 The compact 512px artwork centre is now y=208 (previously 216), moving the
 whole analog dial, digital time and optional weather row 8 px up together.
@@ -86,6 +88,15 @@ instead of inside the dial. Text is measured and shrunk only if
 necessary to stay within dial-relative width. All non-analog layouts
 retain their existing source label placement.
 
+## Clean analog restored in v0.16
+
+The Analog radio selection now displays two independent checkboxes:
+**Добави цифров час** and **Добави времето**. Both unchecked means
+`ANALOG_PURE`: no central digits, no weather, only the analog dial and
+hands. Saved choices from 0.15 remain intact (digital time stays checked
+until the user explicitly unchecks it). The compact/standard positions
+and the observation-source label improvements from v0.15 are unchanged.
+
 ## Resource and compatibility design
 
 - Minute-aligned clock artwork and media metadata only while the clock is active
@@ -101,7 +112,7 @@ tested on the target phone and Android Auto head unit.
 
 ## Download and install
 
-[AutoClock-2-v0.15-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.15.0-beta)
+[AutoClock-2-v0.16-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.16.0-beta)
 
 1. Open the beta release under **Releases**, then tap the APK under **Assets**.
 2. Install it on the Android phone connected to the car.
@@ -115,7 +126,10 @@ tested on the target phone and Android Auto head unit.
 ## Testing checklist
 
 - [ ] New install: moving seconds/progress checkbox is **unchecked**
-- [ ] Analog without weather keeps its large analog face and digital HH:mm
+- [ ] Analogue with both boxes off shows only hands and tick marks (no digits)
+- [ ] Analogue with digital checked shows HH:mm over the hands
+- [ ] Analogue with weather checked shows weather without digital time
+- [ ] Analogue with both checked shows digital time plus weather
 - [ ] Digital without weather shows HH:mm without hands
 - [ ] Weather without added clock shows only its weather data
 - [ ] Three styles restore their independently chosen checkbox
