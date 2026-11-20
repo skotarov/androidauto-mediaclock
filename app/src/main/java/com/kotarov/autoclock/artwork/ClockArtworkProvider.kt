@@ -10,6 +10,7 @@ import java.io.FileNotFoundException
 import java.io.FileOutputStream
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import com.kotarov.autoclock.weather.WeatherStore
 
 /**
  * Android Auto may request the same album art multiple times.
@@ -42,12 +43,20 @@ class ClockArtworkProvider : ContentProvider() {
         if (!directory.exists() && !directory.mkdirs()) {
             throw FileNotFoundException("Cannot create artwork cache")
         }
-        val destination = File(directory, "$clockMode-$key.png")
+        val weatherRevision = uri.getQueryParameter("rev")?.toLongOrNull()?.coerceAtLeast(0L) ?: 0L
+        val destination = File(directory, "$clockMode-$key-$weatherRevision.png")
 
         synchronized(lock) {
             if (!destination.isFile || destination.length() == 0L) {
                 val temp = File(directory, "inflight-${System.nanoTime()}.tmp")
-                val bitmap = ClockRenderer.render(clockMode, requestedMinute)
+                val weather = if (clockMode == "weather" || clockMode == "both") {
+                    WeatherStore.current(appContext)
+                } else null
+                val bitmap = ClockRenderer.render(
+                    clockMode, requestedMinute,
+                    weather?.formattedTemperature ?: "--°C",
+                    weather?.description ?: "Няма данни"
+                )
                 try {
                     FileOutputStream(temp).use { out ->
                         if (!bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)) {
@@ -95,7 +104,16 @@ class ClockArtworkProvider : ContentProvider() {
         private val VALID_MODES = setOf("clock", "analog", "weather", "both")
         private val KEY_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd_HHmm")
 
-        fun artworkUri(mode: String, now: LocalDateTime = LocalDateTime.now()): Uri =
-            Uri.parse("content://$AUTHORITY/$mode/clock_${now.format(KEY_FORMAT)}.png")
+        fun artworkUri(
+            mode: String,
+            now: LocalDateTime = LocalDateTime.now(),
+            weatherRevision: Long = 0L
+        ): Uri = Uri.Builder()
+            .scheme("content")
+            .authority(AUTHORITY)
+            .appendPath(mode)
+            .appendPath("clock_${now.format(KEY_FORMAT)}.png")
+            .appendQueryParameter("rev", weatherRevision.coerceAtLeast(0L).toString())
+            .build()
     }
 }
