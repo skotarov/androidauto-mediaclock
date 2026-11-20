@@ -45,7 +45,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(scroll)
 
         root.addView(label("Auto Clock 2", 30f, light, dp(7)))
-        root.addView(label("Лек часовник за Android Auto", 17f, muted, dp(20)))
+        root.addView(label("Аналогов циферблат във всички режими", 17f, muted, dp(20)))
 
         preview = ImageView(this).apply {
             scaleType = ImageView.ScaleType.FIT_CENTER
@@ -60,8 +60,8 @@ class MainActivity : AppCompatActivity() {
         root.addView(label("Какво да се показва", 21f, light, dp(8)))
 
         val modeOptions = linkedMapOf(
-            "digital" to "Часовник — цифров",
-            "analog" to "Часовник — аналогов",
+            "digital" to "Часовник — час и дата",
+            "analog" to "Часовник — аналогов фон",
             "weather" to "Времето",
             "both" to "Часовник + време"
         )
@@ -130,7 +130,7 @@ class MainActivity : AppCompatActivity() {
         root.addView(refreshButton)
 
         root.addView(label(
-            "В Android Auto избери Auto Clock от мултимедийните приложения " +
+            "В Android Auto избери Auto Clock 2 от мултимедийните приложения " +
                 "и натисни Play. Режимът може да се сменя от приложението " +
                 "или с Previous / Next. Промените от телефона се прилагат " +
                 "най-късно при следващата минута.",
@@ -193,8 +193,8 @@ class MainActivity : AppCompatActivity() {
         val weather = WeatherStore.current(this)
         val image = ClockRenderer.render(
             mode, LocalDateTime.now(),
-            weather?.formattedTemperature ?: "--°C",
-            weather?.description ?: "Няма данни"
+            weather?.weatherCode,
+            weather?.isDay ?: true
         )
         preview.setImageBitmap(image)
         previewBitmap?.recycle()
