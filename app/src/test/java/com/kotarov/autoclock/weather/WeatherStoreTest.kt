@@ -14,6 +14,16 @@ class WeatherStoreTest {
         assertEquals("Времето", WeatherStore.describe(-1))
     }
 
+    @Test fun weatherSymbolsAreMappedAcrossDifferentConditions() {
+        assertEquals("☀", WeatherStore.symbol(0, true))
+        assertEquals("☾", WeatherStore.symbol(0, false))
+        assertEquals("⛅", WeatherStore.symbol(2))
+        assertEquals("≋", WeatherStore.symbol(45))
+        assertEquals("☂", WeatherStore.symbol(63))
+        assertEquals("❄", WeatherStore.symbol(73))
+        assertEquals("⚡", WeatherStore.symbol(95))
+    }
+
     @Test fun unknownCityFallsBackToSofia() {
         assertEquals(WeatherStore.City.SOFIA, WeatherStore.City.byId("unknown"))
         assertEquals(WeatherStore.City.SOFIA, WeatherStore.City.byId(null))
