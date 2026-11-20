@@ -60,7 +60,10 @@ object WeatherStore {
         val formattedTemperature: String get() = "${temperatureC.roundToInt()}°C"
         val description: String get() = describe(weatherCode)
         val artworkSource: String? get() =
-            if (autoSelected) originLabel else null
+            if (autoSelected) {
+                if (sourceLabel.contains("модел")) "Модел · $originLabel"
+                else originLabel.removePrefix("Станция ")
+            } else null
     }
 
     private data class Reading(
