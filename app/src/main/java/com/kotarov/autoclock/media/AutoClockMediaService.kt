@@ -29,7 +29,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private lateinit var session: MediaSessionCompat
     private lateinit var prefs: SharedPreferences
     private var running = false
-    private var preset = ClockPreset.ANALOG_TIME
+    private var preset = ClockPreset.ANALOG_PURE
     private var artworkGeneration = 0L
 
     private val settingsRefresh = Runnable {
@@ -42,9 +42,12 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == ClockPreset.KEY_FAMILY ||
-            key == ClockPreset.KEY_ANALOG_DETAIL ||
-            key == ClockPreset.KEY_DIGITAL_DETAIL ||
-            key == ClockPreset.KEY_WEATHER_DETAIL ||
+            key == ClockPreset.KEY_ANALOG_ADD_DIGITAL ||
+            key == ClockPreset.KEY_ANALOG_ADD_WEATHER ||
+            key == ClockPreset.KEY_DIGITAL_ADD_ANALOG ||
+            key == ClockPreset.KEY_DIGITAL_ADD_WEATHER ||
+            key == ClockPreset.KEY_WEATHER_ADD_ANALOG ||
+            key == ClockPreset.KEY_WEATHER_ADD_DIGITAL ||
             key == KEY_MODE || key == KEY_HIDE_MEDIA_TEXT ||
             key == KEY_LAYOUT || key == KEY_PROGRESS_ANIMATED ||
             key == WeatherStore.KEY_CITY || key == "weather_cached_city" ||
@@ -70,6 +73,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     override fun onCreate() {
         super.onCreate()
         prefs = getSharedPreferences(PREFERENCES, MODE_PRIVATE)
+        ClockSelectionStore.migrateIfNeeded(prefs)
         preset = selectedPreset()
         session = MediaSessionCompat(this, "AutoClockV3").apply {
             setFlags(
@@ -82,33 +86,35 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                     startClock()
                 }
                 override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
-                    choosePreset(ClockPreset.fromId(mediaId))
+                    chooseFromMediaId(mediaId)
                     startClock()
                 }
                 override fun onPrepareFromMediaId(mediaId: String?, extras: Bundle?) {
-                    choosePreset(ClockPreset.fromId(mediaId))
+                    chooseFromMediaId(mediaId)
                     publishClock()
                     publishPlaybackState()
                 }
                 override fun onPlayFromSearch(query: String?, extras: Bundle?) {
                     val q = query?.lowercase(Locale.ROOT).orEmpty()
-                    val target = when {
-                        "weather" in q || "врем" in q -> ClockPreset.WEATHER_ONLY
-                        "digital" in q || "цифр" in q -> ClockPreset.DIGITAL_TIME
-                        else -> ClockPreset.ANALOG_TIME
+                    val family = when {
+                        "weather" in q || "врем" in q -> ClockFamily.WEATHER
+                        "digital" in q || "цифр" in q -> ClockFamily.DIGITAL
+                        else -> ClockFamily.ANALOG
                     }
-                    choosePreset(target)
+                    chooseFamily(family)
                     startClock()
                 }
                 override fun onPause() = stopClock()
                 override fun onStop() = stopClock()
                 override fun onSkipToNext() {
-                    choosePreset(ClockPreset.entries[(preset.ordinal + 1) % ClockPreset.entries.size])
+                    val next = ClockFamily.entries[(preset.family.ordinal + 1) % ClockFamily.entries.size]
+                    chooseFamily(next)
                     startClock()
                 }
                 override fun onSkipToPrevious() {
-                    val index = (preset.ordinal + ClockPreset.entries.size - 1) % ClockPreset.entries.size
-                    choosePreset(ClockPreset.entries[index])
+                    val count = ClockFamily.entries.size
+                    val previous = ClockFamily.entries[(preset.family.ordinal + count - 1) % count]
+                    chooseFamily(previous)
                     startClock()
                 }
             })
@@ -139,11 +145,14 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         }
         val now = LocalDateTime.now()
         val rev = weatherRevision()
-        val items = ClockPreset.entries.map { option ->
+        // One simple item per main radio style; checkboxes are configured on
+        // the phone, so Android Auto does not show a confusing 12-item list.
+        val items = ClockFamily.entries.map { family ->
+            val option = ClockSelectionStore.forFamily(prefs, family)
             val description = MediaDescriptionCompat.Builder()
-                .setMediaId(option.id)
-                .setTitle(option.label)
-                .setSubtitle(option.family.label)
+                .setMediaId("family_${family.id}")
+                .setTitle(family.label)
+                .setSubtitle(option.label)
                 .setIconUri(
                     ClockArtworkProvider.artworkUri(
                         option.id, now,
@@ -152,8 +161,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                     )
                 ).build()
             MediaBrowserCompat.MediaItem(
-                description,
-                MediaBrowserCompat.MediaItem.FLAG_PLAYABLE
+                description, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE
             )
         }.toMutableList()
         result.sendResult(items)
@@ -169,20 +177,24 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         super.onDestroy()
     }
 
-    private fun selectedPreset(): ClockPreset = ClockPreset.selected(
-        prefs.getString(ClockPreset.KEY_FAMILY, null),
-        prefs.getString(ClockPreset.KEY_ANALOG_DETAIL, null),
-        prefs.getString(ClockPreset.KEY_DIGITAL_DETAIL, null),
-        prefs.getString(ClockPreset.KEY_WEATHER_DETAIL, null),
-        prefs.getString(KEY_MODE, "analog")
-    )
+    private fun selectedPreset(): ClockPreset =
+        ClockSelectionStore.current(prefs)
 
-    private fun choosePreset(selected: ClockPreset) {
-        preset = selected
-        prefs.edit()
-            .putString(ClockPreset.KEY_FAMILY, selected.family.id)
-            .putString(ClockPreset.detailKey(selected.family), selected.detail)
-            .apply()
+    private fun chooseFamily(family: ClockFamily) {
+        preset = ClockSelectionStore.forFamily(prefs, family)
+        prefs.edit().putString(ClockPreset.KEY_FAMILY, family.id).apply()
+    }
+
+    private fun chooseFromMediaId(id: String?) {
+        val family = id?.removePrefix("family_")?.let(ClockFamily::fromId)
+        if (family != null) {
+            chooseFamily(family)
+        } else {
+            // Older Android Auto hosts may retain previous media IDs.
+            val selected = ClockPreset.fromId(id)
+            preset = selected
+            ClockSelectionStore.choose(prefs, selected)
+        }
     }
 
     private fun compactLayout(): Boolean =
@@ -235,17 +247,20 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             "${WeatherStore.symbol(weather.weatherCode, weather.isDay)} $temp"
         val time = now.format(TIME_FORMAT)
 
-        val title = when (preset) {
-            ClockPreset.ANALOG_TIME, ClockPreset.DIGITAL_TIME -> time
-            ClockPreset.ANALOG_TIME_WEATHER, ClockPreset.DIGITAL_TIME_WEATHER -> time
-            ClockPreset.ANALOG_WEATHER, ClockPreset.WEATHER_ONLY,
-            ClockPreset.WEATHER_WITH_TIME -> shortWeather
+        val title = when (preset.family) {
+            ClockFamily.ANALOG ->
+                if (preset.hasDigitalTime) time
+                else if (preset.usesWeather) shortWeather
+                else "Аналогов часовник"
+            ClockFamily.DIGITAL -> time
+            ClockFamily.WEATHER -> shortWeather
         }
-        val subtitle = when (preset) {
-            ClockPreset.ANALOG_TIME, ClockPreset.DIGITAL_TIME -> now.format(DATE_FORMAT)
-            ClockPreset.ANALOG_TIME_WEATHER, ClockPreset.DIGITAL_TIME_WEATHER -> shortWeather
-            ClockPreset.ANALOG_WEATHER, ClockPreset.WEATHER_ONLY -> description
-            ClockPreset.WEATHER_WITH_TIME -> "$time • $description"
+        val subtitle = when {
+            preset.family == ClockFamily.WEATHER && preset.hasDigitalTime ->
+                "$time • $description"
+            preset.usesWeather -> description
+            preset.hasDigitalTime -> now.format(DATE_FORMAT)
+            else -> preset.label
         }
         val artwork = ClockArtworkProvider.artworkUri(
             preset.id, now, weather?.observedAtMs ?: 0L,
