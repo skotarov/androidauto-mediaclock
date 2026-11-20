@@ -1,5 +1,9 @@
 package com.kotarov.autoclock
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.app.ActivityCompat
+import com.kotarov.autoclock.weather.WeatherLocation
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.os.Bundle
@@ -43,7 +47,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         val prefs = getSharedPreferences(AutoClockMediaService.PREFERENCES, MODE_PRIVATE)
 
-        ClockSelectionStore.migrateIfNeeded(prefs)
+        ClockSelectionStore.migrateSimplifiedIfNeeded(prefs)
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -87,8 +91,8 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(optionsContainer)
         root.addView(label(
-            "Без отметка — само основната визия. Можеш да включиш " +
-                "една или две добавки едновременно.",
+            "Аналоговият и цифровият часовник показват часа по подразбиране. " +
+                "Добавката включва прогнозата, а при „Времето“ — цифров час.",
             14f, muted, dp(18)
         ))
 
@@ -125,7 +129,7 @@ class MainActivity : AppCompatActivity() {
 
         root.addView(checkOption(
             "Движение на прогрес бара (секунди)",
-            prefs.getBoolean(AutoClockMediaService.KEY_PROGRESS_ANIMATED, true)
+            prefs.getBoolean(AutoClockMediaService.KEY_PROGRESS_ANIMATED, false)
         ) { checked ->
             prefs.edit().putBoolean(AutoClockMediaService.KEY_PROGRESS_ANIMATED, checked).apply()
         })
@@ -143,22 +147,32 @@ class MainActivity : AppCompatActivity() {
             13f, muted, dp(15)
         ))
 
-        root.addView(label("Град за прогнозата", 20f, light, dp(6)))
-        root.addView(label("Без GPS и постоянно следене на местоположението.", 14f, muted, dp(6)))
+        root.addView(label("Източник за времето", 20f, light, dp(6)))
+        root.addView(label("Авто използва местоположение еднократно, при обновяване. " +
+            "Избира най-близката метеостанция с актуално измерване; " +
+            "ръчните градове използват Open-Meteo.", 14f, muted, dp(6)))
         val cityGroup = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
         val cityIds = mutableMapOf<Int, String>()
+        val auto = radio("Авто — най-близка метеостанция")
+        cityIds[auto.id] = WeatherStore.AUTO_ID
+        cityGroup.addView(auto)
+        if (WeatherStore.isAuto(this)) cityGroup.check(auto.id)
         for (city in WeatherStore.City.entries) {
             val button = radio(city.label)
             cityIds[button.id] = city.id
             cityGroup.addView(button)
-            if (city == WeatherStore.city(this)) cityGroup.check(button.id)
+            if (!WeatherStore.isAuto(this) && city == WeatherStore.city(this)) cityGroup.check(button.id)
         }
         cityGroup.setOnCheckedChangeListener { _, id ->
             cityIds[id]?.let {
                 WeatherStore.setCity(this, it)
                 updateWeatherStatus()
                 updatePreview()
-                requestWeatherForPreview()
+                if (it == WeatherStore.AUTO_ID && !WeatherLocation.permitted(this)) {
+                    askForLocation()
+                } else {
+                    requestWeatherForPreview()
+                }
             }
         }
         root.addView(cityGroup)
@@ -170,15 +184,19 @@ class MainActivity : AppCompatActivity() {
             isAllCaps = false
         }
         refresh.setOnClickListener {
-            refresh.isEnabled = false
-            weatherStatus.text = "Зареждам данни за времето..."
-            WeatherStore.refreshIfDue(this, force = true) { success ->
-                if (!isFinishing && !isDestroyed) {
-                    refresh.isEnabled = true
-                    updateWeatherStatus()
-                    updatePreview()
-                    if (!success) weatherStatus.text =
-                        "Няма връзка. Часовникът работи и без интернет."
+            if (WeatherStore.isAuto(this) && !WeatherLocation.permitted(this)) {
+                askForLocation()
+            } else {
+                refresh.isEnabled = false
+                weatherStatus.text = "Зареждам данни за времето..."
+                WeatherStore.refreshIfDue(this, force = true) { success ->
+                    if (!isFinishing && !isDestroyed) {
+                        refresh.isEnabled = true
+                        updateWeatherStatus()
+                        updatePreview()
+                        if (!success) weatherStatus.text =
+                            "Няма достъпни данни. Провери връзката и разрешенията."
+                    }
                 }
             }
         }
@@ -190,7 +208,8 @@ class MainActivity : AppCompatActivity() {
                 "се обновява веднъж в минута, прогнозата — най-много веднъж на час.",
             14f, muted, dp(8)
         ))
-        root.addView(label("Данни за времето: Open-Meteo.com", 13f, Color.GRAY, dp(4)))
+        root.addView(label("Източници: NOAA Aviation Weather (METAR измервания) " +
+            "и Open-Meteo (метеомодел).", 13f, Color.GRAY, dp(4)))
 
         updateWeatherStatus()
         updatePreview()
@@ -210,30 +229,53 @@ class MainActivity : AppCompatActivity() {
     private fun updateVariantOptions(family: ClockFamily) {
         optionsContainer.removeAllViews()
         val prefs = getSharedPreferences(AutoClockMediaService.PREFERENCES, MODE_PRIVATE)
-        val firstLabel = when (family) {
-            ClockFamily.ANALOG -> "Добави цифров час"
-            ClockFamily.DIGITAL -> "Добави аналогов часовник"
-            ClockFamily.WEATHER -> "Добави аналогов часовник"
+        val (label, key) = when (family) {
+            ClockFamily.ANALOG -> "Добави времето" to ClockPreset.KEY_ANALOG_ADD_WEATHER
+            ClockFamily.DIGITAL -> "Добави времето" to ClockPreset.KEY_DIGITAL_ADD_WEATHER
+            ClockFamily.WEATHER -> "Добави цифров час" to ClockPreset.KEY_WEATHER_ADD_DIGITAL
         }
-        val secondLabel = when (family) {
-            ClockFamily.ANALOG, ClockFamily.DIGITAL -> "Добави времето"
-            ClockFamily.WEATHER -> "Добави цифров час"
-        }
-        fun addCheckbox(label: String, key: String) {
-            val box = checkOption(label, prefs.getBoolean(key, false)) { checked ->
+        optionsContainer.addView(
+            checkOption(label, prefs.getBoolean(key, false)) { checked ->
                 prefs.edit().putBoolean(key, checked).apply()
                 updatePreview()
                 requestWeatherForPreview()
             }
-            optionsContainer.addView(box)
-        }
-        addCheckbox(firstLabel, ClockPreset.firstKey(family))
-        addCheckbox(secondLabel, ClockPreset.secondKey(family))
+        )
     }
 
-    private fun requestWeatherForPreview() {
+    private fun askForLocation() {
+        if (!WeatherStore.isAuto(this)) return
+        if (WeatherLocation.permitted(this)) {
+            requestWeatherForPreview(force = true)
+        } else {
+            ActivityCompat.requestPermissions(
+                this, arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION), LOCATION_REQUEST
+            )
+        }
+    }
+
+    @Deprecated("The ActivityResult API may replace this permission callback later")
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == LOCATION_REQUEST) {
+            updateWeatherStatus()
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+                requestWeatherForPreview(force = true)
+            }
+        }
+    }
+
+    private fun requestWeatherForPreview(force: Boolean = false) {
         if (!currentPreset().usesWeather) return
-        WeatherStore.refreshIfDue(this) { success ->
+        if (WeatherStore.isAuto(this) && !WeatherLocation.permitted(this)) {
+            updateWeatherStatus()
+            return
+        }
+        WeatherStore.refreshIfDue(this, force = force) { success ->
             if (success && !isFinishing && !isDestroyed) {
                 updateWeatherStatus()
                 updatePreview()
@@ -260,15 +302,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateWeatherStatus() {
         if (!::weatherStatus.isInitialized) return
-        val current = WeatherStore.current(this)
-        weatherStatus.text = if (current == null) {
-            "За ${WeatherStore.city(this).label} няма актуални данни."
-        } else {
-            val time = SimpleDateFormat("HH:mm", Locale("bg", "BG"))
-                .format(Date(current.observedAtMs))
-            "${WeatherStore.city(this).label}: ${current.formattedTemperature}, " +
-                "${current.description} (обновено $time)"
-        }
+        weatherStatus.text = WeatherStore.sourceStatus(this)
     }
 
     private fun checkOption(title: String, checked: Boolean, onChange: (Boolean) -> Unit): CheckBox =
@@ -303,6 +337,8 @@ class MainActivity : AppCompatActivity() {
         previewBitmap = null
         super.onDestroy()
     }
+
+    companion object { private const val LOCATION_REQUEST = 7401 }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 }
