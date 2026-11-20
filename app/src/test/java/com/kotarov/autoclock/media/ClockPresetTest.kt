@@ -1,5 +1,7 @@
 package com.kotarov.autoclock.media
 
+import android.content.SharedPreferences
+import java.lang.reflect.Proxy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -57,6 +59,33 @@ class ClockPresetTest {
             ClockPreset.fromAddons(ClockFamily.WEATHER, second = true))
         assertEquals(ClockPreset.WEATHER_ANALOG_TIME,
             ClockPreset.fromAddons(ClockFamily.WEATHER, first = true, second = true))
+    }
+
+    @Test fun activeAnalogSelectionHonorsBothSavedCheckboxes() {
+        fun prefs(digital: Boolean, weather: Boolean): SharedPreferences {
+            val flags = mapOf(
+                ClockPreset.KEY_ANALOG_ADD_DIGITAL to digital,
+                ClockPreset.KEY_ANALOG_ADD_WEATHER to weather
+            )
+            return Proxy.newProxyInstance(
+                SharedPreferences::class.java.classLoader,
+                arrayOf(SharedPreferences::class.java)
+            ) { _, method, args ->
+                when (method.name) {
+                    "getBoolean" -> flags[args!![0] as String] ?: args[1] as Boolean
+                    else -> throw UnsupportedOperationException(method.name)
+                }
+            } as SharedPreferences
+        }
+
+        assertEquals(ClockPreset.ANALOG_PURE,
+            ClockSelectionStore.forFamily(prefs(false, false), ClockFamily.ANALOG))
+        assertEquals(ClockPreset.ANALOG_TIME,
+            ClockSelectionStore.forFamily(prefs(true, false), ClockFamily.ANALOG))
+        assertEquals(ClockPreset.ANALOG_WEATHER,
+            ClockSelectionStore.forFamily(prefs(false, true), ClockFamily.ANALOG))
+        assertEquals(ClockPreset.ANALOG_TIME_WEATHER,
+            ClockSelectionStore.forFamily(prefs(true, true), ClockFamily.ANALOG))
     }
 
     @Test fun allTwelveCombinationsHaveStableUniqueIds() {
