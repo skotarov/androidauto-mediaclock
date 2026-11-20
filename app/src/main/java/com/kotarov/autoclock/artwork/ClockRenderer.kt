@@ -21,12 +21,12 @@ import kotlin.math.sin
 object ClockRenderer {
     const val SIZE = 512
     private const val CENTER_X = 256f
-    // The top of album art is cropped on the compact Android Auto media tile.
-    // Move only analog-containing layouts down while keeping their lower edge
-    // above the native transport controls.
+    // Different optical centres for compact and standard Android Auto tiles.
+    // Compact is raised slightly from v0.13; standard returns to its v0.12 centre.
+    // Clock digits and weather retain their positions relative to the dial.
     private const val CONTENT_CENTER_Y = 190f
-    private const val COMPACT_ANALOG_CENTER_Y = 216f
-    private const val STANDARD_ANALOG_CENTER_Y = 198f
+    private const val COMPACT_ANALOG_CENTER_Y = 208f
+    private const val STANDARD_ANALOG_CENTER_Y = 204f
     private const val COMPACT_RADIUS = 96f
     private const val STANDARD_RADIUS = 122f
     // Shared weather geometry in both analogue variants. The optional time
