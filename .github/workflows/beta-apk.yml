@@ -5,6 +5,10 @@ on:
     branches: [revamp/low-power-v2]
   workflow_dispatch:
 
+concurrency:
+  group: autoclock-beta-preview
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
