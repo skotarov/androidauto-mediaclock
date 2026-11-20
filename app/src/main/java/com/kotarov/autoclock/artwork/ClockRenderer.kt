@@ -39,7 +39,7 @@ object ClockRenderer {
         canvas.drawColor(Color.rgb(2, 5, 11))
 
         drawClock(canvas, time)
-        if (mode == "weather" || mode == "both") {
+        if ((mode == "weather" || mode == "both") && weatherCode != null && weatherCode >= 0) {
             drawWeatherIcon(canvas, weatherCode, isDay)
         }
         return bitmap
