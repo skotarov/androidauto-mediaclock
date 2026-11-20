@@ -69,7 +69,7 @@ object WeatherStore {
      * Network I/O is isolated from the UI and browser service main thread.
      * callback is posted only when a new reading succeeds.
      */
-    fun refreshIfDue(context: Context, force: Boolean = false, callback: () -> Unit = {}) {
+    fun refreshIfDue(context: Context, force: Boolean = false, callback: (Boolean) -> Unit = {}) {
         val appContext = context.applicationContext
         val prefs = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val selected = city(appContext)
@@ -92,8 +92,8 @@ object WeatherStore {
                     .putLong("weather_temperature_bits", java.lang.Double.doubleToRawLongBits(reading.first))
                     .putInt("weather_code", reading.second)
                     .apply()
-                Handler(Looper.getMainLooper()).post { callback() }
             }
+            Handler(Looper.getMainLooper()).post { callback(reading != null) }
         }, "AutoClockWeather").apply { isDaemon = true }.start()
     }
 
