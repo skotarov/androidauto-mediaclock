@@ -13,10 +13,11 @@ media card next to navigation, not a replacement for a real audio player.
 
 ## Features
 
-- Digital clock: 24-hour HH:mm, local date
-- Analog clock: hour/minute hands, no second-hand animation
-- Weather: current temperature and a brief condition label
-- Clock + weather: time, temperature, condition
+- Every display mode keeps the same high-contrast analog clock artwork (hour/minute hands, no second hand)
+- Time and date appear as Android Auto metadata, never as text baked into the artwork
+- Weather codes display as vector icons (sun, moon, cloud, fog, rain, snow and storm)
+- Temperature and condition appear in media metadata and next to the navigation panel
+- Clock + weather combines time, temperature, and an illustrated weather condition
 - Select any mode from Android Auto's media list or the phone settings
 - Phone preview of all four modes
 - Choose forecast city on the phone (Sofia, Stara Zagora, Plovdiv, Varna,
@@ -46,16 +47,16 @@ Power consumption still **must be measured on the actual phone**.
 ## Install the APK
 
 The release candidate APK will be published as
-[AutoClock-2-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases)
-once the release build succeeds.
+[AutoClock-2-v0.4-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.4.0-beta)
+from GitHub Releases after the automated build succeeds.
 
-1. Open the public **Releases** page and choose **v0.3.0-beta**.
-2. Under **Assets**, tap **AutoClock-2-beta.apk** (not the source ZIP).
+1. Open the public **Releases** page and choose **v0.4.0-beta**.
+2. Under **Assets**, tap **AutoClock-2-v0.4-beta.apk** (not the source ZIP).
 3. Install on the Android phone connected to the car, allowing installation
    from the browser/files app if Android requests permission.
 4. Open Auto Clock 2 on the phone and select the mode and weather city.
 5. In Android Auto, enable developer-mode unknown sources for the local test
-   if Auto Clock is absent from the media app launcher.
+   if Auto Clock 2 is absent from the media app launcher.
 6. Select **Auto Clock 2** from the media menu, tap its mode and press Play
    if needed; return to navigation/split-screen mode.
 
@@ -63,7 +64,9 @@ once the release build succeeds.
 
 - [ ] Time appears and updates when minutes change
 - [ ] Date is correct after switching timezone / after midnight
-- [ ] Analog hands move each minute
+- [ ] The high-contrast analog dial is visible in every mode; hour/minute hands update each minute
+- [ ] Weather glyphs match current conditions; clear night shows the moon
+- [ ] No text is printed inside the artwork; Android Auto owns text overlays
 - [ ] Weather appears after first request, survives weak/offline signal
 - [ ] Weather mode city selection is correct; manual refresh works
 - [ ] Time appears in split-screen media card alongside maps
@@ -76,6 +79,8 @@ once the release build succeeds.
 Kotlin, Android Gradle Plugin 8.6.1, AndroidX Media 1.7.0.
 `gradle testDebugUnitTest assembleDebug` builds the local debug APK.
 The **Android Build** GitHub Actions workflow runs tests/build automatically.
+
+If replacing an earlier GitHub Actions debug APK, Android may reject the update because each runner can generate a different debug signing key. If needed, uninstall only the existing **Auto Clock 2** before installing the new beta. The original **Auto Clock** has a different app ID and remains untouched.
 
 The stable `main` branch remains unchanged; the next version lives in
 `revamp/low-power-v2` until verified in the car.
