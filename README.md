@@ -36,9 +36,26 @@ Weather uses [Open-Meteo](https://open-meteo.com/) data with attribution,
 no API key for permitted non-commercial use. Network is only needed for
 weather; the clock works without a connection.
 
+## Minute progress bar (v0.7)
+
+The media "track" is a virtual 60-second minute, not real sound playback.
+The service now sends `MediaMetadataCompat.METADATA_KEY_DURATION = 60_000`
+and sets `PlaybackStateCompat.position = System.currentTimeMillis() % 60_000`
+with playback speed 1.0 and a monotonic timestamp.
+
+For example, if Auto Clock is started at 15:36:24 it publishes 24 seconds /
+60 seconds (40%) immediately; it does **not** start at 0. On the next minute,
+it sends a fresh position near the beginning of the new minute. The normal
+artwork update and playback-state update are aligned to the same minute timer.
+No wakeups are added between minute boundaries.
+
+**Android Auto limitation:** The host owns the progress bar. The state and
+duration give it the information needed to extrapolate progress, but it may
+choose not to show or animate the bar for an audio-less media session.
+
 ## Battery and memory strategy
 
-- Minute-aligned updates *only while the clock is active*, not 60 FPS
+- Minute-aligned artwork and playback-state updates *only while the clock is active*, not 60 FPS
 - No GPS, location permission, wakelock, audio stream, alarms or work manager
 - No app-start or Android Auto-bind automatic playback
 - `START_NOT_STICKY` and timer cancellation on pause/stop/destroy
@@ -60,11 +77,11 @@ itself is controlled by Android Auto, not by the phone app. Android Auto does no
 ## Install the APK
 
 The latest beta APK is published as
-[AutoClock-2-v0.6-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.6.0-beta)
+[AutoClock-2-v0.7-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.7.0-beta)
 from GitHub Releases after tests pass.
 
-1. Open the public **Releases** page and choose **v0.6.0-beta**.
-2. Under **Assets**, tap **AutoClock-2-v0.6-beta.apk** (not the source ZIP).
+1. Open the public **Releases** page and choose **v0.7.0-beta**.
+2. Under **Assets**, tap **AutoClock-2-v0.7-beta.apk** (not the source ZIP).
 3. Install on the Android phone connected to the car, allowing installation
    from the browser/files app if Android requests permission.
 4. Open Auto Clock 2 on the phone and select the mode and weather city.
@@ -75,6 +92,8 @@ from GitHub Releases after tests pass.
 
 ### Testing checklist
 
+- [ ] Media progress initially equals the current seconds / 60, rather than 0
+- [ ] Progress moves without second-by-second updates and resets at minute rollover
 - [ ] Time appears and updates when minutes change
 - [ ] Date is correct after switching timezone / after midnight
 - [ ] The high-contrast analog dial is visible in every mode; hour/minute hands update each minute
