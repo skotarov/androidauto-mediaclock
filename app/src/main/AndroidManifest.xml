@@ -6,7 +6,7 @@
 
     <application
         android:allowBackup="true"
-        android:label="Auto Clock"
+        android:label="Auto Clock 2"
         android:icon="@drawable/ic_auto_clock"
         android:supportsRtl="true"
         android:theme="@style/Theme.AutoClock">
@@ -34,7 +34,7 @@
 
         <provider
             android:name=".artwork.ClockArtworkProvider"
-            android:authorities="com.kotarov.autoclock.artwork"
+            android:authorities="com.kotarov.autoclock2.artwork"
             android:exported="true"
             android:grantUriPermissions="true" />
 
