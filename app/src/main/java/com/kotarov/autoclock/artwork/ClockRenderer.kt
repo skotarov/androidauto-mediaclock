@@ -12,11 +12,8 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * Artwork is visual only. Android Auto paints its own title, subtitle and
- * playback controls on top of this image, so we never bake words into it.
- *
- * Every mode has the same, high-contrast analog clock background.
- * Active weather data adds a vector weather symbol and temperature to the upper right.
+ * Artwork can be a digital-only face or a high-contrast analogue face.
+ * Combined weather is aligned below the full-size time digits, without a box.
  * The minute hand changes once per minute; no animated second hand.
  */
 object ClockRenderer {
@@ -42,22 +39,31 @@ object ClockRenderer {
         weatherCode: Int? = null,
         isDay: Boolean = true,
         temperature: String? = null,
-        compact: Boolean = true
+        compact: Boolean = true,
+        outputSize: Int = SIZE
     ): Bitmap {
-        val bitmap = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.RGB_565)
+        require(outputSize in 192..SIZE) { "Unsupported artwork size" }
+        val bitmap = Bitmap.createBitmap(outputSize, outputSize, Bitmap.Config.RGB_565)
         val canvas = Canvas(bitmap)
+        canvas.scale(outputSize.toFloat() / SIZE, outputSize.toFloat() / SIZE)
         canvas.drawColor(Color.rgb(2, 5, 11))
 
-        val weatherEnabled = (mode == "weather" || mode == "both") &&
-            weatherCode != null && weatherCode >= 0 && !temperature.isNullOrBlank()
-        drawClock(
-            canvas = canvas,
-            now = time,
-            radius = if (compact) COMPACT_RADIUS else STANDARD_RADIUS,
-            weatherCode = if (weatherEnabled) weatherCode else null,
-            isDay = isDay,
-            temperature = if (weatherEnabled) temperature else null
-        )
+        val r = if (compact) COMPACT_RADIUS else STANDARD_RADIUS
+        if (mode == "clock" || mode == "digital") {
+            // This is a genuinely digital-only display: no analogue ring or hands.
+            drawDigitalFace(canvas, time, r)
+        } else {
+            val weatherEnabled = (mode == "weather" || mode == "both") &&
+                weatherCode != null && weatherCode >= 0 && !temperature.isNullOrBlank()
+            drawClock(
+                canvas = canvas,
+                now = time,
+                radius = r,
+                weatherCode = if (weatherEnabled) weatherCode else null,
+                isDay = isDay,
+                temperature = if (weatherEnabled) temperature else null
+            )
+        }
         return bitmap
     }
 
@@ -75,6 +81,18 @@ object ClockRenderer {
             this.color = color
             style = Paint.Style.FILL
         }
+
+    private fun drawDigitalFace(canvas: Canvas, now: LocalDateTime, radius: Float) {
+        val unit = radius / STANDARD_RADIUS
+        drawGlowingText(
+            canvas, now.format(timeFormat), DIAL_X, DIAL_Y - 11f * unit,
+            96f * unit, white, unit
+        )
+        drawGlowingText(
+            canvas, now.format(DateTimeFormatter.ofPattern("dd.MM.yyyy")),
+            DIAL_X, DIAL_Y + 55f * unit, 29f * unit, pale, unit
+        )
+    }
 
     private fun drawClock(
         canvas: Canvas,
@@ -127,24 +145,49 @@ object ClockRenderer {
         // No rectangle, background or border behind the digits.
         // A subtle shadow + dark thin outline helps on top of the hands.
         val withWeather = weatherCode != null && temperature != null
-        val timeSize = (if (withWeather) 39f else 46f) * unit
-        val timeY = if (withWeather) cy - 18f * unit else cy
-        drawGlowingText(canvas, now.format(timeFormat), cx, timeY, timeSize, white)
+        // HH:mm has exactly the same font size with or without weather.
+        val timeSize = 46f * unit
+        val timeY = if (withWeather) cy - 25f * unit else cy
+        drawGlowingText(canvas, now.format(timeFormat), cx, timeY, timeSize, white, unit)
 
         if (withWeather) {
-            val lineY = cy + 37f * unit
-            val iconX = cx - 47f * unit
-            val textX = cx + 16f * unit
-            canvas.save()
-            canvas.translate(iconX, lineY - 8f * unit)
-            canvas.scale(0.47f * unit, 0.47f * unit)
-            drawWeatherIcon(canvas, weatherCode!!, isDay)
-            canvas.restore()
-            drawGlowingText(
-                canvas, temperature!!, textX, lineY,
-                32f * unit, white
-            )
+            drawWeatherLine(canvas, cx, cy + 39f * unit, weatherCode!!, isDay, temperature!!, unit)
         }
+    }
+
+    /**
+     * Horizontally centre the complete weather row, not the individual pieces.
+     * Icon and temperature share one optical centreline and scale together.
+     */
+    private fun drawWeatherLine(
+        canvas: Canvas,
+        cx: Float,
+        y: Float,
+        code: Int,
+        isDay: Boolean,
+        temperature: String,
+        unit: Float
+    ) {
+        val textSize = 32f * unit
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            this.textSize = textSize
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        }
+        val textWidth = textPaint.measureText(temperature)
+        val iconWidth = 57f * unit
+        val gap = 7f * unit
+        val totalWidth = iconWidth + gap + textWidth
+        val left = cx - totalWidth / 2f
+        val iconX = left + iconWidth / 2f
+        val textX = left + iconWidth + gap + textWidth / 2f
+
+        canvas.save()
+        canvas.translate(iconX, y)
+        canvas.scale(0.56f * unit, 0.56f * unit)
+        drawWeatherIcon(canvas, code, isDay)
+        canvas.restore()
+
+        drawGlowingText(canvas, temperature, textX, y, textSize, white, unit)
     }
 
     private fun drawGlowingText(
@@ -153,24 +196,32 @@ object ClockRenderer {
         x: Float,
         centreY: Float,
         size: Float,
-        color: Int
+        color: Int,
+        unit: Float
     ) {
         val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             this.color = color
             textAlign = Paint.Align.CENTER
             textSize = size
             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-            setShadowLayer(3f, 0f, 1f, Color.rgb(4, 10, 17))
         }
         val baseline = centreY - (p.fontMetrics.ascent + p.fontMetrics.descent) / 2f
-        // Thin outline is confined to the glyphs; not a box.
-        val edge = Paint(p).apply {
-            clearShadowLayer()
+        val glow = Paint(p).apply {
             style = Paint.Style.STROKE
-            strokeWidth = 2.2f
-            this.color = Color.rgb(7, 22, 35)
+            strokeWidth = 3.5f * unit
+            this.color = Color.argb(175, 99, 195, 255)
+            strokeJoin = Paint.Join.ROUND
+            setShadowLayer(10f * unit, 0f, 0f, Color.argb(205, 94, 191, 255))
+        }
+        // The thin dark glyph outline protects readability over moving hands;
+        // this is not a rectangular background or padded label.
+        val edge = Paint(p).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 2.4f * unit
+            this.color = Color.rgb(8, 24, 38)
             strokeJoin = Paint.Join.ROUND
         }
+        canvas.drawText(value, x, baseline, glow)
         canvas.drawText(value, x, baseline, edge)
         canvas.drawText(value, x, baseline, p)
     }
