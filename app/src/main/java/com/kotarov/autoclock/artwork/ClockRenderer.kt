@@ -5,10 +5,9 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
-import android.graphics.RectF
 import android.graphics.Typeface
-import java.time.format.DateTimeFormatter
 import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -23,14 +22,14 @@ import kotlin.math.sin
 object ClockRenderer {
     const val SIZE = 512
 
-    // Portrait artwork is cropped/overlaid by Android Auto media controls.
-    // Keep the lower ~160 px unused; fit the dial above the control strip.
-    // No reliable compact/full-screen signal is exposed through MediaSession.
-    private const val DIAL_Y = 187f
+    // The media artwork is the same 512px image in compact and full cards.
+    // Because Android Auto doesn't expose the card dimensions to this service,
+    // users can choose the conservative default or a larger dial on the phone.
+    // Both variants leave the lower area clear for transport controls.
     private const val DIAL_X = 256f
-    private const val DIAL_RADIUS = 146f
-    private const val WEATHER_DIAL_X = 212f
-    private const val WEATHER_DIAL_RADIUS = 125f
+    private const val DIAL_Y = 196f
+    private const val COMPACT_RADIUS = 96f
+    private const val STANDARD_RADIUS = 122f
     private val timeFormat = DateTimeFormatter.ofPattern("HH:mm")
     private val white = Color.rgb(255, 255, 255)
     private val pale = Color.rgb(224, 239, 247)
@@ -42,20 +41,23 @@ object ClockRenderer {
         time: LocalDateTime,
         weatherCode: Int? = null,
         isDay: Boolean = true,
-        temperature: String? = null
+        temperature: String? = null,
+        compact: Boolean = true
     ): Bitmap {
         val bitmap = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.RGB_565)
         val canvas = Canvas(bitmap)
         canvas.drawColor(Color.rgb(2, 5, 11))
 
-        // "analog" deliberately suppresses weather, even if an old overlay
-        // preference was enabled in the previous release.
-        val withWeather = (mode == "weather" || mode == "both") &&
-            weatherCode != null && weatherCode >= 0
-        drawClock(canvas, time, withWeather, showDigits = mode != "weather")
-        if (withWeather) {
-            drawWeatherBadge(canvas, weatherCode!!, isDay, temperature)
-        }
+        val weatherEnabled = (mode == "weather" || mode == "both") &&
+            weatherCode != null && weatherCode >= 0 && !temperature.isNullOrBlank()
+        drawClock(
+            canvas = canvas,
+            now = time,
+            radius = if (compact) COMPACT_RADIUS else STANDARD_RADIUS,
+            weatherCode = if (weatherEnabled) weatherCode else null,
+            isDay = isDay,
+            temperature = if (weatherEnabled) temperature else null
+        )
         return bitmap
     }
 
@@ -77,28 +79,29 @@ object ClockRenderer {
     private fun drawClock(
         canvas: Canvas,
         now: LocalDateTime,
-        withWeather: Boolean,
-        showDigits: Boolean
+        radius: Float,
+        weatherCode: Int?,
+        isDay: Boolean,
+        temperature: String?
     ) {
-        // Clock-only uses the horizontal centre, while weather variants
-        // reserve a narrow independent column for the weather badge.
-        val cx = if (withWeather) WEATHER_DIAL_X else DIAL_X
+        val cx = DIAL_X
         val cy = DIAL_Y
-        val r = if (withWeather) WEATHER_DIAL_RADIUS else DIAL_RADIUS
+        val r = radius
+        val unit = r / STANDARD_RADIUS
 
         canvas.drawCircle(cx, cy, r + 1f, fill(Color.rgb(8, 17, 27)))
-        canvas.drawCircle(cx, cy, r, stroke(pale, 5.5f))
-        canvas.drawCircle(cx, cy, r - 11f, stroke(Color.rgb(53, 92, 115), 2f))
+        canvas.drawCircle(cx, cy, r, stroke(pale, 4.8f * unit))
+        canvas.drawCircle(cx, cy, r - 9f * unit, stroke(Color.rgb(53, 92, 115), 1.8f * unit))
 
-        val hourTick = stroke(white, 7.5f)
-        val minuteTick = stroke(Color.rgb(157, 193, 210), 2.5f)
+        val hourTick = stroke(white, 6.5f * unit)
+        val minuteTick = stroke(Color.rgb(157, 193, 210), 2.3f * unit)
         repeat(60) { index ->
-            val angle = Math.toRadians((index * 6 - 90).toDouble())
-            val dx = cos(angle).toFloat()
-            val dy = sin(angle).toFloat()
+            val a = Math.toRadians((index * 6 - 90).toDouble())
+            val dx = cos(a).toFloat()
+            val dy = sin(a).toFloat()
             val major = index % 5 == 0
-            val inner = r - if (major) 28f else 19f
-            val outer = r - 7f
+            val inner = r - if (major) 26f * unit else 17f * unit
+            val outer = r - 7f * unit
             canvas.drawLine(
                 cx + dx * inner, cy + dy * inner,
                 cx + dx * outer, cy + dy * outer,
@@ -106,84 +109,76 @@ object ClockRenderer {
             )
         }
 
-        val hourAngle = Math.toRadians(
-            ((now.hour % 12) * 30.0 + now.minute * 0.5 - 90.0)
-        )
-        val minuteAngle = Math.toRadians((now.minute * 6 - 90).toDouble())
-
+        val h = Math.toRadians((now.hour % 12) * 30.0 + now.minute * 0.5 - 90.0)
+        val m = Math.toRadians(now.minute * 6.0 - 90.0)
         canvas.drawLine(
-            cx, cy, cx + cos(hourAngle).toFloat() * r * 0.65f,
-            cy + sin(hourAngle).toFloat() * r * 0.65f,
-            stroke(white, if (withWeather) 11f else 13f)
+            cx, cy,
+            cx + cos(h).toFloat() * r * 0.68f,
+            cy + sin(h).toFloat() * r * 0.68f,
+            stroke(white, 10f * unit)
         )
         canvas.drawLine(
-            cx, cy, cx + cos(minuteAngle).toFloat() * r * 0.79f,
-            cy + sin(minuteAngle).toFloat() * r * 0.79f,
-            stroke(cyan, if (withWeather) 7f else 8f)
+            cx, cy,
+            cx + cos(m).toFloat() * r * 0.83f,
+            cy + sin(m).toFloat() * r * 0.83f,
+            stroke(cyan, 6.5f * unit)
         )
 
-        if (showDigits) {
-            // Put HH:mm directly at the pivot. A dark opaque plate masks
-            // the crossed hands so the numbers remain readable at any angle.
-            val halfWidth = if (withWeather) 68f else 78f
-            val halfHeight = if (withWeather) 23f else 26f
-            val labelBounds = RectF(
-                cx - halfWidth, cy - halfHeight,
-                cx + halfWidth, cy + halfHeight
+        // No rectangle, background or border behind the digits.
+        // A subtle shadow + dark thin outline helps on top of the hands.
+        val withWeather = weatherCode != null && temperature != null
+        val timeSize = (if (withWeather) 39f else 46f) * unit
+        val timeY = if (withWeather) cy - 18f * unit else cy
+        drawGlowingText(canvas, now.format(timeFormat), cx, timeY, timeSize, white)
+
+        if (withWeather) {
+            val lineY = cy + 37f * unit
+            val iconX = cx - 47f * unit
+            val textX = cx + 16f * unit
+            canvas.save()
+            canvas.translate(iconX, lineY - 8f * unit)
+            canvas.scale(0.47f * unit, 0.47f * unit)
+            drawWeatherIcon(canvas, weatherCode!!, isDay)
+            canvas.restore()
+            drawGlowingText(
+                canvas, temperature!!, textX, lineY,
+                32f * unit, white
             )
-            canvas.drawRoundRect(
-                labelBounds, 11f, 11f, fill(Color.rgb(10, 24, 36))
-            )
-            canvas.drawRoundRect(
-                labelBounds, 11f, 11f, stroke(Color.rgb(147, 197, 220), 1.8f)
-            )
-            val label = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = white
-                textAlign = Paint.Align.CENTER
-                textSize = if (withWeather) 37f else 43f
-                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-            }
-            val middleBaseline = cy - (label.fontMetrics.ascent + label.fontMetrics.descent) / 2f
-            canvas.drawText(now.format(timeFormat), cx, middleBaseline, label)
-        } else {
-            canvas.drawCircle(cx, cy, 8f, fill(white))
-            canvas.drawCircle(cx, cy, 3.5f, fill(navy))
         }
     }
 
-    /**
-     * Icons are drawn from vectors, not fonts or emoji. They remain legible
-     * even if Android Auto desaturates and dims the album art.
-     */
-    private fun drawWeatherBadge(
+    private fun drawGlowingText(
         canvas: Canvas,
-        code: Int,
-        isDay: Boolean,
-        temperature: String?
+        value: String,
+        x: Float,
+        centreY: Float,
+        size: Float,
+        color: Int
     ) {
-        // Place real weather information above Android Auto's lower-left
-        // media text and transport buttons. The card is part of the bitmap.
-        val rect = RectF(350f, 71f, 480f, 227f)
-        canvas.drawRoundRect(rect, 19f, 19f, fill(Color.rgb(5, 16, 26)))
-        canvas.drawRoundRect(rect, 19f, 19f, stroke(Color.rgb(186, 219, 235), 3.5f))
-        drawWeatherIcon(canvas, code, isDay)
-        if (!temperature.isNullOrBlank()) {
-            val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.WHITE
-                textSize = 36f
-                textAlign = Paint.Align.CENTER
-                typeface = android.graphics.Typeface.create(
-                    android.graphics.Typeface.SANS_SERIF,
-                    android.graphics.Typeface.BOLD
-                )
-            }
-            canvas.drawText(temperature, 415f, 208f, p)
+        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            this.color = color
+            textAlign = Paint.Align.CENTER
+            textSize = size
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            setShadowLayer(3f, 0f, 1f, Color.rgb(4, 10, 17))
         }
+        val baseline = centreY - (p.fontMetrics.ascent + p.fontMetrics.descent) / 2f
+        // Thin outline is confined to the glyphs; not a box.
+        val edge = Paint(p).apply {
+            clearShadowLayer()
+            style = Paint.Style.STROKE
+            strokeWidth = 2.2f
+            this.color = Color.rgb(7, 22, 35)
+            strokeJoin = Paint.Join.ROUND
+        }
+        canvas.drawText(value, x, baseline, edge)
+        canvas.drawText(value, x, baseline, p)
     }
 
     private fun drawWeatherIcon(canvas: Canvas, code: Int?, isDay: Boolean) {
-        val cx = 415f
-        val cy = 128f
+        // Coordinates are local to the translated/scaled weather line.
+        val cx = 0f
+        val cy = 0f
         when (code) {
             0 -> if (isDay) drawSun(canvas, cx, cy) else drawMoon(canvas, cx, cy)
             1, 2 -> {
