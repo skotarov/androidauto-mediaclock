@@ -4,6 +4,23 @@ import android.content.SharedPreferences
 
 /** Persist independent checkbox choices for each of the three radio styles. */
 object ClockSelectionStore {
+    private const val KEY_SCHEMA_V13 = "display_simplified_v13"
+
+    /**
+     * Keep existing weather choices but make the digital time intrinsic to the
+     * analogue base (as requested). Deprecated secondary analog add-ons are
+     * never re-enabled by the simplified screen.
+     */
+    fun migrateSimplifiedIfNeeded(prefs: SharedPreferences) {
+        migrateIfNeeded(prefs)
+        if (prefs.getBoolean(KEY_SCHEMA_V13, false)) return
+        prefs.edit()
+            .putBoolean(ClockPreset.KEY_ANALOG_ADD_DIGITAL, true)
+            .putBoolean(ClockPreset.KEY_DIGITAL_ADD_ANALOG, false)
+            .putBoolean(ClockPreset.KEY_WEATHER_ADD_ANALOG, false)
+            .putBoolean(KEY_SCHEMA_V13, true)
+            .apply()
+    }
     fun migrateIfNeeded(prefs: SharedPreferences) {
         if (prefs.getBoolean(ClockPreset.KEY_SCHEMA_V11, false)) return
 
@@ -53,26 +70,37 @@ object ClockSelectionStore {
     }
 
     fun forFamily(prefs: SharedPreferences, family: ClockFamily): ClockPreset =
-        ClockPreset.fromAddons(
-            family,
-            prefs.getBoolean(ClockPreset.firstKey(family), false),
-            prefs.getBoolean(ClockPreset.secondKey(family), false)
-        )
+        when (family) {
+            ClockFamily.ANALOG ->
+                if (prefs.getBoolean(ClockPreset.KEY_ANALOG_ADD_WEATHER, false))
+                    ClockPreset.ANALOG_TIME_WEATHER
+                else ClockPreset.ANALOG_TIME
+            ClockFamily.DIGITAL ->
+                if (prefs.getBoolean(ClockPreset.KEY_DIGITAL_ADD_WEATHER, false))
+                    ClockPreset.DIGITAL_TIME_WEATHER
+                else ClockPreset.DIGITAL_TIME
+            ClockFamily.WEATHER ->
+                if (prefs.getBoolean(ClockPreset.KEY_WEATHER_ADD_DIGITAL, false))
+                    ClockPreset.WEATHER_WITH_TIME
+                else ClockPreset.WEATHER_ONLY
+        }
 
     fun choose(prefs: SharedPreferences, preset: ClockPreset) {
         val family = preset.family
-        val first = when (family) {
-            ClockFamily.ANALOG -> preset.hasDigitalTime
-            ClockFamily.DIGITAL, ClockFamily.WEATHER -> preset.hasAnalog
-        }
-        val second = when (family) {
-            ClockFamily.ANALOG, ClockFamily.DIGITAL -> preset.usesWeather
-            ClockFamily.WEATHER -> preset.hasDigitalTime
-        }
         prefs.edit()
             .putString(ClockPreset.KEY_FAMILY, family.id)
-            .putBoolean(ClockPreset.firstKey(family), first)
-            .putBoolean(ClockPreset.secondKey(family), second)
+            .putBoolean(ClockPreset.KEY_ANALOG_ADD_DIGITAL, true)
+            .putBoolean(ClockPreset.KEY_ANALOG_ADD_WEATHER,
+                if (family == ClockFamily.ANALOG) preset.usesWeather
+                else prefs.getBoolean(ClockPreset.KEY_ANALOG_ADD_WEATHER, false))
+            .putBoolean(ClockPreset.KEY_DIGITAL_ADD_ANALOG, false)
+            .putBoolean(ClockPreset.KEY_DIGITAL_ADD_WEATHER,
+                if (family == ClockFamily.DIGITAL) preset.usesWeather
+                else prefs.getBoolean(ClockPreset.KEY_DIGITAL_ADD_WEATHER, false))
+            .putBoolean(ClockPreset.KEY_WEATHER_ADD_ANALOG, false)
+            .putBoolean(ClockPreset.KEY_WEATHER_ADD_DIGITAL,
+                if (family == ClockFamily.WEATHER) preset.hasDigitalTime
+                else prefs.getBoolean(ClockPreset.KEY_WEATHER_ADD_DIGITAL, false))
             .apply()
     }
 }
