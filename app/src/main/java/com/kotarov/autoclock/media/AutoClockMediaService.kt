@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.support.v4.media.MediaBrowserCompat
 import android.support.v4.media.MediaDescriptionCompat
 import android.support.v4.media.MediaMetadataCompat
@@ -36,6 +37,9 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             if (!running) return
             mode = savedMode()
             publishClock()
+            // Re-anchor the progress to the actual seconds when the minute changes.
+            // Android Auto can animate the remainder without per-second messages.
+            publishPlaybackState()
             requestWeatherIfNecessary()
             scheduleNextMinute()
         }
@@ -176,7 +180,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         handler.removeCallbacks(minuteTick)
         if (!running) return
         val now = System.currentTimeMillis()
-        handler.postDelayed(minuteTick, 60_000L - now % 60_000L + 150L)
+        handler.postDelayed(minuteTick, MinuteProgress.millisUntilNextMinute(now))
     }
 
         private fun hideMediaText(): Boolean =
@@ -241,6 +245,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         session.setMetadata(
             MediaMetadataCompat.Builder()
                 .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, mode.id)
+                .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, MinuteProgress.DURATION_MS)
                 .putString(MediaMetadataCompat.METADATA_KEY_TITLE, displayedTitle)
                 .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, displayedSubtitle)
                 .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, displayedAlbum)
@@ -255,6 +260,11 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private fun publishPlaybackState() {
+        // Capture the position from wall time and the monotonic anchor together.
+        // A start at HH:mm:24 starts at ~24/60 instead of the beginning.
+        val nowWallMs = System.currentTimeMillis()
+        val nowElapsedMs = SystemClock.elapsedRealtime()
+        val currentSecondPositionMs = MinuteProgress.positionMs(nowWallMs)
         val actions = PlaybackStateCompat.ACTION_PLAY or
             PlaybackStateCompat.ACTION_PAUSE or
             PlaybackStateCompat.ACTION_STOP or
@@ -269,8 +279,9 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 .setState(
                     if (running) PlaybackStateCompat.STATE_PLAYING
                     else PlaybackStateCompat.STATE_PAUSED,
-                    0L,
-                    if (running) 1f else 0f
+                    currentSecondPositionMs,
+                    if (running) 1f else 0f,
+                    nowElapsedMs
                 )
                 .setActions(actions)
                 .setActiveQueueItemId(mode.queueId)
