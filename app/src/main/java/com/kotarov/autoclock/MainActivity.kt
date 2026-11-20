@@ -36,7 +36,7 @@ class MainActivity : AppCompatActivity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(22), dp(26), dp(22), dp(30))
-            setBackgroundColor(background)
+            setBackgroundColor(this@MainActivity.background)
         }
         val scroll = ScrollView(this).apply {
             isFillViewport = true
