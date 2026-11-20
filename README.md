@@ -53,10 +53,10 @@ once the release build succeeds.
 2. Under **Assets**, tap **AutoClock-2-beta.apk** (not the source ZIP).
 3. Install on the Android phone connected to the car, allowing installation
    from the browser/files app if Android requests permission.
-4. Open Auto Clock on the phone and select the mode and weather city.
+4. Open Auto Clock 2 on the phone and select the mode and weather city.
 5. In Android Auto, enable developer-mode unknown sources for the local test
    if Auto Clock is absent from the media app launcher.
-6. Select **Auto Clock** from the media menu, tap its mode and press Play
+6. Select **Auto Clock 2** from the media menu, tap its mode and press Play
    if needed; return to navigation/split-screen mode.
 
 ### Testing checklist
