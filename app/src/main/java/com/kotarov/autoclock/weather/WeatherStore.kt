@@ -128,6 +128,10 @@ object WeatherStore {
             ?: if (selected == AUTO_ID) "Няма източник" else "Open-Meteo · модел"
         val label = prefs.getString("weather_station_label", null)
             ?: if (selected == AUTO_ID) "Авто" else city(context).label
+        val reportTime = prefs.getLong("weather_observation_time", fetchedAt)
+        if (selected == AUTO_ID && source.contains("METAR") &&
+            System.currentTimeMillis() - reportTime !in 0..MAX_OBSERVATION_AGE_MS
+        ) return null
         return Snapshot(
             temp,
             prefs.getInt("weather_code", -1),
@@ -135,7 +139,7 @@ object WeatherStore {
             prefs.getBoolean("weather_is_day", true),
             label,
             source,
-            prefs.getLong("weather_observation_time", fetchedAt),
+            reportTime,
             selected == AUTO_ID
         )
     }
