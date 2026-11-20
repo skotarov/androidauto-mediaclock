@@ -91,8 +91,8 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(optionsContainer)
         root.addView(label(
-            "Аналоговият и цифровият часовник показват часа по подразбиране. " +
-                "Добавката включва прогнозата, а при „Времето“ — цифров час.",
+            "При аналоговия можеш да махнеш цифровия час и да оставиш само " +
+                "циферблата и стрелките. Другите две визии имат по една добавка.",
             14f, muted, dp(18)
         ))
 
@@ -229,18 +229,26 @@ class MainActivity : AppCompatActivity() {
     private fun updateVariantOptions(family: ClockFamily) {
         optionsContainer.removeAllViews()
         val prefs = getSharedPreferences(AutoClockMediaService.PREFERENCES, MODE_PRIVATE)
-        val (label, key) = when (family) {
-            ClockFamily.ANALOG -> "Добави времето" to ClockPreset.KEY_ANALOG_ADD_WEATHER
-            ClockFamily.DIGITAL -> "Добави времето" to ClockPreset.KEY_DIGITAL_ADD_WEATHER
-            ClockFamily.WEATHER -> "Добави цифров час" to ClockPreset.KEY_WEATHER_ADD_DIGITAL
+        fun addOption(label: String, key: String, defaultChecked: Boolean = false) {
+            optionsContainer.addView(
+                checkOption(label, prefs.getBoolean(key, defaultChecked)) { checked ->
+                    prefs.edit().putBoolean(key, checked).apply()
+                    updatePreview()
+                    requestWeatherForPreview()
+                }
+            )
         }
-        optionsContainer.addView(
-            checkOption(label, prefs.getBoolean(key, false)) { checked ->
-                prefs.edit().putBoolean(key, checked).apply()
-                updatePreview()
-                requestWeatherForPreview()
+
+        when (family) {
+            ClockFamily.ANALOG -> {
+                addOption("Добави цифров час", ClockPreset.KEY_ANALOG_ADD_DIGITAL, true)
+                addOption("Добави времето", ClockPreset.KEY_ANALOG_ADD_WEATHER)
             }
-        )
+            ClockFamily.DIGITAL ->
+                addOption("Добави времето", ClockPreset.KEY_DIGITAL_ADD_WEATHER)
+            ClockFamily.WEATHER ->
+                addOption("Добави цифров час", ClockPreset.KEY_WEATHER_ADD_DIGITAL)
+        }
     }
 
     private fun askForLocation() {
