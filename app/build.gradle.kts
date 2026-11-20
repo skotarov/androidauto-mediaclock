@@ -8,7 +8,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.kotarov.autoclock"
+        applicationId = "com.kotarov.autoclock2"
         minSdk = 23
         targetSdk = 35
         versionCode = 3
