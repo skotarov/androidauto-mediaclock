@@ -1,9 +1,11 @@
 package com.kotarov.autoclock.media
 
 import android.content.Intent
+import android.content.SharedPreferences
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.support.v4.media.MediaBrowserCompat
 import android.support.v4.media.MediaDescriptionCompat
 import android.support.v4.media.MediaMetadataCompat
@@ -11,276 +13,349 @@ import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import androidx.media.MediaBrowserServiceCompat
 import com.kotarov.autoclock.artwork.ClockArtworkProvider
+import com.kotarov.autoclock.artwork.ClockRenderer
+import com.kotarov.autoclock.weather.WeatherStore
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
+/**
+ * Personal Android Auto media-card clock experiment. One update per minute
+ * while active. No fake sound, location polling, wake locks or background
+ * animation. Android Auto owns its media card and may cache the artwork.
+ */
 class AutoClockMediaService : MediaBrowserServiceCompat() {
-    private lateinit var mediaSession: MediaSessionCompat
     private val handler = Handler(Looper.getMainLooper())
-    private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
-    private val dateFormatter = DateTimeFormatter.ofPattern("EEEE, dd.MM.yyyy")
-    private var activeMode: DisplayMode = DisplayMode.CLOCK
+    private lateinit var session: MediaSessionCompat
+    private lateinit var prefs: SharedPreferences
+    private var running = false
+    private var preset = ClockPreset.ANALOG_PURE
+    private var artworkGeneration = 0L
 
-    private val updateRunnable = object : Runnable {
+    private val settingsRefresh = Runnable {
+        preset = selectedPreset()
+        artworkGeneration += 1L
+        notifyChildrenChanged(ROOT_ID)
+        publishClock()
+        publishPlaybackState()
+        requestWeatherIfNecessary()
+    }
+    private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == ClockPreset.KEY_FAMILY ||
+            key == ClockPreset.KEY_ANALOG_ADD_DIGITAL ||
+            key == ClockPreset.KEY_ANALOG_ADD_WEATHER ||
+            key == ClockPreset.KEY_DIGITAL_ADD_ANALOG ||
+            key == ClockPreset.KEY_DIGITAL_ADD_WEATHER ||
+            key == ClockPreset.KEY_WEATHER_ADD_ANALOG ||
+            key == ClockPreset.KEY_WEATHER_ADD_DIGITAL ||
+            key == KEY_MODE || key == KEY_HIDE_MEDIA_TEXT ||
+            key == KEY_LAYOUT || key == KEY_PROGRESS_ANIMATED ||
+            key == WeatherStore.KEY_CITY || key == "weather_cached_city" ||
+            key == "weather_cached_mode" || key == "weather_station_label" ||
+            key == "weather_source_name" ||
+            key == "weather_fetched_at" || key == "weather_code" ||
+            key == "weather_temperature_bits" || key == "weather_is_day"
+        ) {
+            handler.removeCallbacks(settingsRefresh)
+            handler.postDelayed(settingsRefresh, 120L)
+        }
+    }
+
+    private val minuteTick = object : Runnable {
         override fun run() {
-            updateRadioTrack()
-            scheduleNextMinuteUpdate()
+            if (!running) return
+            preset = selectedPreset()
+            publishClock()
+            publishPlaybackState()
+            requestWeatherIfNecessary()
+            scheduleNextMinute()
         }
     }
 
     override fun onCreate() {
         super.onCreate()
-
-        mediaSession = MediaSessionCompat(this, "AutoClockMediaSession").apply {
+        prefs = getSharedPreferences(PREFERENCES, MODE_PRIVATE)
+        ClockSelectionStore.migrateSimplifiedIfNeeded(prefs)
+        preset = selectedPreset()
+        session = MediaSessionCompat(this, "AutoClockV3").apply {
             setFlags(
                 MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS or
                     MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS
             )
             setCallback(object : MediaSessionCompat.Callback() {
                 override fun onPlay() {
-                    startRadio()
+                    preset = selectedPreset()
+                    startClock()
                 }
-
                 override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
-                    activeMode = DisplayMode.fromMediaId(mediaId)
-                    startRadio()
+                    chooseFromMediaId(mediaId)
+                    startClock()
                 }
-
                 override fun onPrepareFromMediaId(mediaId: String?, extras: Bundle?) {
-                    activeMode = DisplayMode.fromMediaId(mediaId)
-                    updateRadioTrack()
-                    setPausedState()
+                    chooseFromMediaId(mediaId)
+                    publishClock()
+                    publishPlaybackState()
                 }
-
-                override fun onPause() {
-                    pauseRadio()
+                override fun onPlayFromSearch(query: String?, extras: Bundle?) {
+                    val q = query?.lowercase(Locale.ROOT).orEmpty()
+                    val family = when {
+                        "weather" in q || "врем" in q -> ClockFamily.WEATHER
+                        "digital" in q || "цифр" in q -> ClockFamily.DIGITAL
+                        else -> ClockFamily.ANALOG
+                    }
+                    chooseFamily(family)
+                    startClock()
                 }
-
-                override fun onStop() {
-                    pauseRadio()
-                }
-
+                override fun onPause() = stopClock()
+                override fun onStop() = stopClock()
                 override fun onSkipToNext() {
-                    activeMode = activeMode.next()
-                    startRadio()
+                    val next = ClockFamily.entries[(preset.family.ordinal + 1) % ClockFamily.entries.size]
+                    chooseFamily(next)
+                    startClock()
                 }
-
                 override fun onSkipToPrevious() {
-                    activeMode = activeMode.previous()
-                    startRadio()
+                    val count = ClockFamily.entries.size
+                    val previous = ClockFamily.entries[(preset.family.ordinal + count - 1) % count]
+                    chooseFamily(previous)
+                    startClock()
                 }
             })
-            setQueueTitle("Auto Clock Radio")
             isActive = true
         }
-
-        sessionToken = mediaSession.sessionToken
-        updateRadioTrack()
-        setPausedState()
+        sessionToken = session.sessionToken
+        prefs.registerOnSharedPreferenceChangeListener(prefsListener)
+        publishClock()
+        publishPlaybackState()
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startRadio()
-        return START_STICKY
-    }
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int =
+        START_NOT_STICKY
 
     override fun onGetRoot(
         clientPackageName: String,
         clientUid: Int,
         rootHints: Bundle?
-    ): BrowserRoot {
-        return BrowserRoot(ROOT_ID, null)
-    }
+    ): BrowserRoot = BrowserRoot(ROOT_ID, null)
 
     override fun onLoadChildren(
         parentId: String,
         result: Result<MutableList<MediaBrowserCompat.MediaItem>>
     ) {
-        val items = DisplayMode.entries.map { mode ->
+        if (parentId != ROOT_ID) {
+            result.sendResult(mutableListOf())
+            return
+        }
+        val now = LocalDateTime.now()
+        val rev = weatherRevision()
+        // One simple item per main radio style; checkboxes are configured on
+        // the phone, so Android Auto does not show a confusing 12-item list.
+        val items = ClockFamily.entries.map { family ->
+            val option = ClockSelectionStore.forFamily(prefs, family)
+            val description = MediaDescriptionCompat.Builder()
+                .setMediaId("family_${family.id}")
+                .setTitle(family.label)
+                .setSubtitle(option.label)
+                .setIconUri(
+                    ClockArtworkProvider.artworkUri(
+                        option.id, now,
+                        if (option.usesWeather) rev else 0L,
+                        compactLayout(), artworkGeneration
+                    )
+                ).build()
             MediaBrowserCompat.MediaItem(
-                buildModeDescription(mode, LocalDateTime.now()),
-                MediaBrowserCompat.MediaItem.FLAG_PLAYABLE
+                description, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE
             )
         }.toMutableList()
-
         result.sendResult(items)
     }
 
     override fun onDestroy() {
-        handler.removeCallbacksAndMessages(null)
-        mediaSession.release()
+        running = false
+        handler.removeCallbacks(minuteTick)
+        handler.removeCallbacks(settingsRefresh)
+        prefs.unregisterOnSharedPreferenceChangeListener(prefsListener)
+        session.isActive = false
+        session.release()
         super.onDestroy()
     }
 
-    private fun startRadio() {
-        mediaSession.isActive = true
-        updateRadioTrack()
-        setPlayingState()
-        scheduleNextMinuteUpdate()
+    private fun selectedPreset(): ClockPreset =
+        ClockSelectionStore.current(prefs)
+
+    private fun chooseFamily(family: ClockFamily) {
+        preset = ClockSelectionStore.forFamily(prefs, family)
+        prefs.edit().putString(ClockPreset.KEY_FAMILY, family.id).apply()
     }
 
-    private fun pauseRadio() {
-        handler.removeCallbacks(updateRunnable)
-        setPausedState()
+    private fun chooseFromMediaId(id: String?) {
+        val family = id?.removePrefix("family_")?.let(ClockFamily::fromId)
+        if (family != null) {
+            chooseFamily(family)
+        } else {
+            // Older Android Auto hosts may retain previous media IDs.
+            val selected = ClockPreset.fromId(id)
+            preset = selected
+            ClockSelectionStore.choose(prefs, selected)
+        }
     }
 
-    private fun updateRadioTrack() {
-        val now = LocalDateTime.now()
-        val timeText = now.format(timeFormatter)
-        val dateText = now.format(dateFormatter)
-        val weatherText = getWeatherText()
-        val title = when (activeMode) {
-            DisplayMode.CLOCK -> timeText
-            DisplayMode.WEATHER -> weatherText
-            DisplayMode.BOTH -> "$timeText • $weatherText"
-        }
-        val subtitle = when (activeMode) {
-            DisplayMode.CLOCK -> dateText
-            DisplayMode.WEATHER -> "Weather mode"
-            DisplayMode.BOTH -> dateText
-        }
-        val artworkUri = ClockArtworkProvider.artworkUri(activeMode.artworkMode, now)
+    private fun compactLayout(): Boolean =
+        prefs.getString(KEY_LAYOUT, "compact") != "standard"
 
-        val description = MediaDescriptionCompat.Builder()
-            .setMediaId(activeMode.mediaId)
-            .setTitle(title)
-            .setSubtitle(subtitle)
-            .setDescription(activeMode.stationTitle)
-            .setIconUri(artworkUri)
-            .build()
+    private fun animateProgress(): Boolean =
+        prefs.getBoolean(KEY_PROGRESS_ANIMATED, false)
 
-        mediaSession.setQueue(
-            listOf(MediaSessionCompat.QueueItem(description, activeMode.queueId))
+    private fun hideMediaText(): Boolean =
+        prefs.getBoolean(KEY_HIDE_MEDIA_TEXT, true)
+
+    private fun startClock() {
+        running = true
+        publishClock()
+        publishPlaybackState()
+        requestWeatherIfNecessary()
+        scheduleNextMinute()
+    }
+
+    private fun stopClock() {
+        running = false
+        handler.removeCallbacks(minuteTick)
+        publishPlaybackState()
+    }
+
+    private fun scheduleNextMinute() {
+        handler.removeCallbacks(minuteTick)
+        if (!running) return
+        handler.postDelayed(
+            minuteTick,
+            MinuteProgress.millisUntilNextMinute(System.currentTimeMillis())
         )
+    }
 
+    private fun requestWeatherIfNecessary() {
+        if (!running || !preset.usesWeather) return
+        // A successful response is delivered through the SharedPreferences
+        // listener; no separate per-second worker or polling is required.
+        WeatherStore.refreshIfDue(this)
+    }
+
+    private fun weatherRevision(): Long = WeatherStore.current(this)?.observedAtMs ?: 0L
+
+    private fun publishClock() {
+        val now = LocalDateTime.now()
+        val weather = if (preset.usesWeather) WeatherStore.current(this) else null
+        val temp = weather?.formattedTemperature ?: "--°C"
+        val description = weather?.description ?: "Няма данни"
+        val shortWeather = if (weather == null) "Няма данни" else
+            "${WeatherStore.symbol(weather.weatherCode, weather.isDay)} $temp"
+        val time = now.format(TIME_FORMAT)
+
+        val title = when (preset.family) {
+            ClockFamily.ANALOG ->
+                if (preset.hasDigitalTime) time
+                else if (preset.usesWeather) shortWeather
+                else "Аналогов часовник"
+            ClockFamily.DIGITAL -> time
+            ClockFamily.WEATHER -> shortWeather
+        }
+        val subtitle = when {
+            preset.family == ClockFamily.WEATHER && preset.hasDigitalTime ->
+                "$time • $description"
+            preset.usesWeather -> if (weather != null && weather.autoSelected)
+                "${weather.originLabel} · ${weather.sourceLabel}" else description
+            preset.hasDigitalTime -> now.format(DATE_FORMAT)
+            else -> preset.label
+        }
+        val artwork = ClockArtworkProvider.artworkUri(
+            preset.id, now, weather?.observedAtMs ?: 0L,
+            compactLayout(), artworkGeneration
+        )
+        val blank = hideMediaText()
+        val shownTitle = if (blank) INVISIBLE_TEXT else title
+        val shownSubtitle = if (blank) INVISIBLE_TEXT else subtitle
+        val shownDescription = if (blank) INVISIBLE_TEXT else preset.label
+        val shownAlbum = if (blank) INVISIBLE_TEXT else "Auto Clock 2"
+
+        val item = MediaDescriptionCompat.Builder()
+            .setMediaId(preset.id)
+            .setTitle(shownTitle)
+            .setSubtitle(shownSubtitle)
+            .setDescription(shownDescription)
+            .setIconUri(artwork)
+            .build()
+        session.setQueueTitle(shownAlbum)
+        session.setQueue(listOf(MediaSessionCompat.QueueItem(item, preset.queueId)))
+
+        // Provide a small direct bitmap as well as an URI, because some Android
+        // Auto versions keep the previous URI artwork while text changes live.
+        val art = ClockRenderer.render(
+            preset.id, now, weather?.weatherCode, weather?.isDay ?: true,
+            weather?.formattedTemperature, compactLayout(),
+            outputSize = 320, condition = description,
+            sourceLabel = weather?.artworkSource
+        )
         val metadata = MediaMetadataCompat.Builder()
-            .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, activeMode.mediaId)
-            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
-            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, subtitle)
-            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, "Auto Clock Radio")
-            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, title)
-            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, activeMode.stationTitle)
-            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_DESCRIPTION, subtitle)
-            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ART_URI, artworkUri.toString())
-            .putString(MediaMetadataCompat.METADATA_KEY_ART_URI, artworkUri.toString())
-            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON_URI, artworkUri.toString())
-            .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, ONE_MINUTE_MS)
-            .putLong(MediaMetadataCompat.METADATA_KEY_TRACK_NUMBER, now.minute.toLong() + 1L)
-            .putLong(MediaMetadataCompat.METADATA_KEY_NUM_TRACKS, 60L)
-            .build()
+            .putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, art)
+            .putBitmap(MediaMetadataCompat.METADATA_KEY_ART, art)
+            .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, preset.id)
+            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, shownTitle)
+            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, shownSubtitle)
+            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, shownAlbum)
+            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, shownTitle)
+            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, shownSubtitle)
+            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_DESCRIPTION, shownDescription)
+            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ART_URI, artwork.toString())
+            .putString(MediaMetadataCompat.METADATA_KEY_ART_URI, artwork.toString())
+            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON_URI, artwork.toString())
 
-        mediaSession.setMetadata(metadata)
-    }
-
-    private fun buildModeDescription(mode: DisplayMode, now: LocalDateTime): MediaDescriptionCompat {
-        val previewText = when (mode) {
-            DisplayMode.CLOCK -> now.format(timeFormatter)
-            DisplayMode.WEATHER -> getWeatherText()
-            DisplayMode.BOTH -> "${now.format(timeFormatter)} • ${getWeatherText()}"
+        if (animateProgress()) {
+            metadata.putLong(
+                MediaMetadataCompat.METADATA_KEY_DURATION,
+                MinuteProgress.DURATION_MS
+            )
         }
-
-        return MediaDescriptionCompat.Builder()
-            .setMediaId(mode.mediaId)
-            .setTitle(mode.stationTitle)
-            .setSubtitle(previewText)
-            .setDescription(mode.stationDescription)
-            .setIconUri(ClockArtworkProvider.artworkUri(mode.artworkMode, now))
-            .build()
+        session.setMetadata(metadata.build())
     }
 
-    private fun setPlayingState() {
-        mediaSession.setPlaybackState(
+    private fun publishPlaybackState() {
+        val moving = animateProgress()
+        val position = if (moving)
+            MinuteProgress.positionMs(System.currentTimeMillis())
+        else
+            PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN
+
+        val actions = PlaybackStateCompat.ACTION_PLAY or
+            PlaybackStateCompat.ACTION_PAUSE or
+            PlaybackStateCompat.ACTION_STOP or
+            PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID or
+            PlaybackStateCompat.ACTION_PLAY_FROM_SEARCH or
+            PlaybackStateCompat.ACTION_PREPARE_FROM_MEDIA_ID or
+            PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
+            PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS
+
+        session.setPlaybackState(
             PlaybackStateCompat.Builder()
-                .setState(PlaybackStateCompat.STATE_PLAYING, 0L, 1f)
-                .setActions(PLAYING_ACTIONS)
-                .setActiveQueueItemId(activeMode.queueId)
+                .setState(
+                    if (running) PlaybackStateCompat.STATE_PLAYING
+                    else PlaybackStateCompat.STATE_PAUSED,
+                    position,
+                    if (running && moving) 1f else 0f,
+                    SystemClock.elapsedRealtime()
+                )
+                .setActions(actions)
+                .setActiveQueueItemId(preset.queueId)
                 .build()
         )
-    }
-
-    private fun setPausedState() {
-        mediaSession.setPlaybackState(
-            PlaybackStateCompat.Builder()
-                .setState(PlaybackStateCompat.STATE_PAUSED, 0L, 0f)
-                .setActions(PAUSED_ACTIONS)
-                .setActiveQueueItemId(activeMode.queueId)
-                .build()
-        )
-    }
-
-    private fun scheduleNextMinuteUpdate() {
-        handler.removeCallbacks(updateRunnable)
-        val now = LocalDateTime.now()
-        val millisUntilNextMinute = ((60 - now.second) * 1000L) - (now.nano / 1_000_000L) + 250L
-        handler.postDelayed(updateRunnable, millisUntilNextMinute.coerceAtLeast(1_000L))
-    }
-
-    private fun getWeatherText(): String {
-        return "--°C"
-    }
-
-    private enum class DisplayMode(
-        val mediaId: String,
-        val stationTitle: String,
-        val stationDescription: String,
-        val artworkMode: String,
-        val queueId: Long
-    ) {
-        CLOCK(
-            mediaId = "station_clock",
-            stationTitle = "Clock",
-            stationDescription = "Show current time",
-            artworkMode = "clock",
-            queueId = 1L
-        ),
-        WEATHER(
-            mediaId = "station_weather",
-            stationTitle = "Weather",
-            stationDescription = "Show weather information",
-            artworkMode = "weather",
-            queueId = 2L
-        ),
-        BOTH(
-            mediaId = "station_clock_weather",
-            stationTitle = "Clock + Weather",
-            stationDescription = "Show time and weather together",
-            artworkMode = "both",
-            queueId = 3L
-        );
-
-        fun next(): DisplayMode {
-            val modes = entries
-            return modes[(ordinal + 1) % modes.size]
-        }
-
-        fun previous(): DisplayMode {
-            val modes = entries
-            return modes[(ordinal - 1 + modes.size) % modes.size]
-        }
-
-        companion object {
-            fun fromMediaId(mediaId: String?): DisplayMode {
-                return entries.firstOrNull { it.mediaId == mediaId } ?: CLOCK
-            }
-        }
     }
 
     companion object {
+        const val PREFERENCES = "clock_settings"
+        const val KEY_MODE = "display_mode"
+        const val KEY_HIDE_MEDIA_TEXT = "hide_media_text"
+        const val KEY_LAYOUT = "clock_layout"
+        const val KEY_PROGRESS_ANIMATED = "progress_animated"
+        private const val INVISIBLE_TEXT = "\u00A0"
         private const val ROOT_ID = "auto_clock_root"
-        private const val ONE_MINUTE_MS = 60_000L
-
-        private const val PAUSED_ACTIONS =
-            PlaybackStateCompat.ACTION_PLAY or
-                PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID or
-                PlaybackStateCompat.ACTION_PREPARE_FROM_MEDIA_ID
-
-        private const val PLAYING_ACTIONS =
-            PlaybackStateCompat.ACTION_PLAY or
-                PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID or
-                PlaybackStateCompat.ACTION_PREPARE_FROM_MEDIA_ID or
-                PlaybackStateCompat.ACTION_PAUSE or
-                PlaybackStateCompat.ACTION_STOP or
-                PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
-                PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS
+        private val TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm", Locale("bg", "BG"))
+        private val DATE_FORMAT = DateTimeFormatter.ofPattern("EEEE, dd.MM.yyyy", Locale("bg", "BG"))
     }
 }
