@@ -1,6 +1,7 @@
 package com.kotarov.autoclock.weather
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WeatherStoreTest {
@@ -22,8 +23,8 @@ class WeatherStoreTest {
         val cities = WeatherStore.City.entries
         assertEquals(cities.size, cities.map { it.id }.toSet().size)
         cities.forEach {
-            assert(it.lat in -90.0..90.0)
-            assert(it.lon in -180.0..180.0)
+            assertTrue(it.lat in -90.0..90.0)
+            assertTrue(it.lon in -180.0..180.0)
         }
     }
 }
