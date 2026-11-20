@@ -29,6 +29,10 @@ object ClockRenderer {
     private const val STANDARD_ANALOG_CENTER_Y = 204f
     private const val COMPACT_RADIUS = 96f
     private const val STANDARD_RADIUS = 122f
+    // Shared weather geometry in both analogue variants. The optional time
+    // label must never cause the forecast to jump or resize.
+    private const val ANALOG_WEATHER_Y_OFFSET = 47f
+    private const val ANALOG_WEATHER_TEXT_SIZE = 29f
     private val timeFormat = DateTimeFormatter.ofPattern("HH:mm")
     private val white = Color.rgb(255, 255, 255)
     private val pale = Color.rgb(224, 239, 247)
@@ -68,15 +72,17 @@ object ClockRenderer {
                     preset.hasDigitalTime && preset.usesWeather -> {
                         drawText(canvas, time.format(timeFormat), CENTER_X,
                             clockY - 24f * unit, 46f * unit, white, unit)
-                        drawWeatherRow(canvas, CENTER_X, clockY + 47f * unit,
-                            weatherCode, isDay, temperature, 29f * unit, unit)
+                        drawWeatherRow(canvas, CENTER_X, clockY + ANALOG_WEATHER_Y_OFFSET * unit,
+                            weatherCode, isDay, temperature,
+                            ANALOG_WEATHER_TEXT_SIZE * unit, unit)
                     }
                     preset.hasDigitalTime ->
                         drawText(canvas, time.format(timeFormat), CENTER_X,
                             clockY, 46f * unit, white, unit)
                     preset.usesWeather ->
-                        drawWeatherRow(canvas, CENTER_X, clockY + 22f * unit,
-                            weatherCode, isDay, temperature, 45f * unit, unit)
+                        drawWeatherRow(canvas, CENTER_X, clockY + ANALOG_WEATHER_Y_OFFSET * unit,
+                            weatherCode, isDay, temperature,
+                            ANALOG_WEATHER_TEXT_SIZE * unit, unit)
                     // Pure analog: hands and markings, no digital text.
                 }
             }
