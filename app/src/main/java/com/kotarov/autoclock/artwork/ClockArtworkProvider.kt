@@ -45,15 +45,12 @@ class ClockArtworkProvider : ContentProvider() {
         }
         val weatherRevision = uri.getQueryParameter("rev")?.toLongOrNull()?.coerceAtLeast(0L) ?: 0L
         // v5 is a new visual design; never reuse an old image cached by v0.4.
-        val destination = File(directory, "v5-$clockMode-$key-$weatherRevision.png")
+        val destination = File(directory, "v6-$clockMode-$key-$weatherRevision.png")
 
         synchronized(lock) {
             if (!destination.isFile || destination.length() == 0L) {
                 val temp = File(directory, "inflight-${System.nanoTime()}.tmp")
-                val showWeather = appContext.getSharedPreferences(
-                    WeatherStore.PREFS, android.content.Context.MODE_PRIVATE
-                ).getBoolean("show_weather_overlay", true)
-                val weather = if (showWeather || clockMode == "weather" || clockMode == "both") {
+                val weather = if (clockMode == "weather" || clockMode == "both") {
                     WeatherStore.current(appContext)
                 } else null
                 val bitmap = ClockRenderer.render(
@@ -119,7 +116,7 @@ class ClockArtworkProvider : ContentProvider() {
             .appendPath(mode)
             .appendPath("clock_${now.format(KEY_FORMAT)}.png")
             .appendQueryParameter("rev", weatherRevision.coerceAtLeast(0L).toString())
-            .appendQueryParameter("style", "v5")
+            .appendQueryParameter("style", "v6")
             .build()
     }
 }
