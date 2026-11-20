@@ -5,6 +5,7 @@ import android.graphics.Color
 import android.os.Bundle
 import android.view.View
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.RadioButton
@@ -83,6 +84,41 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(modeGroup)
 
+        val cleanText = CheckBox(this).apply {
+            text = "Само фон — скрий надписите за песента"
+            textSize = 17f
+            setTextColor(light)
+            isChecked = prefs.getBoolean(AutoClockMediaService.KEY_HIDE_MEDIA_TEXT, true)
+            setOnCheckedChangeListener { _, checked ->
+                prefs.edit()
+                    .putBoolean(AutoClockMediaService.KEY_HIDE_MEDIA_TEXT, checked)
+                    .apply()
+            }
+        }
+        root.addView(cleanText)
+        root.addView(label(
+            "Експериментално: Android Auto може да запази системните бутони " +
+                "или да покаже заместващ надпис. Не можем да изключим неговия " +
+                "медиен интерфейс от приложението.",
+            13f, muted, dp(10)
+        ))
+
+        val weatherOverlay = CheckBox(this).apply {
+            text = "Иконка и температура върху аналоговия циферблат"
+            textSize = 17f
+            setTextColor(light)
+            isChecked = prefs.getBoolean(
+                AutoClockMediaService.KEY_SHOW_WEATHER_OVERLAY, true
+            )
+            setOnCheckedChangeListener { _, checked ->
+                prefs.edit()
+                    .putBoolean(AutoClockMediaService.KEY_SHOW_WEATHER_OVERLAY, checked)
+                    .apply()
+                updatePreview()
+            }
+        }
+        root.addView(weatherOverlay)
+
         root.addView(label("Град за прогнозата", 21f, light, dp(7)))
         root.addView(label(
             "Изборът на град спестява постоянно използване на GPS.",
@@ -138,7 +174,7 @@ class MainActivity : AppCompatActivity() {
         ))
         root.addView(label(
             "Икономичен режим: часовникът се обновява веднъж в минута; " +
-                "прогнозата — най-много веднъж на час при активен режим за времето. " +
+                "прогнозата — най-много веднъж на час, когато се показва върху часовника. " +
                 "Няма GPS следене, аудио поток или непрекъсната фонова задача.",
             14f, muted, dp(12)
         ))
@@ -190,11 +226,15 @@ class MainActivity : AppCompatActivity() {
             AutoClockMediaService.PREFERENCES, MODE_PRIVATE
         ).getString(AutoClockMediaService.KEY_MODE, "digital")
         val mode = if (key == "digital") "clock" else key ?: "clock"
-        val weather = WeatherStore.current(this)
+        val showWeather = (mode == "weather" || mode == "both") ||
+            getSharedPreferences(AutoClockMediaService.PREFERENCES, MODE_PRIVATE)
+                .getBoolean(AutoClockMediaService.KEY_SHOW_WEATHER_OVERLAY, true)
+        val weather = if (showWeather) WeatherStore.current(this) else null
         val image = ClockRenderer.render(
             mode, LocalDateTime.now(),
             weather?.weatherCode,
-            weather?.isDay ?: true
+            weather?.isDay ?: true,
+            weather?.formattedTemperature
         )
         preview.setImageBitmap(image)
         previewBitmap?.recycle()
