@@ -99,7 +99,7 @@ class ClockArtworkProvider : ContentProvider() {
     override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?): Int = 0
 
     companion object {
-        const val AUTHORITY = "com.kotarov.autoclock.artwork"
+        const val AUTHORITY = "com.kotarov.autoclock2.artwork"
         private const val MAX_FILES = 6
         private val VALID_MODES = setOf("clock", "analog", "weather", "both")
         private val KEY_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd_HHmm")
