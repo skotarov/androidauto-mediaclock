@@ -20,15 +20,15 @@ object ClockRenderer {
     private val timeFormat = DateTimeFormatter.ofPattern("HH:mm", Locale("bg", "BG"))
     private val dateFormat = DateTimeFormatter.ofPattern("dd.MM.yyyy", Locale("bg", "BG"))
 
-    fun render(mode: String, time: LocalDateTime): Bitmap {
+    fun render(mode: String, time: LocalDateTime, temperature: String = "--°C", condition: String = "Няма данни"): Bitmap {
         val bitmap = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.RGB_565)
         val canvas = Canvas(bitmap)
         canvas.drawColor(Color.rgb(10, 10, 12))
 
         when (mode) {
             "analog" -> drawAnalog(canvas, time)
-            "weather" -> drawWeather(canvas, time)
-            "both" -> drawDigital(canvas, time, withWeather = true)
+            "weather" -> drawWeather(canvas, time, temperature, condition)
+            "both" -> drawDigital(canvas, time, withWeather = true, temperature = temperature, condition = condition)
             else -> drawDigital(canvas, time, withWeather = false)
         }
         return bitmap
@@ -45,19 +45,20 @@ object ClockRenderer {
             )
         }
 
-    private fun drawDigital(canvas: Canvas, now: LocalDateTime, withWeather: Boolean) {
+    private fun drawDigital(canvas: Canvas, now: LocalDateTime, withWeather: Boolean, temperature: String = "--°C", condition: String = "Няма данни") {
         canvas.drawText(now.format(timeFormat), 256f, 245f, paint(114f, bold = true))
         if (withWeather) {
-            canvas.drawText("--°C", 256f, 322f, paint(56f, Color.LTGRAY))
+            canvas.drawText(temperature, 256f, 323f, paint(65f, Color.LTGRAY))
+            canvas.drawText(condition, 256f, 376f, paint(28f, Color.LTGRAY))
         } else {
             canvas.drawText(now.format(dateFormat), 256f, 320f, paint(37f, Color.LTGRAY))
         }
         canvas.drawText("AUTO CLOCK", 256f, 430f, paint(23f, Color.GRAY))
     }
 
-    private fun drawWeather(canvas: Canvas, now: LocalDateTime) {
-        canvas.drawText("--°C", 256f, 245f, paint(110f, bold = true))
-        canvas.drawText("НЯМА ДАННИ", 256f, 313f, paint(30f, Color.LTGRAY))
+    private fun drawWeather(canvas: Canvas, now: LocalDateTime, temperature: String, condition: String) {
+        canvas.drawText(temperature, 256f, 245f, paint(110f, bold = true))
+        canvas.drawText(condition, 256f, 313f, paint(30f, Color.LTGRAY))
         canvas.drawText(now.format(timeFormat), 256f, 423f, paint(35f, Color.GRAY))
     }
 
