@@ -17,6 +17,7 @@ import com.kotarov.autoclock.artwork.ClockRenderer
 import com.kotarov.autoclock.media.AutoClockMediaService
 import com.kotarov.autoclock.media.ClockFamily
 import com.kotarov.autoclock.media.ClockPreset
+import com.kotarov.autoclock.media.ClockSelectionStore
 import com.kotarov.autoclock.weather.WeatherStore
 import java.text.SimpleDateFormat
 import java.time.LocalDateTime
@@ -42,14 +43,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         val prefs = getSharedPreferences(AutoClockMediaService.PREFERENCES, MODE_PRIVATE)
 
-        // Migrate v0.9's flat modes without surprising anyone on upgrade.
-        if (!prefs.contains(ClockPreset.KEY_FAMILY)) {
-            val old = ClockPreset.fromId(prefs.getString(AutoClockMediaService.KEY_MODE, "analog"))
-            prefs.edit()
-                .putString(ClockPreset.KEY_FAMILY, old.family.id)
-                .putString(ClockPreset.detailKey(old.family), old.detail)
-                .apply()
-        }
+        ClockSelectionStore.migrateIfNeeded(prefs)
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -87,14 +81,14 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(mainGroup)
 
-        root.addView(label("2. Какво да се добави", 21f, light, dp(7)))
+        root.addView(label("2. Добави към избраната визия", 21f, light, dp(7)))
         optionsContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
         }
         root.addView(optionsContainer)
         root.addView(label(
-            "При цифровия часовник водещ е часът, а при „Времето“ " +
-                "водещи са градусите и метеорологичната иконка.",
+            "Без отметка — само основната визия. Можеш да включиш " +
+                "една или две добавки едновременно.",
             14f, muted, dp(18)
         ))
 
@@ -191,9 +185,9 @@ class MainActivity : AppCompatActivity() {
         root.addView(refresh)
 
         root.addView(label(
-            "В Android Auto можеш да избираш и седемте готови комбинации " +
-                "директно от мултимедийното меню. Часовникът се обновява веднъж " +
-                "на минута; метеорологичната прогноза — най-много веднъж на час.",
+            "В Android Auto избираш една от трите основни визии. " +
+                "Отметките за всяка се запазват поотделно. Часовникът " +
+                "се обновява веднъж в минута, прогнозата — най-много веднъж на час.",
             14f, muted, dp(8)
         ))
         root.addView(label("Данни за времето: Open-Meteo.com", 13f, Color.GRAY, dp(4)))
@@ -203,48 +197,38 @@ class MainActivity : AppCompatActivity() {
         requestWeatherForPreview()
     }
 
-    private fun currentPreset(): ClockPreset {
-        val prefs = getSharedPreferences(AutoClockMediaService.PREFERENCES, MODE_PRIVATE)
-        return ClockPreset.selected(
-            prefs.getString(ClockPreset.KEY_FAMILY, null),
-            prefs.getString(ClockPreset.KEY_ANALOG_DETAIL, null),
-            prefs.getString(ClockPreset.KEY_DIGITAL_DETAIL, null),
-            prefs.getString(ClockPreset.KEY_WEATHER_DETAIL, null),
-            prefs.getString(AutoClockMediaService.KEY_MODE, "analog")
+    private fun currentPreset(): ClockPreset =
+        ClockSelectionStore.current(
+            getSharedPreferences(AutoClockMediaService.PREFERENCES, MODE_PRIVATE)
         )
-    }
 
+    /**
+     * The only radio group is for choosing the primary style. Additional
+     * features are two independent checkboxes. Clearing both always gives
+     * the pure selected style.
+     */
     private fun updateVariantOptions(family: ClockFamily) {
         optionsContainer.removeAllViews()
         val prefs = getSharedPreferences(AutoClockMediaService.PREFERENCES, MODE_PRIVATE)
-        val selected = currentPreset()
-        val group = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
-        val ids = mutableMapOf<Int, ClockPreset>()
-        for (option in ClockPreset.options(family)) {
-            val radio = radio(when (option) {
-                ClockPreset.ANALOG_TIME -> "Показване на цифров час"
-                ClockPreset.ANALOG_TIME_WEATHER -> "Час + време"
-                ClockPreset.ANALOG_WEATHER -> "Само времето (с аналогов фон)"
-                ClockPreset.DIGITAL_TIME -> "Само цифров час"
-                ClockPreset.DIGITAL_TIME_WEATHER -> "Цифров час + време"
-                ClockPreset.WEATHER_ONLY -> "Само прогнозата — големи градуси"
-                ClockPreset.WEATHER_WITH_TIME -> "Прогноза + по-малък цифров час"
-            })
-            ids[radio.id] = option
-            group.addView(radio)
-            if (option == selected) group.check(radio.id)
+        val firstLabel = when (family) {
+            ClockFamily.ANALOG -> "Добави цифров час"
+            ClockFamily.DIGITAL -> "Добави аналогов часовник"
+            ClockFamily.WEATHER -> "Добави аналогов часовник"
         }
-        group.setOnCheckedChangeListener { _, id ->
-            ids[id]?.let { option ->
-                prefs.edit()
-                    .putString(ClockPreset.KEY_FAMILY, option.family.id)
-                    .putString(ClockPreset.detailKey(option.family), option.detail)
-                    .apply()
+        val secondLabel = when (family) {
+            ClockFamily.ANALOG, ClockFamily.DIGITAL -> "Добави времето"
+            ClockFamily.WEATHER -> "Добави цифров час"
+        }
+        fun addCheckbox(label: String, key: String) {
+            val box = checkOption(label, prefs.getBoolean(key, false)) { checked ->
+                prefs.edit().putBoolean(key, checked).apply()
                 updatePreview()
                 requestWeatherForPreview()
             }
+            optionsContainer.addView(box)
         }
-        optionsContainer.addView(group)
+        addCheckbox(firstLabel, ClockPreset.firstKey(family))
+        addCheckbox(secondLabel, ClockPreset.secondKey(family))
     }
 
     private fun requestWeatherForPreview() {
