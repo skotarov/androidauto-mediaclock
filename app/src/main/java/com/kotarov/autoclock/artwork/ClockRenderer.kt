@@ -29,9 +29,11 @@ object ClockRenderer {
     private const val STANDARD_ANALOG_CENTER_Y = 204f
     private const val COMPACT_RADIUS = 96f
     private const val STANDARD_RADIUS = 122f
-    // Shared weather geometry in both analogue variants. The optional time
-    // label must never cause the forecast to jump or resize.
-    private const val ANALOG_WEATHER_Y_OFFSET = 39f
+    // Keep the analog forecast at the same size and vertical position with
+    // or without the optional digital HH:mm. Compact / standard use slightly
+    // different offsets to match the size of the dial in Android Auto.
+    private const val COMPACT_ANALOG_WEATHER_Y_OFFSET = 30f
+    private const val STANDARD_ANALOG_WEATHER_Y_OFFSET = 34f
     private const val ANALOG_WEATHER_TEXT_SIZE = 29f
     private val timeFormat = DateTimeFormatter.ofPattern("HH:mm")
     private val white = Color.rgb(255, 255, 255)
@@ -62,6 +64,8 @@ object ClockRenderer {
         val clockY = if (preset.hasAnalog) {
             if (compact) COMPACT_ANALOG_CENTER_Y else STANDARD_ANALOG_CENTER_Y
         } else CONTENT_CENTER_Y
+        val analogWeatherOffset = if (compact)
+            COMPACT_ANALOG_WEATHER_Y_OFFSET else STANDARD_ANALOG_WEATHER_Y_OFFSET
 
         // The primary style establishes the visual hierarchy. Add-ons are
         // independent: no checkboxes means no secondary information at all.
@@ -73,7 +77,7 @@ object ClockRenderer {
                     preset.hasDigitalTime && preset.usesWeather -> {
                         drawText(canvas, time.format(timeFormat), CENTER_X,
                             clockY - 24f * unit, 46f * unit, white, unit)
-                        drawWeatherRow(canvas, CENTER_X, clockY + ANALOG_WEATHER_Y_OFFSET * unit,
+                        drawWeatherRow(canvas, CENTER_X, clockY + analogWeatherOffset * unit,
                             weatherCode, isDay, temperature,
                             ANALOG_WEATHER_TEXT_SIZE * unit, unit)
                     }
@@ -81,7 +85,7 @@ object ClockRenderer {
                         drawText(canvas, time.format(timeFormat), CENTER_X,
                             clockY, 46f * unit, white, unit)
                     preset.usesWeather ->
-                        drawWeatherRow(canvas, CENTER_X, clockY + ANALOG_WEATHER_Y_OFFSET * unit,
+                        drawWeatherRow(canvas, CENTER_X, clockY + analogWeatherOffset * unit,
                             weatherCode, isDay, temperature,
                             ANALOG_WEATHER_TEXT_SIZE * unit, unit)
                     // For compatibility, basic analog always includes HH:mm.
@@ -132,32 +136,41 @@ object ClockRenderer {
             }
         }
         if (preset.usesWeather && !sourceLabel.isNullOrBlank()) {
-            // Source must be visible in Auto even when Android Auto hides
-            // the media title/artist metadata. Draw below the main values.
-            drawSourceLabel(
-                canvas,
-                sourceLabel,
-                CENTER_X,
-                if (preset.hasAnalog) clockY + 94f * unit
-                else CONTENT_CENTER_Y + 118f * unit,
-                unit
-            )
+            // Position the observation/source name immediately BELOW the ring.
+            // The baseline is computed from each dial's actual bottom edge,
+            // not from a fixed offset from the centre.
+            val sourceY = if (preset.hasAnalog) {
+                val gap = if (compact) 18f * unit else 16f * unit
+                clockY + radius + gap
+            } else CONTENT_CENTER_Y + 118f * unit
+
+            val maxWidth = if (preset.hasAnalog)
+                radius * 2f + 40f * unit
+            else 390f
+
+            drawSourceLabel(canvas, sourceLabel, CENTER_X, sourceY, unit, maxWidth)
         }
         return bitmap
     }
 
     private fun drawSourceLabel(
-        canvas: Canvas, value: String, x: Float, y: Float, unit: Float
+        canvas: Canvas,
+        value: String,
+        x: Float,
+        y: Float,
+        unit: Float,
+        maxWidth: Float
     ) {
+        val baseSize = 22f * unit
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = pale
             textAlign = Paint.Align.CENTER
-            textSize = 22f * unit
+            textSize = baseSize
             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
         }
         val width = paint.measureText(value)
-        val scale = minOf(1f, 400f / width)
-        drawText(canvas, value, x, y, 22f * unit * scale, pale, unit)
+        val scale = if (width > 0f) minOf(1f, maxWidth / width) else 1f
+        drawText(canvas, value, x, y, baseSize * scale, pale, unit)
     }
 
     private fun stroke(color: Int, thickness: Float): Paint =
