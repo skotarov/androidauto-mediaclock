@@ -11,7 +11,21 @@ media card next to navigation, not a replacement for a real audio player.
 > guaranteed supported API for a general-purpose custom clock in the media
 > card. Not intended for Play Store publication as a music app.
 
-## Features (v0.8)
+## Features (v0.9)
+
+- **Digital-only now works:** choosing "Цифров часовник — без стрелки"
+  renders a large HH:mm and local date with **no analog hands or dial**.
+- **HH:mm typography is identical in analog and weather layouts** for a
+  selected dial radius. The time never shrinks when conditions are displayed.
+- Weather vector icon and temperature share one horizontally centred row
+  directly below the time, with an optical centreline to avoid offset icons.
+- Increased text-only blue glow; still no weather/time boxes or borders.
+- Live phone display changes additionally publish a small (320×320 RGB_565)
+  artwork bitmap in playing-item metadata, plus a distinct URI generation,
+  to work around hosts that cache the same URI. This is best-effort and must
+  be verified on the actual Android Auto dashboard. Direct artwork adds about
+  200 KiB per frame and changes only on minute boundaries or settings updates.
+
 
 - All modes use an analog face with clean **HH:mm text and a subtle glyph shadow**.
   There is no rectangle, badge, padding block or border behind the time.
@@ -38,7 +52,7 @@ Weather uses [Open-Meteo](https://open-meteo.com/) data with attribution,
 no API key for permitted non-commercial use. Network is only needed for
 weather; the clock works without a connection.
 
-## Minute progress bar (v0.8)
+## Minute progress bar (v0.9)
 
 The media "track" is a virtual 60-second minute, not real sound playback.
 The service now sends `MediaMetadataCompat.METADATA_KEY_DURATION = 60_000`
@@ -92,11 +106,11 @@ itself is controlled by Android Auto, not by the phone app. Android Auto does no
 ## Install the APK
 
 The latest beta APK is published as
-[AutoClock-2-v0.8-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.8.0-beta)
+[AutoClock-2-v0.9-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.9.0-beta)
 from GitHub Releases after tests pass.
 
-1. Open the public **Releases** page and choose **v0.8.0-beta**.
-2. Under **Assets**, tap **AutoClock-2-v0.8-beta.apk** (not the source ZIP).
+1. Open the public **Releases** page and choose **v0.9.0-beta**.
+2. Under **Assets**, tap **AutoClock-2-v0.9-beta.apk** (not the source ZIP).
 3. Install on the Android phone connected to the car, allowing installation
    from the browser/files app if Android requests permission.
 4. Open Auto Clock 2 on the phone and select the mode and weather city.
@@ -106,6 +120,10 @@ from GitHub Releases after tests pass.
    if needed; return to navigation/split-screen mode.
 
 ### Testing checklist
+- [ ] Digital-only mode shows no analog dial or hands on phone and Android Auto
+- [ ] Weather-on / weather-off leaves HH:mm font size unchanged
+- [ ] Weather glyph and temperature are aligned on the same second line
+- [ ] Switch Compact ↔ Standard while Android Auto is open and check artwork redraw
 
 - [ ] Switching Compact and Standard on the phone updates Android Auto without waiting for a minute
 - [ ] HH:mm has no box or border, only a subtle shadow
