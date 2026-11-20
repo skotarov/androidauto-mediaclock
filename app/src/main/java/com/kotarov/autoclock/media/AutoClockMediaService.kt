@@ -186,7 +186,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private fun publishClock() {
         val now = LocalDateTime.now()
         val weather = if (mode.usesWeather) WeatherStore.current(this) else null
-        val weatherText = weather?.formattedTemperature ?: "--°C"
+        val weatherLabel = if (weather == null) "Няма данни"
+        else "${WeatherStore.symbol(weather.weatherCode, weather.isDay)} ${weather.formattedTemperature}"
         val weatherDescription = weather?.description ?: "Няма данни"
         val city = WeatherStore.city(this).label
         val time = now.format(TIME_FORMAT)
@@ -194,8 +195,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
         val title = when (mode) {
             Mode.DIGITAL, Mode.ANALOG -> time
-            Mode.WEATHER -> weatherText
-            Mode.BOTH -> "$time • $weatherText"
+            Mode.WEATHER -> weatherLabel
+            Mode.BOTH -> if (weather == null) time else "$time • $weatherLabel"
         }
         val subtitle = when (mode) {
             Mode.WEATHER, Mode.BOTH -> "$city • $weatherDescription"
