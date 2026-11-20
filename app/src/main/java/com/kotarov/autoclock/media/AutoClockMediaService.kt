@@ -127,7 +127,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 .setIconUri(
                     ClockArtworkProvider.artworkUri(
                         option.artwork, now,
-                        if (option.usesWeather || showWeatherOverlay()) revision else 0L
+                        if (option.usesWeather) revision else 0L
                     )
                 )
                 .build()
@@ -179,15 +179,12 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         handler.postDelayed(minuteTick, 60_000L - now % 60_000L + 150L)
     }
 
-    private fun showWeatherOverlay(): Boolean =
-        getSharedPreferences(PREFERENCES, MODE_PRIVATE)
-            .getBoolean(KEY_SHOW_WEATHER_OVERLAY, true)
-
-    private fun hideMediaText(): Boolean =
+        private fun hideMediaText(): Boolean =
         getSharedPreferences(PREFERENCES, MODE_PRIVATE)
             .getBoolean(KEY_HIDE_MEDIA_TEXT, true)
 
-    private fun wantsWeather(): Boolean = mode.usesWeather || showWeatherOverlay()
+    // Pure analog is always weather-free; only explicit weather modes fetch data.
+    private fun wantsWeather(): Boolean = mode.usesWeather
 
     private fun requestWeatherIfNecessary() {
         if (!running || !wantsWeather()) return
@@ -303,7 +300,6 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         const val PREFERENCES = "clock_settings"
         const val KEY_MODE = "display_mode"
         const val KEY_HIDE_MEDIA_TEXT = "hide_media_text"
-        const val KEY_SHOW_WEATHER_OVERLAY = "show_weather_overlay"
         private const val INVISIBLE_TEXT = "\u00A0"
         private const val ROOT_ID = "auto_clock_root"
         private val TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm", Locale("bg", "BG"))
