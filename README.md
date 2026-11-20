@@ -11,76 +11,47 @@ media card next to navigation, not a replacement for a real audio player.
 > guaranteed supported API for a general-purpose custom clock in the media
 > card. Not intended for Play Store publication as a music app.
 
-## Features (v0.9)
+## Three primary visual styles (v0.10)
 
-- **Digital-only now works:** choosing "Цифров часовник — без стрелки"
-  renders a large HH:mm and local date with **no analog hands or dial**.
-- **HH:mm typography is identical in analog and weather layouts** for a
-  selected dial radius. The time never shrinks when conditions are displayed.
-- Weather vector icon and temperature share one horizontally centred row
-  directly below the time, with an optical centreline to avoid offset icons.
-- Increased text-only blue glow; still no weather/time boxes or borders.
-- Live phone display changes additionally publish a small (320×320 RGB_565)
-  artwork bitmap in playing-item metadata, plus a distinct URI generation,
-  to work around hosts that cache the same URI. This is best-effort and must
-  be verified on the actual Android Auto dashboard. Direct artwork adds about
-  200 KiB per frame and changes only on minute boundaries or settings updates.
+Select **one main visual style**, then its corresponding additional information.
+Settings keep the last detail option for each main style independently.
 
+| Main style | Details | Emphasis |
+| --- | --- | --- |
+| Analog clock | Digital time | Analog hands + prominent HH:mm |
+| Analog clock | Digital time and weather | Analog hands, HH:mm and smaller forecast |
+| Analog clock | Weather only | Analog hands with prominent weather, no digital HH:mm |
+| Digital clock | Time only | Large HH:mm with smaller date |
+| Digital clock | Time + weather | Large HH:mm with smaller weather underneath |
+| Weather | Weather only | Large weather symbol, temperature and condition |
+| Weather | Weather + digital time | Large weather symbol and temperature with smaller HH:mm underneath |
 
-- All modes use an analog face with clean **HH:mm text and a subtle glyph shadow**.
-  There is no rectangle, badge, padding block or border behind the time.
-- Weather and Clock + Weather modes show a weather **vector symbol and temperature
-  on the second line directly below HH:mm, inside the analog clock face**.
-  Pure analog clock mode does not fetch or display weather.
-- Phone-side clock-size setting:
-  - **Compact** (default) uses dial radius 96 px and centre (256, 196).
-  - **Standard** uses radius 122 px and the same centre.
-  - Android Auto does not reliably report its split/full media-card dimensions,
-    so Compact is the conservative layout for the small card.
-- **Moving progress bar** phone switch (default on). Off: no duration is
-  supplied and the playback-state position is unknown with zero speed.
-  Android Auto may keep its own non-moving progress decoration.
-- Phone changes to mode, city, size, text visibility or progress behavior are
-  **applied immediately to the active media session** through a debounced
-  SharedPreferences listener (without waiting for the next minute).
-  Artwork URIs include layout-specific cache keys; browser contents are refreshed.
-- The media artwork and minute alignment continue to update only once per minute.
-- Weather data via Open-Meteo, hourly only when a weather mode is active.
-- Settings preview, city selection, manual forecast refresh.
+The main weather style reverses the hierarchy of Digital + Weather:
+the forecast becomes the focal point, not the clock.
 
-Weather uses [Open-Meteo](https://open-meteo.com/) data with attribution,
-no API key for permitted non-commercial use. Network is only needed for
-weather; the clock works without a connection.
+The Android Auto media browser shows all seven choices. Changes on the
+phone update the live media session via a debounced SharedPreferences
+listener; the car still controls how quickly artwork is redrawn.
+Compact/standard layout, clean media text and animated/static playback
+progress retain their previous settings.
 
-## Minute progress bar (v0.9)
+Bitmap rendering: 512×512 RGB_565 for content-provider artwork and a
+small 320×320 RGB_565 direct media bitmap for display-change updates.
+The analog dial is positioned above the native Android Auto controls.
+No continuous frame-by-frame rendering is used.
 
-The media "track" is a virtual 60-second minute, not real sound playback.
-The service now sends `MediaMetadataCompat.METADATA_KEY_DURATION = 60_000`
-and sets `PlaybackStateCompat.position = System.currentTimeMillis() % 60_000`
-with playback speed 1.0 and a monotonic timestamp.
+Weather uses [Open-Meteo](https://open-meteo.com/) for permitted
+non-commercial use. Its city is selected on the phone: there is no GPS
+permission or continuous location service. Forecasts are fetched only
+when a selected mode requires weather, no more than hourly while active.
 
-For example, if Auto Clock is started at 15:36:24 it publishes 24 seconds /
-60 seconds (40%) immediately; it does **not** start at 0. On the next minute,
-it sends a fresh position near the beginning of the new minute. The normal
-artwork update and playback-state update are aligned to the same minute timer.
-No wakeups are added between minute boundaries.
+## Minute progress bar
 
-If "Движение на прогрес бара" is switched off on the phone, the
-metadata no longer contains a duration and the playback state reports
-unknown position with speed zero.
-
-**Android Auto limitation:** The host owns the progress bar. The state and
-duration give it the information needed to extrapolate progress, but it may
-choose not to show or animate the bar for an audio-less media session.
-
-## Phone settings and Android Auto updates
-
-Open Auto Clock 2 on the phone, while Android Auto is running. Changing the
-display mode, compact/standard dial, moving progress, clean media-label setting,
-or weather city updates the bound Auto Clock media service at once. An Android
-Auto host may still cache album art or delay repainting its view; in such cases
-return to the app in Android Auto. This project cannot control the native
-transport controls or detect the media panel's size with certainty.
+The media "track" is a virtual 60-second minute. At HH:mm:24 the app
+publishes a position of 24 seconds in a 60-second duration and speed 1×.
+The next minute resets it. There are no per-second wakeups. Turn off
+**Движение на прогрес бара** to omit the duration and report no advancing
+position. Android Auto may still draw its own static bar.
 
 ## Battery and memory strategy
 
@@ -106,11 +77,11 @@ itself is controlled by Android Auto, not by the phone app. Android Auto does no
 ## Install the APK
 
 The latest beta APK is published as
-[AutoClock-2-v0.9-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.9.0-beta)
+[AutoClock-2-v0.10-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.10.0-beta)
 from GitHub Releases after tests pass.
 
-1. Open the public **Releases** page and choose **v0.9.0-beta**.
-2. Under **Assets**, tap **AutoClock-2-v0.9-beta.apk** (not the source ZIP).
+1. Open the public **Releases** page and choose **v0.10.0-beta**.
+2. Under **Assets**, tap **AutoClock-2-v0.10-beta.apk** (not the source ZIP).
 3. Install on the Android phone connected to the car, allowing installation
    from the browser/files app if Android requests permission.
 4. Open Auto Clock 2 on the phone and select the mode and weather city.
@@ -120,6 +91,14 @@ from GitHub Releases after tests pass.
    if needed; return to navigation/split-screen mode.
 
 ### Testing checklist
+
+- [ ] Select each of the three main visuals, then every detail option (3 + 2 + 2)
+- [ ] Weather-first text and icon are clearly larger than its optional digital time
+- [ ] Digital-first HH:mm is larger than its accompanying forecast
+- [ ] Analog weather-only has hands and weather, but no printed digital time
+- [ ] Switching the primary view restores its independently saved detail choice
+- [ ] Existing v0.9 settings migrate without resetting chosen layout
+
 - [ ] Digital-only mode shows no analog dial or hands on phone and Android Auto
 - [ ] Weather-on / weather-off leaves HH:mm font size unchanged
 - [ ] Weather glyph and temperature are aligned on the same second line
