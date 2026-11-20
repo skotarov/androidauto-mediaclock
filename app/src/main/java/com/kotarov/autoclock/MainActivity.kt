@@ -270,7 +270,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun requestWeatherForPreview(force: Boolean = false) {
-        if (!currentPreset().usesWeather) return
+        if (!currentPreset().usesWeather && !force) return
         if (WeatherStore.isAuto(this) && !WeatherLocation.permitted(this)) {
             updateWeatherStatus()
             return
