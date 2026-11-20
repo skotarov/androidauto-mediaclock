@@ -91,7 +91,9 @@ object ClockSelectionStore {
         val family = preset.family
         prefs.edit()
             .putString(ClockPreset.KEY_FAMILY, family.id)
-            .putBoolean(ClockPreset.KEY_ANALOG_ADD_DIGITAL, preset.hasDigitalTime)
+            .putBoolean(ClockPreset.KEY_ANALOG_ADD_DIGITAL,
+                if (family == ClockFamily.ANALOG) preset.hasDigitalTime
+                else prefs.getBoolean(ClockPreset.KEY_ANALOG_ADD_DIGITAL, true))
             .putBoolean(ClockPreset.KEY_ANALOG_ADD_WEATHER,
                 if (family == ClockFamily.ANALOG) preset.usesWeather
                 else prefs.getBoolean(ClockPreset.KEY_ANALOG_ADD_WEATHER, false))
