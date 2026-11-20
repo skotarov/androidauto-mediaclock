@@ -44,8 +44,11 @@ class ClockArtworkProvider : ContentProvider() {
             throw FileNotFoundException("Cannot create artwork cache")
         }
         val weatherRevision = uri.getQueryParameter("rev")?.toLongOrNull()?.coerceAtLeast(0L) ?: 0L
-        // v5 is a new visual design; never reuse an old image cached by v0.4.
-        val destination = File(directory, "v6-$clockMode-$key-$weatherRevision.png")
+        val compact = uri.getQueryParameter("layout") != "standard"
+        // Include the layout and release design in the filename, so changing
+        // phone settings invalidates both Android Auto and disk artwork caches.
+        val layout = if (compact) "compact" else "standard"
+        val destination = File(directory, "v8-$layout-$clockMode-$key-$weatherRevision.png")
 
         synchronized(lock) {
             if (!destination.isFile || destination.length() == 0L) {
@@ -57,7 +60,8 @@ class ClockArtworkProvider : ContentProvider() {
                     clockMode, requestedMinute,
                     weather?.weatherCode,
                     weather?.isDay ?: true,
-                    weather?.formattedTemperature
+                    weather?.formattedTemperature,
+                    compact
                 )
                 try {
                     FileOutputStream(temp).use { out ->
@@ -109,14 +113,16 @@ class ClockArtworkProvider : ContentProvider() {
         fun artworkUri(
             mode: String,
             now: LocalDateTime = LocalDateTime.now(),
-            weatherRevision: Long = 0L
+            weatherRevision: Long = 0L,
+            compact: Boolean = true
         ): Uri = Uri.Builder()
             .scheme("content")
             .authority(AUTHORITY)
             .appendPath(mode)
             .appendPath("clock_${now.format(KEY_FORMAT)}.png")
             .appendQueryParameter("rev", weatherRevision.coerceAtLeast(0L).toString())
-            .appendQueryParameter("style", "v6")
+            .appendQueryParameter("style", "v8")
+            .appendQueryParameter("layout", if (compact) "compact" else "standard")
             .build()
     }
 }
