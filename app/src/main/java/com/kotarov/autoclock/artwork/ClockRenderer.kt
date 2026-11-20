@@ -7,13 +7,14 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Typeface
 import com.kotarov.autoclock.media.ClockPreset
+import com.kotarov.autoclock.media.ClockFamily
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * Three main visual styles with seven information arrangements.
+ * Three main visual styles with zero, one or two independent additions.
  * Art is a single RGB_565 bitmap, refreshed only when the minute or
  * selected settings change. The foreground never animates every second.
  */
@@ -24,7 +25,6 @@ object ClockRenderer {
     private const val COMPACT_RADIUS = 96f
     private const val STANDARD_RADIUS = 122f
     private val timeFormat = DateTimeFormatter.ofPattern("HH:mm")
-    private val dateFormat = DateTimeFormatter.ofPattern("dd.MM.yyyy")
     private val white = Color.rgb(255, 255, 255)
     private val pale = Color.rgb(224, 239, 247)
     private val cyan = Color.rgb(108, 218, 255)
@@ -50,47 +50,65 @@ object ClockRenderer {
         val radius = if (compact) COMPACT_RADIUS else STANDARD_RADIUS
         val unit = radius / STANDARD_RADIUS
 
-        when (preset) {
-            ClockPreset.ANALOG_TIME -> {
-                drawDial(canvas, time, radius)
-                drawText(canvas, time.format(timeFormat), CENTER_X, CENTER_Y, 46f * unit, white, unit)
+        // The primary style establishes the visual hierarchy. Add-ons are
+        // independent: no checkboxes means no secondary information at all.
+        if (preset.hasAnalog) drawDial(canvas, time, radius)
+
+        when (preset.family) {
+            ClockFamily.ANALOG -> {
+                when {
+                    preset.hasDigitalTime && preset.usesWeather -> {
+                        drawText(canvas, time.format(timeFormat), CENTER_X,
+                            CENTER_Y - 24f * unit, 46f * unit, white, unit)
+                        drawWeatherRow(canvas, CENTER_X, CENTER_Y + 35f * unit,
+                            weatherCode, isDay, temperature, 29f * unit, unit)
+                    }
+                    preset.hasDigitalTime ->
+                        drawText(canvas, time.format(timeFormat), CENTER_X,
+                            CENTER_Y, 46f * unit, white, unit)
+                    preset.usesWeather ->
+                        drawWeatherRow(canvas, CENTER_X, CENTER_Y,
+                            weatherCode, isDay, temperature, 49f * unit, unit)
+                    // Pure analog: hands and markings, no digital text.
+                }
             }
-            ClockPreset.ANALOG_TIME_WEATHER -> {
-                drawDial(canvas, time, radius)
-                drawText(canvas, time.format(timeFormat), CENTER_X, CENTER_Y - 24f * unit, 46f * unit, white, unit)
-                drawWeatherRow(canvas, CENTER_X, CENTER_Y + 35f * unit,
-                    weatherCode, isDay, temperature, 29f * unit, unit)
+            ClockFamily.DIGITAL -> {
+                if (preset.hasAnalog) {
+                    if (preset.usesWeather) {
+                        drawText(canvas, time.format(timeFormat), CENTER_X,
+                            CENTER_Y - 24f * unit, 46f * unit, white, unit)
+                        drawWeatherRow(canvas, CENTER_X, CENTER_Y + 35f * unit,
+                            weatherCode, isDay, temperature, 29f * unit, unit)
+                    } else {
+                        drawText(canvas, time.format(timeFormat), CENTER_X,
+                            CENTER_Y, 46f * unit, white, unit)
+                    }
+                } else if (preset.usesWeather) {
+                    drawText(canvas, time.format(timeFormat), CENTER_X,
+                        CENTER_Y - 35f * unit, 88f * unit, white, unit)
+                    drawWeatherRow(canvas, CENTER_X, CENTER_Y + 47f * unit,
+                        weatherCode, isDay, temperature, 36f * unit, unit)
+                } else {
+                    // Pure digital: no dial, date or weather.
+                    drawText(canvas, time.format(timeFormat), CENTER_X,
+                        CENTER_Y, 96f * unit, white, unit)
+                }
             }
-            ClockPreset.ANALOG_WEATHER -> {
-                drawDial(canvas, time, radius)
-                drawWeatherRow(canvas, CENTER_X, CENTER_Y, weatherCode, isDay,
-                    temperature, 49f * unit, unit)
-            }
-            ClockPreset.DIGITAL_TIME -> {
-                drawText(canvas, time.format(timeFormat), CENTER_X, CENTER_Y - 10f * unit,
-                    96f * unit, white, unit)
-                drawText(canvas, time.format(dateFormat), CENTER_X, CENTER_Y + 55f * unit,
-                    29f * unit, pale, unit)
-            }
-            ClockPreset.DIGITAL_TIME_WEATHER -> {
-                // Digital time dominates; weather is intentionally secondary.
-                drawText(canvas, time.format(timeFormat), CENTER_X, CENTER_Y - 30f * unit,
-                    88f * unit, white, unit)
-                drawWeatherRow(canvas, CENTER_X, CENTER_Y + 44f * unit,
-                    weatherCode, isDay, temperature, 36f * unit, unit)
-            }
-            ClockPreset.WEATHER_ONLY -> {
-                drawWeatherRow(canvas, CENTER_X, CENTER_Y - 18f * unit,
-                    weatherCode, isDay, temperature, 84f * unit, unit)
-                drawText(canvas, condition ?: "Няма данни", CENTER_X, CENTER_Y + 66f * unit,
-                    28f * unit, pale, unit)
-            }
-            ClockPreset.WEATHER_WITH_TIME -> {
-                // Weather dominates; digital clock is secondary on the second row.
-                drawWeatherRow(canvas, CENTER_X, CENTER_Y - 38f * unit,
-                    weatherCode, isDay, temperature, 81f * unit, unit)
-                drawText(canvas, time.format(timeFormat), CENTER_X, CENTER_Y + 49f * unit,
-                    42f * unit, pale, unit)
+            ClockFamily.WEATHER -> {
+                val weatherSize = if (preset.hasAnalog) 61f * unit else 84f * unit
+                if (preset.hasDigitalTime) {
+                    drawWeatherRow(canvas, CENTER_X, CENTER_Y - 30f * unit,
+                        weatherCode, isDay, temperature, weatherSize, unit)
+                    drawText(canvas, time.format(timeFormat), CENTER_X,
+                        CENTER_Y + 45f * unit, 37f * unit, pale, unit)
+                } else {
+                    drawWeatherRow(canvas, CENTER_X, CENTER_Y - 9f * unit,
+                        weatherCode, isDay, temperature, weatherSize, unit)
+                    if (!preset.hasAnalog) {
+                        drawText(canvas, condition ?: "Няма данни", CENTER_X,
+                            CENTER_Y + 69f * unit, 27f * unit, pale, unit)
+                    }
+                }
             }
         }
         return bitmap
