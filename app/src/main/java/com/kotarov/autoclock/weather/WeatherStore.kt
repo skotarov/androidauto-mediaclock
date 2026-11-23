@@ -57,10 +57,20 @@ object WeatherStore {
         val originLabel: String,
         val sourceLabel: String,
         val reportTimeMs: Long,
-        val autoSelected: Boolean
+        val autoSelected: Boolean,
+        /** Pressure reported by METAR altimeter setting, or modeled surface pressure. */
+        val pressureHpa: Double? = null,
+        /** Elevation of the reporting station/model grid, NOT the car's GPS altitude. */
+        val elevationMeters: Double? = null
     ) {
         val formattedTemperature: String get() = "${temperatureC.roundToInt()}°C"
         val description: String get() = describe(weatherCode)
+        val pressureText: String get() =
+            pressureHpa?.takeIf { it.isFinite() && it in 500.0..1100.0 }
+                ?.let { "${it.roundToInt()} hPa" } ?: "няма данни"
+        val elevationText: String get() =
+            elevationMeters?.takeIf { it.isFinite() && it in -500.0..9000.0 }
+                ?.let { "${it.roundToInt()} м" } ?: "няма данни"
         // Station/ICAO and observation provenance stay in phone settings.
         // Only the city/place is shown below the clock face.
         val artworkSource: String? get() =
@@ -86,7 +96,9 @@ object WeatherStore {
         val isDay: Boolean,
         val place: String,
         val source: String,
-        val reportTimeMs: Long
+        val reportTimeMs: Long,
+        val pressureHpa: Double? = null,
+        val elevationMeters: Double? = null
     )
 
     fun isAuto(context: Context): Boolean =
@@ -154,8 +166,18 @@ object WeatherStore {
             label,
             source,
             reportTime,
-            selected == AUTO_ID
+            selected == AUTO_ID,
+            pressureHpa = storedDouble(prefs, "weather_pressure_bits", 500.0..1100.0),
+            elevationMeters = storedDouble(prefs, "weather_elevation_bits", -500.0..9000.0)
         )
+    }
+
+    private fun storedDouble(
+        prefs: android.content.SharedPreferences, key: String, range: ClosedFloatingPointRange<Double>
+    ): Double? {
+        val bits = prefs.getLong(key, java.lang.Double.doubleToRawLongBits(Double.NaN))
+        val value = java.lang.Double.longBitsToDouble(bits)
+        return value.takeIf { it.isFinite() && it in range }
     }
 
     /**
@@ -227,6 +249,14 @@ object WeatherStore {
                         java.lang.Double.doubleToRawLongBits(result.temperature))
                     .putInt("weather_code", result.code)
                     .putBoolean("weather_is_day", result.isDay)
+                    // Store NaN for missing values so stale station metrics
+                    // cannot survive switching source or location.
+                    .putLong("weather_pressure_bits",
+                        java.lang.Double.doubleToRawLongBits(
+                            result.pressureHpa ?: Double.NaN))
+                    .putLong("weather_elevation_bits",
+                        java.lang.Double.doubleToRawLongBits(
+                            result.elevationMeters ?: Double.NaN))
                     .apply()
                 saved = true
             }
@@ -275,7 +305,12 @@ object WeatherStore {
             isDay = estimatedDaylightBulgaria(),
             place = "Станция ${nearest.label}",
             source = "NOAA · измерване METAR",
-            reportTimeMs = timeMs
+            reportTimeMs = timeMs,
+            // NOAA METAR JSON altim is in hPa, elev in meters MSL.
+            pressureHpa = report.optDouble("altim", Double.NaN)
+                .takeIf { it.isFinite() && it in 500.0..1100.0 },
+            elevationMeters = report.optDouble("elev", Double.NaN)
+                .takeIf { it.isFinite() && it in -500.0..9000.0 }
         )
     }
 
@@ -334,7 +369,7 @@ object WeatherStore {
         val url = "https://api.open-meteo.com/v1/forecast?" +
             "latitude=${String.format(Locale.US, "%.4f", lat)}&" +
             "longitude=${String.format(Locale.US, "%.4f", lon)}&" +
-            "current=temperature_2m,weather_code,is_day&timezone=auto&forecast_days=1"
+            "current=temperature_2m,weather_code,is_day,surface_pressure&timezone=auto&forecast_days=1"
         val body = fetchText(url, "AutoClock2/0.13 (Android personal weather display)")
             ?: return null
         val current = JSONObject(body).optJSONObject("current") ?: return null
@@ -346,7 +381,11 @@ object WeatherStore {
             current.optInt("is_day", 1) == 1,
             label,
             source,
-            System.currentTimeMillis()
+            System.currentTimeMillis(),
+            pressureHpa = current.optDouble("surface_pressure", Double.NaN)
+                .takeIf { it.isFinite() && it in 500.0..1100.0 },
+            elevationMeters = JSONObject(body).optDouble("elevation", Double.NaN)
+                .takeIf { it.isFinite() && it in -500.0..9000.0 }
         )
     }
 

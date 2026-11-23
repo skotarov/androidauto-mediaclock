@@ -66,6 +66,23 @@ class WeatherStoreTest {
         assertEquals("Станция София (LBSF)", observed.originLabel)
     }
 
+    @Test fun pressureAndTerrainHeightHaveExplicitUnitsAndSafeFallbacks() {
+        val withValues = WeatherStore.Snapshot(
+            temperatureC = 16.0, weatherCode = 2, observedAtMs = 10L,
+            isDay = true, originLabel = "Станция София (LBSF)",
+            sourceLabel = "NOAA METAR", reportTimeMs = 10L, autoSelected = true,
+            pressureHpa = 1014.4, elevationMeters = 548.6
+        )
+        assertEquals("1014 hPa", withValues.pressureText)
+        assertEquals("549 м", withValues.elevationText)
+        val missing = withValues.copy(pressureHpa = null, elevationMeters = null)
+        assertEquals("няма данни", missing.pressureText)
+        assertEquals("няма данни", missing.elevationText)
+        val invalid = withValues.copy(pressureHpa = Double.NaN, elevationMeters = 25000.0)
+        assertEquals("няма данни", invalid.pressureText)
+        assertEquals("няма данни", invalid.elevationText)
+    }
+
     @Test fun unknownCityFallsBackToSofia() {
         assertEquals(WeatherStore.City.SOFIA, WeatherStore.City.byId("unknown"))
         assertEquals(WeatherStore.City.SOFIA, WeatherStore.City.byId(null))
