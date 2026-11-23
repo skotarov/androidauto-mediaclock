@@ -160,17 +160,18 @@ class ClockArtworkProvider : ContentProvider() {
          * forecast revision and date; no unnecessary minute-by-minute bitmap.
          */
         fun forecastArtworkUri(
-            day: com.kotarov.autoclock.weather.ForecastStore.Day,
+            date: java.time.LocalDate,
+            forecast: com.kotarov.autoclock.weather.ForecastStore.Day?,
             revision: Long,
             theme: ClockTheme = ClockTheme.DARK,
             coloredWeatherIcons: Boolean = true
         ): Uri = artworkUri(
-            "mini_forecast", day.date.atTime(12, 0),
-            revision + day.date.toEpochDay(),
+            "mini_forecast", date.atTime(12, 0),
+            revision + date.toEpochDay(),
             theme = theme, coloredWeatherIcons = coloredWeatherIcons
         ).buildUpon()
-            .appendQueryParameter("code", day.code.toString())
-            .appendQueryParameter("temp", day.iconTemperature)
+            .appendQueryParameter("code", (forecast?.code ?: -1).toString())
+            .appendQueryParameter("temp", forecast?.iconTemperature ?: "--°C")
             .build()
 
         fun metricsArtworkUri(

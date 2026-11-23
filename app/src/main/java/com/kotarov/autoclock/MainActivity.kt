@@ -70,7 +70,7 @@ class MainActivity : AppCompatActivity() {
 
         root.addView(label("Auto Clock 2", 30f, light, dp(5)))
         root.addView(label(
-            "Play — часовник · Stop — времето · 3 реда",
+            "Play — часовник · Stop — времето · прогноза 3 дни",
             16f, muted, dp(16)
         ))
 
@@ -120,7 +120,7 @@ class MainActivity : AppCompatActivity() {
 
         root.addView(label(
             "В Android Auto: Play показва часовника, Stop/Pause — времето. " +
-                "Вторият екран съдържа час, време и налягане/надморска височина.",
+                "Вторият екран показва прогнозата за следващите три дни.",
             14f, muted, dp(14)
         ))
 
@@ -166,15 +166,15 @@ class MainActivity : AppCompatActivity() {
         ))
 
         root.addView(checkOption(
-            "Скрий часа и времето под часовника в Android Auto",
-            prefs.getBoolean(AutoClockMediaService.KEY_HIDE_MEDIA_TEXT, false)
+            "Скрий текста в компактния медиен панел (експеримент)",
+            prefs.getBoolean(AutoClockMediaService.KEY_HIDE_COMPACT_TEXT, true)
         ) { checked ->
-            prefs.edit().putBoolean(AutoClockMediaService.KEY_HIDE_MEDIA_TEXT, checked).apply()
+            prefs.edit().putBoolean(AutoClockMediaService.KEY_HIDE_COMPACT_TEXT, checked).apply()
         })
 
         root.addView(label(
-            "Android Auto сам решава кога да прерисува видимия списък, " +
-                "след като изпратим известие за обновяване.",
+            "За големия плеър подаваме отделно пълен текст. Android Auto " +
+                "обаче може да използва едни и същи текстови полета и в двата изгледа.",
             13f, muted, dp(15)
         ))
 
@@ -242,9 +242,9 @@ class MainActivity : AppCompatActivity() {
         root.addView(refresh)
 
         root.addView(label(
-            "Play показва часовника, Stop/Pause — времето. " +
-                "Трите реда се подават наново всяка минута, а " +
-                "метеоданните се заявяват най-много веднъж на 15 минути.",
+            "Трите реда са утре и още два дни, с минимална/максимална " +
+                "температура и вероятност за валежи. Прогнозата се обновява " +
+                "най-много веднъж на 3 часа, текущото време — през 15 минути.",
             14f, muted, dp(8)
         ))
         root.addView(label("Източници: NOAA Aviation Weather (METAR измервания) " +
@@ -324,8 +324,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun requestWeatherForPreview(force: Boolean = false) {
         val prefs = getSharedPreferences(AutoClockMediaService.PREFERENCES, MODE_PRIVATE)
-        // The library always includes weather and pressure/elevation rows,
-        // even when the selected clock style has no weather add-on.
+        // Always allow refreshing forecast even for a pure analog clock.
         if (WeatherStore.isAuto(this) && !WeatherLocation.permitted(this)) {
             updateWeatherStatus()
             return
