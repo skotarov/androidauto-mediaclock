@@ -65,9 +65,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         }
     }
 
-    // Pause is a weather screen. One small Handler task refreshes it every
-    // 15 minutes while the media service is alive, with no wake lock or GPS
-    // subscription. It is cancelled as soon as Play resumes.
+    // Phone-selected weather display checks every 15 minutes while the
+    // service is alive; no wake lock, periodic GPS subscription or media button.
     private val pausedWeatherTick = object : Runnable {
         override fun run() {
             if (running) return
@@ -98,6 +97,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             setFlags(0)
             isActive = true
         }
+        session.setQueue(emptyList())
+        session.setQueueTitle(null)
         sessionToken = session.sessionToken
         prefs.registerOnSharedPreferenceChangeListener(prefsListener)
         if (prefs.getBoolean(KEY_SHOW_WEATHER_WITHOUT_BUTTONS, false)) {
@@ -147,9 +148,6 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private fun coloredWeatherIcons(): Boolean =
         WeatherStore.coloredIcons(prefs)
 
-    private fun animateProgress(): Boolean =
-        prefs.getBoolean(KEY_PROGRESS_ANIMATED, false)
-
     private fun hideMediaText(): Boolean =
         prefs.getBoolean(KEY_HIDE_MEDIA_TEXT, false)
 
@@ -192,8 +190,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     private fun requestWeatherIfNecessary() {
         if (!visiblePreset().usesWeather) return
-        // A successful response triggers the preferences listener; Pause
-        // checks once per 15 minutes, while Play uses the minute clock tick.
+        // A successful response triggers the preferences listener; the phone
+        // selects weather checks or minute-aligned clock drawing.
         WeatherStore.refreshIfDue(this)
     }
 
@@ -221,12 +219,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val shownTitle = if (blank) INVISIBLE_TEXT else mediaLines.title
         val shownSubtitle = if (blank) INVISIBLE_TEXT else mediaLines.subtitle
         val shownDescription = INVISIBLE_TEXT
-        val shownAlbum = INVISIBLE_TEXT
 
-        // Zero queued tracks, but continue publishing stand-alone artwork.
-        session.setQueue(emptyList())
-        session.setQueueTitle(null)
-
+        // Metadata remains published without any playlist or current track.
         // Provide a small direct bitmap as well as an URI, because some Android
         // Auto versions keep the previous URI artwork while text changes live.
         val art = ClockRenderer.render(
@@ -254,12 +248,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             .putString(MediaMetadataCompat.METADATA_KEY_ART_URI, artwork.toString())
             .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON_URI, miniArtwork.toString())
 
-        if (animateProgress()) {
-            metadata.putLong(
-                MediaMetadataCompat.METADATA_KEY_DURATION,
-                MinuteProgress.DURATION_MS
-            )
-        }
+        // No duration: old preferences cannot bring a progress bar back.
         session.setMetadata(metadata.build())
     }
 

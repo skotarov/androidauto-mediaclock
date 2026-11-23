@@ -9,7 +9,9 @@ guaranteed to support it.
 
 This diagnostic Android Auto version deliberately advertises **zero playable
 media items** and an **empty queue**, registers no media transport callbacks,
-and publishes a playback state of **STATE_NONE** with **zero actions**.
+and publishes a playback state of **STATE_NONE** with **zero actions** and
+**no media duration or progress metadata**, even if an old progress setting
+was previously enabled.
 No Play/Pause/Next/Previous/Stop commands are advertised and no audio is played.
 
 The media session is still active and continues generating the clock's main
