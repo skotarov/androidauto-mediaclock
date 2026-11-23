@@ -21,8 +21,8 @@ import java.util.Locale
 import java.time.LocalDateTime
 
 /**
- * v0.36: confirmed v0.35 routing keeps the map dashboard on the clock
- * while the normal full-screen library exposes SIX next-hour weather rows.
+ * v0.39: keep stable dashboard/library routing; test STATE_STOPPED separately
+ * from STATE_NONE, which Android Auto hides from playback surfaces.
  * No minute browse refresh. No public Android Auto fullscreen/compact
  * callback exists: full date is supplied in standard track metadata only.
  */
@@ -57,6 +57,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             key == ClockPreset.KEY_DIGITAL_ADD_WEATHER ||
             key == KEY_MODE ||
             key == KEY_TEST_DIRECT_BROWSE || key == KEY_TEST_STATE_NONE ||
+            key == KEY_TEST_STATE_STOPPED ||
             key == KEY_LAYOUT || key == ClockTheme.KEY ||
             key == WeatherStore.KEY_CITY || key == "weather_cached_city" ||
             key == "weather_cached_mode" || key == "weather_station_label" ||
@@ -368,7 +369,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 .setState(
                     AutoClockScreenExperiments.playbackState(
                         running,
-                        prefs.getBoolean(KEY_TEST_STATE_NONE, false)
+                        prefs.getBoolean(KEY_TEST_STATE_NONE, false),
+                        prefs.getBoolean(KEY_TEST_STATE_STOPPED, false)
                     ),
                     PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN,
                     0f
@@ -385,6 +387,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         const val KEY_PROGRESS_ANIMATED = "progress_animated"
         const val KEY_TEST_DIRECT_BROWSE = "try_media_host_browse_link_v37"
         const val KEY_TEST_STATE_NONE = "try_playback_state_none_v37"
+        const val KEY_TEST_STATE_STOPPED = "try_playback_state_stopped_v39"
         private const val INVISIBLE_TEXT = ClockMediaLabels.EMPTY
         const val ROOT_ID = "auto_clock_root"
     }
