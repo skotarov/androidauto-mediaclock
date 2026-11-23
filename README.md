@@ -1,4 +1,4 @@
-# Auto Clock 2 — beta 0.19
+# Auto Clock 2 — beta 0.20
 
 An experimental battery-conscious clock for Android Auto's media card next to
 navigation. Android Auto officially reserves the media template for audio apps;
@@ -15,7 +15,7 @@ The three primary radio styles have optional checkboxes:
 | Цифров часовник | Large HH:mm | Also add weather |
 | Времето | Large weather icon, temperature and description | Also add smaller digital HH:mm |
 
-The old multi-add-on combinations are migrated into these simpler options.
+The old multi-add-on combinations are migrated into these simpler options.\nThe analog style now starts with **Добави цифров час** unchecked. On upgrade\nfrom v0.13–v0.19 the previous forced-on setting is cleared **once**; after\nthat, any manual change is remembered. Other style and weather preferences stay unchanged.
 Each main style remembers its checkbox(es) independently. Analogue has two
 independent switches, allowing four distinct looks (pure dial, digital time,
 weather, or both). Digital and Weather each have one optional switch.
@@ -136,7 +136,7 @@ tested on the target phone and Android Auto head unit.
 
 ## Download and install
 
-[AutoClock-2-v0.19-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.19.0-beta)
+[AutoClock-2-v0.20-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.20.0-beta)
 
 1. Open the beta release under **Releases**, then tap the APK under **Assets**.
 2. Install it on the Android phone connected to the car.
@@ -147,9 +147,9 @@ tested on the target phone and Android Auto head unit.
 5. Open Auto Clock 2 in the Android Auto media launcher and press Play, then
    switch to navigation's split-screen view.
 
-## Testing checklist (v0.19)
+## Testing checklist (v0.20)
 
-- [ ] Install the v0.19 APK; start Auto Clock in Android Auto and press Play.
+- [ ] Install the v0.20 APK; confirm analog digital-time checkbox is OFF\n      on first launch after upgrade, and stays OFF after reopening.\n- [ ] Enable it manually, reopen the app and confirm it stays enabled.\n- [ ] Start Auto Clock in Android Auto and press Play.
 - [ ] View fullscreen Google Maps; at a minute boundary check whether the
       **media quick-control thumbnail** switches RED ↔ GREEN.
 - [ ] Check separately whether the **dock app shortcut** switches color,

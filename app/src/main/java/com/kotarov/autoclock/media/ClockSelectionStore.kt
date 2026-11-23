@@ -5,22 +5,41 @@ import android.content.SharedPreferences
 /** Persist independent checkbox choices for each of the three radio styles. */
 object ClockSelectionStore {
     private const val KEY_SCHEMA_V13 = "display_simplified_v13"
+    private const val KEY_ANALOG_DEFAULT_OFF_V20 = "analog_digital_default_off_v20"
 
     /**
-     * Migration from older flat layouts. Previously forced analogue digits
-     * remain checked for existing installs, but can now be switched off to
-     * get a genuinely clean analogue face.
+     * New installs show the clean analog dial without digital digits.
+     *
+     * In v0.13-v0.19 the migration forcibly checked "Add digital time"
+     * even if the setting had never been explicitly selected. A one-time
+     * v0.20 correction clears that legacy default on upgrade. Afterward
+     * manual checkbox changes are preserved on all future launches.
      */
     fun migrateSimplifiedIfNeeded(prefs: SharedPreferences) {
+        val wasSimplified = prefs.getBoolean(KEY_SCHEMA_V13, false)
         migrateIfNeeded(prefs)
-        if (prefs.getBoolean(KEY_SCHEMA_V13, false)) return
-        prefs.edit()
-            .putBoolean(ClockPreset.KEY_ANALOG_ADD_DIGITAL, true)
-            .putBoolean(ClockPreset.KEY_DIGITAL_ADD_ANALOG, false)
-            .putBoolean(ClockPreset.KEY_WEATHER_ADD_ANALOG, false)
-            .putBoolean(KEY_SCHEMA_V13, true)
-            .apply()
+        if (!wasSimplified) {
+            prefs.edit()
+                // Keep intentional migrated choices; do not force digits on.
+                .putBoolean(ClockPreset.KEY_ANALOG_ADD_DIGITAL,
+                    prefs.getBoolean(ClockPreset.KEY_ANALOG_ADD_DIGITAL, false))
+                .putBoolean(ClockPreset.KEY_DIGITAL_ADD_ANALOG, false)
+                .putBoolean(ClockPreset.KEY_WEATHER_ADD_ANALOG, false)
+                .putBoolean(KEY_SCHEMA_V13, true)
+                .apply()
+        }
+        if (!prefs.getBoolean(KEY_ANALOG_DEFAULT_OFF_V20, false)) {
+            val editor = prefs.edit()
+                .putBoolean(KEY_ANALOG_DEFAULT_OFF_V20, true)
+            if (wasSimplified) {
+                // Previous releases enabled digits by default. Reset once,
+                // then preserve the user's explicit choice from this version.
+                editor.putBoolean(ClockPreset.KEY_ANALOG_ADD_DIGITAL, false)
+            }
+            editor.apply()
+        }
     }
+
     fun migrateIfNeeded(prefs: SharedPreferences) {
         if (prefs.getBoolean(ClockPreset.KEY_SCHEMA_V11, false)) return
 
@@ -74,7 +93,7 @@ object ClockSelectionStore {
             ClockFamily.ANALOG ->
                 ClockPreset.fromAddons(
                     ClockFamily.ANALOG,
-                    first = prefs.getBoolean(ClockPreset.KEY_ANALOG_ADD_DIGITAL, true),
+                    first = prefs.getBoolean(ClockPreset.KEY_ANALOG_ADD_DIGITAL, false),
                     second = prefs.getBoolean(ClockPreset.KEY_ANALOG_ADD_WEATHER, false)
                 )
             ClockFamily.DIGITAL ->
@@ -93,7 +112,7 @@ object ClockSelectionStore {
             .putString(ClockPreset.KEY_FAMILY, family.id)
             .putBoolean(ClockPreset.KEY_ANALOG_ADD_DIGITAL,
                 if (family == ClockFamily.ANALOG) preset.hasDigitalTime
-                else prefs.getBoolean(ClockPreset.KEY_ANALOG_ADD_DIGITAL, true))
+                else prefs.getBoolean(ClockPreset.KEY_ANALOG_ADD_DIGITAL, false))
             .putBoolean(ClockPreset.KEY_ANALOG_ADD_WEATHER,
                 if (family == ClockFamily.ANALOG) preset.usesWeather
                 else prefs.getBoolean(ClockPreset.KEY_ANALOG_ADD_WEATHER, false))

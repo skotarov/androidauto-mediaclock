@@ -205,7 +205,7 @@ class MainActivity : AppCompatActivity() {
         root.addView(label(
             "В Android Auto избираш една от трите основни визии. " +
                 "Отметките за всяка се запазват поотделно. Часовникът " +
-                "се обновява веднъж в минута, прогнозата — най-много веднъж на час.",
+                "се обновява веднъж в минута, времето — най-много веднъж на 15 минути.",
             14f, muted, dp(8)
         ))
         root.addView(label("Източници: NOAA Aviation Weather (METAR измервания) " +
@@ -241,7 +241,7 @@ class MainActivity : AppCompatActivity() {
 
         when (family) {
             ClockFamily.ANALOG -> {
-                addOption("Добави цифров час", ClockPreset.KEY_ANALOG_ADD_DIGITAL, true)
+                addOption("Добави цифров час", ClockPreset.KEY_ANALOG_ADD_DIGITAL)
                 addOption("Добави времето", ClockPreset.KEY_ANALOG_ADD_WEATHER)
             }
             ClockFamily.DIGITAL ->

@@ -88,6 +88,20 @@ class ClockPresetTest {
             ClockSelectionStore.forFamily(prefs(true, true), ClockFamily.ANALOG))
     }
 
+    @Test fun analogStartsWithoutDigitalTimeWhenNoPreferenceIsSaved() {
+        val prefs = Proxy.newProxyInstance(
+            SharedPreferences::class.java.classLoader,
+            arrayOf(SharedPreferences::class.java)
+        ) { _, method, args ->
+            when (method.name) {
+                "getBoolean" -> args!![1] as Boolean
+                else -> throw UnsupportedOperationException(method.name)
+            }
+        } as SharedPreferences
+        assertEquals(ClockPreset.ANALOG_PURE,
+            ClockSelectionStore.forFamily(prefs, ClockFamily.ANALOG))
+    }
+
     @Test fun allTwelveCombinationsHaveStableUniqueIds() {
         assertEquals(12, ClockPreset.entries.size)
         assertEquals(12, ClockPreset.entries.map { it.id }.toSet().size)
