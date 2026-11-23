@@ -159,6 +159,12 @@ object ClockRenderer {
      * so the hands remain distinguishable at Android Auto icon sizes.
      * This is NOT the system launcher/dock icon from AndroidManifest.xml.
      */
+    /**
+     * Tight artwork for the tiny now-playing quick-control slot below a
+     * fullscreen map. The dial fills 92.5% of the square image, rather than
+     * being a small dial within a much larger media-card background.
+     * Intentionally no tiny, illegible weather or HH:mm text at 30-48dp.
+     */
     fun renderBrowseClock(time: LocalDateTime, outputSize: Int = 160): Bitmap {
         require(outputSize in 64..256)
         val bitmap = Bitmap.createBitmap(outputSize, outputSize, Bitmap.Config.RGB_565)
@@ -166,33 +172,34 @@ object ClockRenderer {
         canvas.scale(outputSize / 160f, outputSize / 160f)
         canvas.drawColor(Color.rgb(2, 5, 11))
         val cx = 80f
-        val cy = 76f
-        val radius = 66f
+        val cy = 80f
+        val radius = 74f
+
         canvas.drawCircle(cx, cy, radius, fill(Color.rgb(9, 23, 34)))
-        canvas.drawCircle(cx, cy, radius, stroke(pale, 3.4f))
-        val ticks = stroke(Color.rgb(182, 214, 227), 3f)
+        canvas.drawCircle(cx, cy, radius, stroke(pale, 4.4f))
+        val tick = stroke(white, 4.5f)
         repeat(12) { i ->
             val angle = Math.toRadians(i * 30.0 - 90.0)
             val dx = cos(angle).toFloat()
             val dy = sin(angle).toFloat()
-            canvas.drawLine(cx + dx * 50f, cy + dy * 50f,
-                cx + dx * 60f, cy + dy * 60f, ticks)
+            canvas.drawLine(cx + dx * 55f, cy + dy * 55f,
+                cx + dx * 66f, cy + dy * 66f, tick)
         }
-        val hour = Math.toRadians(
+
+        val hourAngle = Math.toRadians(
             (time.hour % 12) * 30.0 + time.minute * 0.5 - 90.0
         )
-        val minute = Math.toRadians(time.minute * 6.0 - 90.0)
+        val minuteAngle = Math.toRadians(time.minute * 6.0 - 90.0)
+
         canvas.drawLine(cx, cy,
-            cx + cos(hour).toFloat() * 39f,
-            cy + sin(hour).toFloat() * 39f,
-            stroke(white, 9f))
+            cx + cos(hourAngle).toFloat() * 41f,
+            cy + sin(hourAngle).toFloat() * 41f,
+            stroke(white, 11f))
         canvas.drawLine(cx, cy,
-            cx + cos(minute).toFloat() * 51f,
-            cy + sin(minute).toFloat() * 51f,
-            stroke(cyan, 5.5f))
-        canvas.drawCircle(cx, cy, 4.5f, fill(white))
-        // At tiny resolutions, the short label is better than a date or weather.
-        drawText(canvas, time.format(timeFormat), cx, 117f, 25f, white, 0.65f)
+            cx + cos(minuteAngle).toFloat() * 60f,
+            cy + sin(minuteAngle).toFloat() * 60f,
+            stroke(cyan, 7f))
+        canvas.drawCircle(cx, cy, 5f, fill(white))
         return bitmap
     }
 
