@@ -22,6 +22,7 @@ import com.kotarov.autoclock.media.AutoClockMediaService
 import com.kotarov.autoclock.media.ClockFamily
 import com.kotarov.autoclock.media.ClockPreset
 import com.kotarov.autoclock.media.ClockSelectionStore
+import com.kotarov.autoclock.media.ClockTheme
 import com.kotarov.autoclock.weather.WeatherStore
 import java.text.SimpleDateFormat
 import java.time.LocalDateTime
@@ -117,8 +118,8 @@ class MainActivity : AppCompatActivity() {
         sizeGroup.addView(small)
         sizeGroup.addView(large)
         sizeGroup.check(
-            if (prefs.getString(AutoClockMediaService.KEY_LAYOUT, "compact") == "standard")
-                large.id else small.id
+            if (prefs.getString(AutoClockMediaService.KEY_LAYOUT, "standard") == "compact")
+                small.id else large.id
         )
         sizeGroup.setOnCheckedChangeListener { _, id ->
             val size = if (id == large.id) "standard" else "compact"
@@ -126,6 +127,21 @@ class MainActivity : AppCompatActivity() {
             updatePreview()
         }
         root.addView(sizeGroup)
+
+        root.addView(label("Тема на часовника", 20f, light, dp(7)))
+        val themes = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
+        val dark = radio("Тъмна — черен фон (по подразбиране)")
+        val reverse = radio("Светла — обратни цветове")
+        themes.addView(dark)
+        themes.addView(reverse)
+        themes.check(if (ClockTheme.fromId(prefs.getString(ClockTheme.KEY, null)) ==
+            ClockTheme.LIGHT) reverse.id else dark.id)
+        themes.setOnCheckedChangeListener { _, id ->
+            prefs.edit().putString(ClockTheme.KEY,
+                if (id == reverse.id) ClockTheme.LIGHT.id else ClockTheme.DARK.id).apply()
+            updatePreview()
+        }
+        root.addView(themes)
 
         root.addView(checkOption(
             "Движение на прогрес бара (секунди)",
@@ -302,12 +318,13 @@ class MainActivity : AppCompatActivity() {
         val preset = currentPreset()
         val weather = if (preset.usesWeather) WeatherStore.current(this) else null
         val prefs = getSharedPreferences(AutoClockMediaService.PREFERENCES, MODE_PRIVATE)
-        val compact = prefs.getString(AutoClockMediaService.KEY_LAYOUT, "compact") != "standard"
+        val compact = prefs.getString(AutoClockMediaService.KEY_LAYOUT, "standard") == "compact"
         val image = ClockRenderer.render(
             preset.id, LocalDateTime.now(),
             weather?.weatherCode, weather?.isDay ?: true,
             weather?.formattedTemperature, compact,
-            condition = weather?.description ?: "Няма данни"
+            condition = weather?.description ?: "Няма данни",
+            theme = ClockTheme.fromId(prefs.getString(ClockTheme.KEY, null))
         )
         preview.setImageBitmap(image)
         previewBitmap?.recycle()

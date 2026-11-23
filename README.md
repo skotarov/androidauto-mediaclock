@@ -1,4 +1,4 @@
-# Auto Clock 2 — beta 0.20
+# Auto Clock 2 — beta 0.21
 
 An experimental battery-conscious clock for Android Auto's media card next to
 navigation. Android Auto officially reserves the media template for audio apps;
@@ -23,7 +23,7 @@ Each main style remembers its checkbox(es) independently. Analogue has two
 independent switches, allowing four distinct looks (pure dial, digital time,
 weather, or both). Digital and Weather each have one optional switch.
 
-Other phone settings: Compact/Standard artwork, hide media text, city/source,
+Other phone settings: Standard (default) / Compact artwork, Dark (default) / Light (reversed) theme, hide media text, city/source,
 and **Движение на прогрес бара (секунди)**. The progress option now defaults
 to **OFF for fresh installations**. Previously saved choices are preserved.
 
@@ -100,29 +100,27 @@ hands. Saved choices from 0.15 remain intact (digital time stays checked
 until the user explicitly unchecks it). The compact/standard positions
 and the observation-source label improvements from v0.15 are unchanged.
 
-## Red / green minute-by-minute media icon experiment (v0.19)
+## Mini now-playing panel (v0.21)
 
-**Diagnostic only:** the media-browse item thumbnail and the active MediaSession
-`DISPLAY_ICON` now show a 160×160 analog dial with a prominent **RED ring on
-even minutes** and **GREEN ring on odd minutes**. The image's timestamp URI
-changes each minute, the active session republishes metadata, and
-`notifyChildrenChanged(ROOT_ID)` is called once per minute **only during Play**.
-No extra second-level timer or wake lock is used. Main media artwork is
-unchanged and remains updated every minute during Play.
+Removed the v0.17–v0.20 dynamic dock-icon experiment, color alternation and
+periodic media-browser icon invalidations. The Android Auto dock application
+shortcut remains a static platform-owned image.
 
-Test separately: (1) the fullscreen-map bottom media quick-control artwork;
-(2) the bottom dock **application icon**; (3) the media browse list thumbnail.
-The dock launcher icon is a static manifest resource. Android Auto chooses which
-media images to show and may cache them. Seeing red/green in one surface does
-not imply that a different surface can be updated programmatically.
+The 160×160 RGB_565 now-playing DISPLAY_ICON is drawn specifically for the
+primary selected mode, with no large-card additions:
+- Analog: almost full-size analog hands and dial
+- Digital: large centered HH:mm
+- Weather: large condition glyph and temperature, no clock
 
-**Weather:** the selected weather source is requested no more often than every
-**15 minutes** while the app is playing and a weather-enabled style is selected.
-Data remains cached and valid up to three hours; the station's report itself
-may be older than the last fetch, because METAR stations publish on their own
-schedules. On selecting a different city/source, a fetch may start immediately.
-Auto mode uses one coarse location fix per fetch, not ongoing GPS tracking.
-Pause stops scheduled minute updates and therefore also scheduled weather checks.
+Main artwork keeps all user-selected additions. Dark/black is the default
+theme; Light is the reversed-color alternative. Standard is the default
+main clock size, while Compact remains available. Explicit saved settings
+remain unchanged when updating.
+
+The mini display metadata and full media art refresh once a minute during Play.
+A host may still cache or choose different image fields. Weather requests remain
+limited to once per 15 minutes during active weather display. No extra timer
+or background audio was introduced.
 
 ## Resource and compatibility design
 
@@ -139,7 +137,7 @@ tested on the target phone and Android Auto head unit.
 
 ## Download and install
 
-[AutoClock-2-v0.20-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.20.0-beta)
+[AutoClock-2-v0.21-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.21.0-beta)
 
 1. Open the beta release under **Releases**, then tap the APK under **Assets**.
 2. Install it on the Android phone connected to the car.
@@ -150,19 +148,16 @@ tested on the target phone and Android Auto head unit.
 5. Open Auto Clock 2 in the Android Auto media launcher and press Play, then
    switch to navigation's split-screen view.
 
-## Testing checklist (v0.20)
+## Testing checklist (v0.21)
 
-- [ ] Install the v0.20 APK; confirm analog digital-time checkbox is OFF\n      on first launch after upgrade, and stays OFF after reopening.\n- [ ] Enable it manually, reopen the app and confirm it stays enabled.\n- [ ] Start Auto Clock in Android Auto and press Play.
-- [ ] View fullscreen Google Maps; at a minute boundary check whether the
-      **media quick-control thumbnail** switches RED ↔ GREEN.
-- [ ] Check separately whether the **dock app shortcut** switches color,
-      stays fixed, or only shows a native playback-state overlay.
-- [ ] Open the clock media browse list and verify whether its icon alternates.
-- [ ] Press Pause: minute updates should stop. Press Play to resume them.
-- [ ] Confirm the main analog clock still updates each minute.
-- [ ] With weather enabled, compare weather-fetch timestamps after ~15 minutes.
-- [ ] Confirm no extra battery drain, location polling or background ticking.
-- [ ] Recheck analog/digital/weather style options and source labels.
+- [ ] Standard size and dark background selected by default
+- [ ] Light/reversed appearance applies to main clock and mini controls
+- [ ] Analog mini uses dial only; Digital mini uses HH:mm only
+- [ ] Weather mini uses condition plus temperature only
+- [ ] Main clock retains its separate selectable additions
+- [ ] Main media clock and mini update with Play once per minute
+- [ ] Pause stops minute updates and weather respects 15-minute limit
+- [ ] No red/green test remains; dock app shortcut stays static
 
 ## Development
 

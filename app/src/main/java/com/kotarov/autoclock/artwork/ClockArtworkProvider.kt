@@ -12,7 +12,8 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import com.kotarov.autoclock.weather.WeatherStore
 import com.kotarov.autoclock.media.ClockPreset
-import com.kotarov.autoclock.media.ClockIconSchedule
+import com.kotarov.autoclock.media.ClockFamily
+import com.kotarov.autoclock.media.ClockTheme
 
 /**
  * Android Auto may request the same album art multiple times.
@@ -30,7 +31,8 @@ class ClockArtworkProvider : ContentProvider() {
         val path = uri.pathSegments
         val clockMode = path.getOrNull(0) ?: throw FileNotFoundException("Missing mode")
         val name = path.getOrNull(1) ?: throw FileNotFoundException("Missing timestamp")
-        if (clockMode !in VALID_MODES || !name.startsWith("clock_") || !name.endsWith(".png")) {
+        if ((clockMode !in VALID_MODES && miniFamily(clockMode) == null) ||
+            !name.startsWith("clock_") || !name.endsWith(".png")) {
             throw FileNotFoundException("Invalid artwork path")
         }
 
@@ -46,17 +48,25 @@ class ClockArtworkProvider : ContentProvider() {
             throw FileNotFoundException("Cannot create artwork cache")
         }
         val weatherRevision = uri.getQueryParameter("rev")?.toLongOrNull()?.coerceAtLeast(0L) ?: 0L
-        val compact = uri.getQueryParameter("layout") != "standard"
+        val compact = uri.getQueryParameter("layout") == "compact"
+        val theme = ClockTheme.fromId(uri.getQueryParameter("theme"))
         // Include the layout and release design in the filename, so changing
         // phone settings invalidates both Android Auto and disk artwork caches.
         val layout = if (compact) "compact" else "standard"
-        val destination = File(directory, "v19-$layout-$clockMode-$key-$weatherRevision.png")
+        val destination = File(directory,
+            "v21-$layout-${theme.id}-$clockMode-$key-$weatherRevision.png")
 
         synchronized(lock) {
             if (!destination.isFile || destination.length() == 0L) {
                 val temp = File(directory, "inflight-${System.nanoTime()}.tmp")
-                val bitmap = if (clockMode == "mini") {
-                    ClockRenderer.renderBrowseClock(requestedMinute)
+                val mini = miniFamily(clockMode)
+                val bitmap = if (mini != null) {
+                    val weather = if (mini == ClockFamily.WEATHER)
+                        WeatherStore.current(appContext) else null
+                    ClockRenderer.renderMini(
+                        mini, requestedMinute, weather?.weatherCode,
+                        weather?.isDay ?: true, weather?.formattedTemperature, theme
+                    )
                 } else {
                     val weather = if (ClockPreset.fromId(clockMode).usesWeather) {
                         WeatherStore.current(appContext)
@@ -68,7 +78,8 @@ class ClockArtworkProvider : ContentProvider() {
                         weather?.formattedTemperature,
                         compact,
                         condition = weather?.description,
-                        sourceLabel = weather?.artworkSource
+                        sourceLabel = weather?.artworkSource,
+                        theme = theme
                     )
                 }
                 try {
@@ -116,28 +127,34 @@ class ClockArtworkProvider : ContentProvider() {
         const val AUTHORITY = "com.kotarov.autoclock2.artwork"
         private const val MAX_FILES = 6
         private val VALID_MODES = ClockPreset.entries.map { it.id }.toSet() +
-            setOf("clock", "analog", "weather", "both", "mini")
+            setOf("clock", "analog", "weather", "both")
         private val KEY_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd_HHmm")
 
-        /** One-minute red/green diagnostic media browse icon (while playing).
-         * Android Auto's manifest-based launcher/dock icon is independent.
-         */
-        fun miniIconUri(now: LocalDateTime = LocalDateTime.now()): Uri =
-            artworkUri("mini", ClockIconSchedule.slotStart(now))
+        private fun miniFamily(id: String): ClockFamily? =
+            if (id.startsWith("mini_")) ClockFamily.fromId(id.removePrefix("mini_"))
+            else null
+
+        /** Dedicated media display/browse art, not the Android Auto app shortcut. */
+        fun miniArtworkUri(
+            family: ClockFamily, now: LocalDateTime,
+            weatherRevision: Long = 0L, theme: ClockTheme = ClockTheme.DARK
+        ): Uri = artworkUri("mini_${family.id}", now, weatherRevision, theme = theme)
 
         fun artworkUri(
             mode: String,
             now: LocalDateTime = LocalDateTime.now(),
             weatherRevision: Long = 0L,
-            compact: Boolean = true,
-            generation: Long = 0L
+            compact: Boolean = false,
+            generation: Long = 0L,
+            theme: ClockTheme = ClockTheme.DARK
         ): Uri = Uri.Builder()
             .scheme("content")
             .authority(AUTHORITY)
             .appendPath(mode)
             .appendPath("clock_${now.format(KEY_FORMAT)}.png")
             .appendQueryParameter("rev", weatherRevision.coerceAtLeast(0L).toString())
-            .appendQueryParameter("style", "v19")
+            .appendQueryParameter("style", "v21")
+            .appendQueryParameter("theme", theme.id)
             .appendQueryParameter("generation", generation.toString())
             .appendQueryParameter("layout", if (compact) "compact" else "standard")
             .build()

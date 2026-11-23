@@ -3,12 +3,13 @@ package com.kotarov.autoclock.artwork
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Typeface
 import com.kotarov.autoclock.media.ClockPreset
 import com.kotarov.autoclock.media.ClockFamily
-import com.kotarov.autoclock.media.ClockIconSchedule
+import com.kotarov.autoclock.media.ClockTheme
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import kotlin.math.cos
@@ -48,10 +49,11 @@ object ClockRenderer {
         weatherCode: Int? = null,
         isDay: Boolean = true,
         temperature: String? = null,
-        compact: Boolean = true,
+        compact: Boolean = false,
         outputSize: Int = SIZE,
         condition: String? = null,
-        sourceLabel: String? = null
+        sourceLabel: String? = null,
+        theme: ClockTheme = ClockTheme.DARK
     ): Bitmap {
         require(outputSize in 192..SIZE) { "Unsupported artwork size" }
         val bitmap = Bitmap.createBitmap(outputSize, outputSize, Bitmap.Config.RGB_565)
@@ -151,62 +153,100 @@ object ClockRenderer {
 
             drawSourceLabel(canvas, sourceLabel, CENTER_X, sourceY, unit, maxWidth)
         }
-        return bitmap
+        return applyTheme(bitmap, theme)
     }
 
-    /**
-     * Low-resolution diagnostic media thumbnail refreshed every minute while playing.
-     * Unlike the main artwork, this tiny clock avoids weather and padding,
-     * so the hands remain distinguishable at Android Auto icon sizes.
-     * This is NOT the system launcher/dock icon from AndroidManifest.xml.
-     */
-    /**
-     * Tight artwork for the tiny now-playing quick-control slot below a
-     * fullscreen map. The dial fills 92.5% of the square image, rather than
-     * being a small dial within a much larger media-card background.
-     * Intentionally no tiny, illegible weather or HH:mm text at 30-48dp.
-     */
-    fun renderBrowseClock(time: LocalDateTime, outputSize: Int = 160): Bitmap {
+
+    /** Media quick-control graphic: always ONE primary family, never add-ons. */
+    fun renderMini(
+        family: ClockFamily,
+        time: LocalDateTime,
+        weatherCode: Int? = null,
+        isDay: Boolean = true,
+        temperature: String? = null,
+        theme: ClockTheme = ClockTheme.DARK,
+        outputSize: Int = 160
+    ): Bitmap {
         require(outputSize in 64..256)
-        val bitmap = Bitmap.createBitmap(outputSize, outputSize, Bitmap.Config.RGB_565)
-        val canvas = Canvas(bitmap)
+        val image = Bitmap.createBitmap(outputSize, outputSize, Bitmap.Config.RGB_565)
+        val canvas = Canvas(image)
         canvas.scale(outputSize / 160f, outputSize / 160f)
-        // v0.19 diagnostic: high-contrast RED on even minutes, GREEN on odd.
-        // This affects display/browse artwork only, not the launcher icon.
-        val red = ClockIconSchedule.isRed(time)
-        val accent = if (red) Color.rgb(255, 36, 36) else Color.rgb(32, 255, 96)
-        canvas.drawColor(if (red) Color.rgb(55, 7, 9) else Color.rgb(5, 55, 20))
-        val cx = 80f
-        val cy = 80f
-        val radius = 74f
-
-        canvas.drawCircle(cx, cy, radius,
-            fill(if (red) Color.rgb(75, 9, 14) else Color.rgb(7, 75, 25)))
-        canvas.drawCircle(cx, cy, radius, stroke(accent, 7f))
-        val tick = stroke(white, 4.5f)
-        repeat(12) { i ->
-            val angle = Math.toRadians(i * 30.0 - 90.0)
-            val dx = cos(angle).toFloat()
-            val dy = sin(angle).toFloat()
-            canvas.drawLine(cx + dx * 55f, cy + dy * 55f,
-                cx + dx * 66f, cy + dy * 66f, tick)
+        val dark = theme == ClockTheme.DARK
+        val ink = if (dark) Color.WHITE else Color.rgb(14, 24, 35)
+        val accent = if (dark) Color.rgb(108, 218, 255) else Color.rgb(12, 65, 115)
+        canvas.drawColor(if (dark) Color.rgb(2, 5, 11) else Color.WHITE)
+        when (family) {
+            ClockFamily.ANALOG -> {
+                val cx = 80f
+                val cy = 80f
+                canvas.drawCircle(cx, cy, 75f, stroke(ink, 4.5f))
+                val tick = stroke(ink, 4f)
+                repeat(12) { i ->
+                    val a = Math.toRadians(i * 30.0 - 90.0)
+                    val dx = cos(a).toFloat()
+                    val dy = sin(a).toFloat()
+                    canvas.drawLine(cx + dx * 55f, cy + dy * 55f,
+                        cx + dx * 67f, cy + dy * 67f, tick)
+                }
+                val h = Math.toRadians((time.hour % 12) * 30.0 + time.minute * 0.5 - 90.0)
+                val m = Math.toRadians(time.minute * 6.0 - 90.0)
+                canvas.drawLine(cx, cy, cx + cos(h).toFloat() * 43f,
+                    cy + sin(h).toFloat() * 43f, stroke(ink, 11f))
+                canvas.drawLine(cx, cy, cx + cos(m).toFloat() * 63f,
+                    cy + sin(m).toFloat() * 63f, stroke(accent, 8f))
+                canvas.drawCircle(cx, cy, 5f, fill(ink))
+            }
+            ClockFamily.DIGITAL ->
+                drawMiniText(canvas, time.format(timeFormat), 80f, 80f, 54f, ink, true)
+            ClockFamily.WEATHER -> {
+                // Contrast island lets existing icon drawing work on both themes.
+                canvas.drawCircle(80f, 52f, 35f, fill(Color.rgb(12, 23, 35)))
+                canvas.save()
+                canvas.translate(80f, 52f)
+                canvas.scale(0.55f, 0.55f)
+                drawWeatherIcon(canvas, weatherCode, isDay)
+                canvas.restore()
+                drawMiniText(canvas, temperature ?: "--°C", 80f, 119f, 54f, ink, false)
+            }
         }
+        return image
+    }
 
-        val hourAngle = Math.toRadians(
-            (time.hour % 12) * 30.0 + time.minute * 0.5 - 90.0
+    private fun drawMiniText(
+        canvas: Canvas, text: String, x: Float, y: Float,
+        size: Float, ink: Int, mono: Boolean
+    ) {
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = ink
+            textAlign = Paint.Align.CENTER
+            textSize = size
+            typeface = Typeface.create(
+                if (mono) Typeface.MONOSPACE else Typeface.DEFAULT, Typeface.BOLD
+            )
+        }
+        val width = paint.measureText(text)
+        if (width > 150f) paint.textSize *= 150f / width
+        val baseline = y - (paint.fontMetrics.ascent + paint.fontMetrics.descent) / 2f
+        canvas.drawText(text, x, baseline, paint)
+    }
+
+    /** Reverse only the light main artwork; dark incurs no additional work. */
+    private fun applyTheme(original: Bitmap, theme: ClockTheme): Bitmap {
+        if (theme == ClockTheme.DARK) return original
+        val result = Bitmap.createBitmap(
+            original.width, original.height, Bitmap.Config.RGB_565
         )
-        val minuteAngle = Math.toRadians(time.minute * 6.0 - 90.0)
-
-        canvas.drawLine(cx, cy,
-            cx + cos(hourAngle).toFloat() * 41f,
-            cy + sin(hourAngle).toFloat() * 41f,
-            stroke(white, 11f))
-        canvas.drawLine(cx, cy,
-            cx + cos(minuteAngle).toFloat() * 60f,
-            cy + sin(minuteAngle).toFloat() * 60f,
-            stroke(cyan, 7f))
-        canvas.drawCircle(cx, cy, 5f, fill(white))
-        return bitmap
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            colorFilter = ColorMatrixColorFilter(floatArrayOf(
+                -1f, 0f, 0f, 0f, 255f,
+                0f, -1f, 0f, 0f, 255f,
+                0f, 0f, -1f, 0f, 255f,
+                0f, 0f, 0f, 1f, 0f
+            ))
+        }
+        Canvas(result).drawBitmap(original, 0f, 0f, paint)
+        original.recycle()
+        return result
     }
 
     private fun drawSourceLabel(

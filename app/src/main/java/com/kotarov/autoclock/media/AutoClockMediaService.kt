@@ -14,6 +14,7 @@ import android.support.v4.media.session.PlaybackStateCompat
 import androidx.media.MediaBrowserServiceCompat
 import com.kotarov.autoclock.artwork.ClockArtworkProvider
 import com.kotarov.autoclock.artwork.ClockRenderer
+import com.kotarov.autoclock.media.ClockTheme
 import com.kotarov.autoclock.weather.WeatherStore
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -31,10 +32,6 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private var running = false
     private var preset = ClockPreset.ANALOG_PURE
     private var artworkGeneration = 0L
-    // Browse artwork changes at minute boundaries, using the existing
-    // minute timer. This does not change Android Auto's manifest app icon.
-    private var lastBrowseIconBucket: Long? = null
-
     private val settingsRefresh = Runnable {
         preset = selectedPreset()
         artworkGeneration += 1L
@@ -52,7 +49,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             key == ClockPreset.KEY_WEATHER_ADD_ANALOG ||
             key == ClockPreset.KEY_WEATHER_ADD_DIGITAL ||
             key == KEY_MODE || key == KEY_HIDE_MEDIA_TEXT ||
-            key == KEY_LAYOUT || key == KEY_PROGRESS_ANIMATED ||
+            key == KEY_LAYOUT || key == ClockTheme.KEY ||
+            key == KEY_PROGRESS_ANIMATED ||
             key == WeatherStore.KEY_CITY || key == "weather_cached_city" ||
             key == "weather_cached_mode" || key == "weather_station_label" ||
             key == "weather_source_name" ||
@@ -70,7 +68,6 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             preset = selectedPreset()
             publishClock()
             publishPlaybackState()
-            refreshBrowseIconIfDue()
             requestWeatherIfNecessary()
             scheduleNextMinute()
         }
@@ -81,7 +78,6 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         prefs = getSharedPreferences(PREFERENCES, MODE_PRIVATE)
         ClockSelectionStore.migrateSimplifiedIfNeeded(prefs)
         preset = selectedPreset()
-        lastBrowseIconBucket = ClockIconSchedule.bucket(LocalDateTime.now())
         session = MediaSessionCompat(this, "AutoClockV3").apply {
             setFlags(
                 MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS or
@@ -159,10 +155,14 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 .setMediaId("family_${family.id}")
                 .setTitle(family.label)
                 .setSubtitle(option.label)
-                // The clock thumbnail is a distinct 1-minute red/green diagnostic asset.
-                // The app icon shown in Android Auto's dock is still the
-                // static icon supplied by AndroidManifest.xml.
-                .setIconUri(ClockArtworkProvider.miniIconUri(now)).build()
+                .setIconUri(
+                    ClockArtworkProvider.miniArtworkUri(
+                        family, now,
+                        if (family == ClockFamily.WEATHER)
+                            WeatherStore.current(this)?.observedAtMs ?: 0L else 0L,
+                        selectedTheme()
+                    )
+                ).build()
             MediaBrowserCompat.MediaItem(
                 description, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE
             )
@@ -201,7 +201,10 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private fun compactLayout(): Boolean =
-        prefs.getString(KEY_LAYOUT, "compact") != "standard"
+        prefs.getString(KEY_LAYOUT, "standard") == "compact"
+
+    private fun selectedTheme(): ClockTheme =
+        ClockTheme.fromId(prefs.getString(ClockTheme.KEY, null))
 
     private fun animateProgress(): Boolean =
         prefs.getBoolean(KEY_PROGRESS_ANIMATED, false)
@@ -239,14 +242,6 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         WeatherStore.refreshIfDue(this)
     }
 
-    private fun refreshBrowseIconIfDue() {
-        val bucket = ClockIconSchedule.bucket(LocalDateTime.now())
-        if (bucket != lastBrowseIconBucket) {
-            lastBrowseIconBucket = bucket
-            notifyChildrenChanged(ROOT_ID)
-        }
-    }
-
     private fun publishClock() {
         val now = LocalDateTime.now()
         val weather = if (preset.usesWeather) WeatherStore.current(this) else null
@@ -272,15 +267,17 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             preset.hasDigitalTime -> now.format(DATE_FORMAT)
             else -> preset.label
         }
+        val theme = selectedTheme()
         val artwork = ClockArtworkProvider.artworkUri(
             preset.id, now, weather?.observedAtMs ?: 0L,
-            compactLayout(), artworkGeneration
+            compactLayout(), artworkGeneration, theme
         )
-        // Keep a separate, tightly cropped icon for the fullscreen-map media
-        // quick-control chip. It changes on the same one-minute schedule
-        // as the browse thumbnail, even though main album art changes
-        // every minute. The host decides which metadata field to display.
-        val miniArtwork = ClockArtworkProvider.miniIconUri(now)
+        val miniArtwork = ClockArtworkProvider.miniArtworkUri(
+            preset.family, now,
+            if (preset.family == ClockFamily.WEATHER)
+                weather?.observedAtMs ?: 0L else 0L,
+            theme
+        )
         val blank = hideMediaText()
         val shownTitle = if (blank) INVISIBLE_TEXT else title
         val shownSubtitle = if (blank) INVISIBLE_TEXT else subtitle
@@ -303,14 +300,11 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             preset.id, now, weather?.weatherCode, weather?.isDay ?: true,
             weather?.formattedTemperature, compactLayout(),
             outputSize = 320, condition = description,
-            sourceLabel = weather?.artworkSource
+            sourceLabel = weather?.artworkSource, theme = theme
         )
-        // The full art stays on the media card; the display icon is now
-        // independently large and legible when Android Auto uses it for the
-        // tiny now-playing bar. Red/green alternate every minute while Play runs.
-        // The small icon occupies ~50 KiB RGB_565.
-        val miniBitmap = ClockRenderer.renderBrowseClock(
-            ClockIconSchedule.slotStart(now), outputSize = 160
+        val miniBitmap = ClockRenderer.renderMini(
+            preset.family, now, weather?.weatherCode,
+            weather?.isDay ?: true, weather?.formattedTemperature, theme
         )
         val metadata = MediaMetadataCompat.Builder()
             .putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, miniBitmap)
