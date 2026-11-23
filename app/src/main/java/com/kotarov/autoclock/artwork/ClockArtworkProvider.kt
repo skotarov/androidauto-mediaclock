@@ -55,13 +55,15 @@ class ClockArtworkProvider : ContentProvider() {
         // phone settings invalidates both Android Auto and disk artwork caches.
         val layout = if (compact) "compact" else "standard"
         val destination = File(directory,
-            "v23-$layout-${theme.id}-${if (coloredWeatherIcons) "color" else "mono"}-$clockMode-$key-$weatherRevision.png")
+            "v29-$layout-${theme.id}-${if (coloredWeatherIcons) "color" else "mono"}-$clockMode-$key-$weatherRevision.png")
 
         synchronized(lock) {
             if (!destination.isFile || destination.length() == 0L) {
                 val temp = File(directory, "inflight-${System.nanoTime()}.tmp")
                 val mini = miniFamily(clockMode)
-                val bitmap = if (mini != null) {
+                val bitmap = if (clockMode == "mini_metrics") {
+                    ClockRenderer.renderMiniMetrics(theme)
+                } else if (mini != null) {
                     val weather = if (mini == ClockFamily.WEATHER)
                         WeatherStore.current(appContext) else null
                     ClockRenderer.renderMini(
@@ -130,7 +132,7 @@ class ClockArtworkProvider : ContentProvider() {
         const val AUTHORITY = "com.kotarov.autoclock2.artwork"
         private const val MAX_FILES = 6
         private val VALID_MODES = ClockPreset.entries.map { it.id }.toSet() +
-            setOf("clock", "analog", "weather", "both")
+            setOf("clock", "analog", "weather", "both", "mini_metrics")
         private val KEY_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd_HHmm")
 
         private fun miniFamily(id: String): ClockFamily? =
@@ -144,6 +146,13 @@ class ClockArtworkProvider : ContentProvider() {
             coloredWeatherIcons: Boolean = true
         ): Uri = artworkUri("mini_${family.id}", now, weatherRevision,
             theme = theme, coloredWeatherIcons = coloredWeatherIcons)
+
+        fun metricsArtworkUri(
+            now: LocalDateTime,
+            weatherRevision: Long = 0L,
+            theme: ClockTheme = ClockTheme.DARK
+        ): Uri = artworkUri("mini_metrics", now, weatherRevision,
+            theme = theme)
 
         fun artworkUri(
             mode: String,
@@ -159,7 +168,7 @@ class ClockArtworkProvider : ContentProvider() {
             .appendPath(mode)
             .appendPath("clock_${now.format(KEY_FORMAT)}.png")
             .appendQueryParameter("rev", weatherRevision.coerceAtLeast(0L).toString())
-            .appendQueryParameter("style", "v23")
+            .appendQueryParameter("style", "v29")
             .appendQueryParameter("weather_color", coloredWeatherIcons.toString())
             .appendQueryParameter("theme", theme.id)
             .appendQueryParameter("generation", generation.toString())

@@ -164,6 +164,32 @@ object ClockRenderer {
     }
 
 
+    /** Distinct low-cost miniature for pressure and station terrain elevation. */
+    fun renderMiniMetrics(
+        theme: ClockTheme = ClockTheme.DARK, outputSize: Int = 160
+    ): Bitmap {
+        require(outputSize in 64..256)
+        val image = Bitmap.createBitmap(outputSize, outputSize, Bitmap.Config.RGB_565)
+        val canvas = Canvas(image)
+        canvas.scale(outputSize / 160f, outputSize / 160f)
+        val dark = theme == ClockTheme.DARK
+        val ink = if (dark) Color.rgb(227, 239, 248) else Color.rgb(17, 33, 51)
+        val accent = if (dark) Color.rgb(108, 218, 255) else Color.rgb(24, 95, 149)
+        canvas.drawColor(if (dark) Color.rgb(2, 5, 11) else Color.WHITE)
+        canvas.drawCircle(80f, 64f, 49f, stroke(ink, 4f))
+        canvas.drawArc(45f, 29f, 115f, 99f, 200f, 140f, false, stroke(accent, 6f))
+        drawMiniText(canvas, "hPa", 80f, 63f, 37f, ink, false)
+        val mountains = Path().apply {
+            moveTo(22f, 139f)
+            lineTo(49f, 112f)
+            lineTo(67f, 125f)
+            lineTo(93f, 101f)
+            lineTo(138f, 139f)
+        }
+        canvas.drawPath(mountains, stroke(accent, 6f))
+        return image
+    }
+
     /** Media quick-control graphic: always ONE primary family, never add-ons. */
     fun renderMini(
         family: ClockFamily,
