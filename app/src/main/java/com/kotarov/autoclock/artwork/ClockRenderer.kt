@@ -23,16 +23,14 @@ import kotlin.math.sin
 object ClockRenderer {
     const val SIZE = 512
     private const val CENTER_X = 256f
-    // Different optical centres for compact and standard Android Auto tiles.
-    // Restore the full original large analog radius and original horizontal
-    // centre. Lower only the standard dial, leaving room for the host crop.
-    // The clock's own digits, weather and source label move together with it.
+    // The large analog dial uses the original v0.29/v0.30 geometry except
+    // for a minimal 6px downward adjustment to prevent top-rim cropping.
+    // No padding, scaling or horizontal translation is applied.
     private const val CONTENT_CENTER_Y = 190f
     private const val COMPACT_ANALOG_CENTER_Y = 208f
-    // Previously 216px (v0.30) / 236px with smaller 104px radius (v0.31).
-    // With the original 122px radius, centre 254 keeps the same top rim as
-    // v0.31: 254 - 122 = 132px, but restores the original large size.
-    private const val STANDARD_ANALOG_CENTER_Y = 254f
+    // Original standard Y=216 with radius 122. Restore original near-top
+    // placement, adding only 6px clearance: Y=222, top=100 instead of 94.
+    private const val STANDARD_ANALOG_CENTER_Y = 222f
     private const val COMPACT_RADIUS = 96f
     private const val STANDARD_RADIUS = 122f
     // Keep the analog forecast at the same size and vertical position with

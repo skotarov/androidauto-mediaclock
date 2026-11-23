@@ -1,9 +1,22 @@
-# Auto Clock 2 — beta 0.32
+# Auto Clock 2 — beta 0.33
 
 An experimental battery-conscious clock for Android Auto's media card next to
 navigation. Android Auto officially reserves the media template for audio apps;
 this project displays a clock without playing audio, so not every head unit is
 guaranteed to support it.
+
+## v0.33: return to nearly original high analog dial position
+
+- Verified original renderer geometry from v0.29 and v0.30:
+  standard analog centre **Y=216**, radius **122**, horizontal centre X=256.
+- v0.32 moved the centre too far down (Y=254) and visibly centered the dial.
+  This release uses **Y=222**: only **6 pixels lower** than the original,
+  with the same full radius 122 and horizontal centre 256.
+- No artificial top padding, new scaling, translation or centering.
+  The dial should just clear the top edge in the compact dashboard tile.
+  The exact crop is controlled by Android Auto and needs a car test.
+- Compact clock, digital mode, weather forecast and refresh rates are untouched.
+  Bump artwork cache ID so the car does not reuse the previous image.
 
 ## v0.32: restore original large analog face without horizontal shift
 
@@ -365,7 +378,7 @@ tested on the target phone and Android Auto head unit.
 
 ## Download and install
 
-[AutoClock-2-v0.32-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.32.0-beta)
+[AutoClock-2-v0.33-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.33.0-beta)
 
 1. Open the beta release under **Releases**, then tap the APK under **Assets**.
 2. Install it on the Android phone connected to the car.
@@ -376,7 +389,14 @@ tested on the target phone and Android Auto head unit.
 5. Open Auto Clock 2 in the Android Auto media launcher and press Play, then
    switch to navigation's split-screen view.
 
-## Testing checklist (v0.32)
+## Testing checklist (v0.33)
+
+- [ ] Full-sized analog dial is again near the TOP of the small dashboard tile
+- [ ] Only ~6px vertical movement from old v0.29/0.30 high position
+- [ ] Upper rim touches the top without being cut or showing excessive space
+- [ ] No horizontal shift and no altered compact/digital/weather artwork
+
+
 
 - [ ] Standard large analog dial regains full pre-v0.31 size
 - [ ] Analog horizontal center is the original position, not shifted right
