@@ -13,7 +13,8 @@ import kotlin.math.roundToInt
 /**
  * Six NEXT whole hours from an Open-Meteo modeled forecast, separate from
  * current METAR weather. The existing weather worker reuses its coordinates:
- * no extra GPS fix or service, at most one hourly-forecast HTTP call per hour.
+ * no extra GPS fix or service; normal HTTP reads cap at 15 minutes.
+ * Explicit Pause/settings-open refreshes may bypass this cap.
  */
 object ForecastStore {
     // Fresh cache keys: never read the older v0.35 daily forecast as hourly.
@@ -22,8 +23,8 @@ object ForecastStore {
     private const val KEY_DATA = "forecast_hourly_payload_v36"
     private const val KEY_LAST_ATTEMPT = "forecast_hourly_attempt_v36"
     private const val KEY_ATTEMPT_MODE = "forecast_hourly_attempt_mode_v36"
-    private const val FETCH_INTERVAL_MS = 60L * 60L * 1000L
-    private const val RETRY_INTERVAL_MS = 20L * 60L * 1000L
+    private const val FETCH_INTERVAL_MS = 15L * 60L * 1000L
+    private const val RETRY_INTERVAL_MS = 10L * 60L * 1000L
     private const val MAX_CACHE_AGE_MS = 4L * 60L * 60L * 1000L
 
     data class Hour(
@@ -64,16 +65,17 @@ object ForecastStore {
 
     /** Invoked ONLY from WeatherStore's existing background weather thread. */
     fun refreshIfDueOnWorker(
-        app: Context, mode: String, latitude: Double, longitude: Double
+        app: Context, mode: String, latitude: Double, longitude: Double,
+        force: Boolean = false
     ) {
         val prefs = app.getSharedPreferences(WeatherStore.PREFS, Context.MODE_PRIVATE)
         val now = System.currentTimeMillis()
         val savedAt = prefs.getLong(KEY_SAVED_AT, 0L)
         val hasFresh = prefs.getString(KEY_MODE, null) == mode &&
             savedAt > 0 && now - savedAt in 0..FETCH_INTERVAL_MS
-        if (hasFresh) return
+        if (!force && hasFresh) return
         val lastAttempt = prefs.getLong(KEY_LAST_ATTEMPT, 0L)
-        if (prefs.getString(KEY_ATTEMPT_MODE, null) == mode &&
+        if (!force && prefs.getString(KEY_ATTEMPT_MODE, null) == mode &&
             now >= lastAttempt && now - lastAttempt < RETRY_INTERVAL_MS) return
         prefs.edit()
             .putLong(KEY_LAST_ATTEMPT, now)

@@ -209,7 +209,8 @@ object WeatherStore {
                     callback(false)
                 } else {
                     fetchOnThread(
-                        app, selected, callback, location.latitude, location.longitude
+                        app, selected, callback, location.latitude, location.longitude,
+                        force
                     ) {
                         fetchNearestStation(location) ?: fetchAutoModelFallback(location)
                     }
@@ -217,7 +218,7 @@ object WeatherStore {
             }
         } else {
             val manual = City.byId(selected)
-            fetchOnThread(app, selected, callback, manual.lat, manual.lon) {
+            fetchOnThread(app, selected, callback, manual.lat, manual.lon, force) {
                 fetchModel(
                     manual.lat, manual.lon,
                     manual.label, "Open-Meteo · модел"
@@ -232,15 +233,18 @@ object WeatherStore {
         callback: (Boolean) -> Unit,
         latitude: Double,
         longitude: Double,
+        forceForecast: Boolean,
         request: () -> Reading?
     ) {
         Thread({
             val result = try { request() } catch (_: Exception) { null }
             // Forecast uses the same approximate coordinates; no extra GPS.
-            // ForecastStore handles three-hour throttle and retry internally.
+            // Auto 15m ticks are throttled; an explicit Pause/settings open
+            // requests a fresh forecast as well as current observations.
             try {
                 ForecastStore.refreshIfDueOnWorker(
-                    app, selectionAtStart, latitude, longitude
+                    app, selectionAtStart, latitude, longitude,
+                    force = forceForecast
                 )
             } catch (_: Exception) {
                 // An unavailable forecast must not break the current weather.
