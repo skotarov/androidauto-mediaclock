@@ -23,6 +23,7 @@ import com.kotarov.autoclock.media.ClockFamily
 import com.kotarov.autoclock.media.ClockPreset
 import com.kotarov.autoclock.media.ClockSelectionStore
 import com.kotarov.autoclock.media.ClockTheme
+import com.kotarov.autoclock.media.PlaybackDisplay
 import com.kotarov.autoclock.weather.WeatherStore
 import java.text.SimpleDateFormat
 import java.time.LocalDateTime
@@ -30,7 +31,7 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Phone-side configuration: three main visual styles and contextual options.
+ * Phone-side configuration: two clock styles; Pause always shows weather.
  * SharedPreferences updates are observed by the bound media service immediately,
  * without recurring worker, polling timer, location permission or wake lock.
  */
@@ -68,7 +69,10 @@ class MainActivity : AppCompatActivity() {
         setContentView(scroll)
 
         root.addView(label("Auto Clock 2", 30f, light, dp(5)))
-        root.addView(label("Три основни визии с допълнения към всяка", 16f, muted, dp(16)))
+        root.addView(label(
+            "Play — избраният часовник · Pause — времето",
+            16f, muted, dp(16)
+        ))
 
         preview = ImageView(this).apply {
             scaleType = ImageView.ScaleType.FIT_CENTER
@@ -84,7 +88,7 @@ class MainActivity : AppCompatActivity() {
         val mainGroup = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
         val familyIds = mutableMapOf<Int, ClockFamily>()
         val initial = currentPreset()
-        for (family in ClockFamily.entries) {
+        for (family in PlaybackDisplay.selectableFamilies) {
             val rb = radio(family.label)
             familyIds[rb.id] = family
             mainGroup.addView(rb)
@@ -98,8 +102,8 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(optionsContainer)
         root.addView(label(
-            "При аналоговия можеш да махнеш цифровия час и да оставиш само " +
-                "циферблата и стрелките. Другите две визии имат по една добавка.",
+            "При аналоговия можеш да оставиш само циферблата и стрелките. " +
+                "Времето се появява автоматично при Pause, без да сменя избрания часовник.",
             14f, muted, dp(18)
         ))
 
@@ -233,9 +237,9 @@ class MainActivity : AppCompatActivity() {
         root.addView(refresh)
 
         root.addView(label(
-            "В Android Auto избираш една от трите основни визии. " +
-                "Отметките за всяка се запазват поотделно. Часовникът " +
-                "се обновява веднъж в минута, времето — най-много веднъж на 15 минути.",
+            "В Android Auto избираш аналогов или цифров часовник. " +
+                "Play показва часовника (с избраните добавки), Pause — времето. " +
+                "Часовникът се обновява на минута, времето — на 15 минути.",
             14f, muted, dp(8)
         ))
         root.addView(label("Източници: NOAA Aviation Weather (METAR измервания) " +
@@ -282,8 +286,8 @@ class MainActivity : AppCompatActivity() {
             }
             ClockFamily.DIGITAL ->
                 addOption("Добави времето", ClockPreset.KEY_DIGITAL_ADD_WEATHER)
-            ClockFamily.WEATHER ->
-                addOption("Добави цифров час", ClockPreset.KEY_WEATHER_ADD_DIGITAL)
+            // Weather is Pause-only and is not selectable in the phone UI.
+            ClockFamily.WEATHER -> Unit
         }
     }
 

@@ -2,7 +2,7 @@ package com.kotarov.autoclock.media
 
 import android.content.SharedPreferences
 
-/** Persist independent checkbox choices for each of the three radio styles. */
+/** Persist analog/digital choices; weather-only is the Pause display. */
 object ClockSelectionStore {
     private const val KEY_SCHEMA_V13 = "display_simplified_v13"
     private const val KEY_ANALOG_DEFAULT_OFF_V20 = "analog_digital_default_off_v20"
@@ -83,8 +83,9 @@ object ClockSelectionStore {
     }
 
     fun current(prefs: SharedPreferences): ClockPreset {
-        val family = ClockFamily.fromId(prefs.getString(ClockPreset.KEY_FAMILY, null))
-            ?: ClockFamily.ANALOG
+        val family = PlaybackDisplay.clockFamily(
+            ClockFamily.fromId(prefs.getString(ClockPreset.KEY_FAMILY, null))
+        )
         return forFamily(prefs, family)
     }
 

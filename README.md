@@ -1,4 +1,4 @@
-# Auto Clock 2 — beta 0.24
+# Auto Clock 2 — beta 0.25
 
 An experimental battery-conscious clock for Android Auto's media card next to
 navigation. Android Auto officially reserves the media template for audio apps;
@@ -7,21 +7,26 @@ guaranteed to support it.
 
 ## Phone settings
 
-The three primary radio styles have optional checkboxes:
+The two selectable clock styles have their existing optional checkboxes:
 
-| Main style | Without checkbox | With checkbox |
+| Play clock style | Without checkbox | With checkbox |
 | --- | --- | --- |
-| Аналогов часовник | **Pure analog dial and hands** with no checkboxes | Check **Добави цифров час** and/or **Добави времето** |
+| Аналогов часовник | Pure analog dial and hands | Add digital time and/or weather |
 | Цифров часовник | Large HH:mm | Also add weather |
-| Времето | Large weather icon, temperature and description | Also add smaller digital HH:mm |
+
+**Play** always shows the selected analog/digital clock and its options.
+**Pause** immediately switches the same media card and mini media artwork to
+the **weather-only** display (colored weather icon, temperature, description,
+and city-only label). Pause does not change the saved clock selection; the
+following Play restores exactly the selected analog/digital clock.
 
 The old multi-add-on combinations are migrated into these simpler options.
 The analog style now starts with **Добави цифров час** unchecked. On upgrade
 from v0.13–v0.19 the previous forced-on setting is cleared **once**; after
 that, any manual change is remembered. Other style and weather preferences stay unchanged.
-Each main style remembers its checkbox(es) independently. Analogue has two
-independent switches, allowing four distinct looks (pure dial, digital time,
-weather, or both). Digital and Weather each have one optional switch.
+Each clock style remembers its checkbox(es) independently. Analog has two
+independent switches; Digital has one. Weather-only remains an internal renderer
+for Pause and legacy compatibility, not an option in the clock chooser.
 
 Other phone settings: Standard (default) / Compact artwork, Dark (default) / Light (reversed) theme, hide media text, city/source,
 and **Движение на прогрес бара (секунди)**. The progress option now defaults
@@ -31,6 +36,25 @@ When enabled, progress is a virtual 60-second track anchored to the actual
 second; no second-by-second bitmap or background job is created. When disabled,
 metadata omits duration and reports an unknown position with speed zero. The
 Android Auto host may still draw an empty/static line.
+
+## v0.25: Play = clock, Pause = weather
+
+The phone and Android Auto media-browser selectors contain only Analog and
+Digital. Pause switches the main media artwork, small quick-control artwork,
+queue entry, title and subtitle to the weather-only display. The default
+weather source remains Auto; previous manual selections stay saved.
+
+The weather report is requested immediately on entering Pause if due, then
+checked every **15 minutes** while the bound media service is alive, using
+a delayed main-thread Handler callback rather than a wake lock, alarm or
+continuous location listener. The cached result updates the paused media
+metadata through the existing preferences listener. Paused mode does not
+run the 1-minute clock artwork ticker. When Play resumes, the paused weather
+callback is cancelled and minute-aligned clock updates resume.
+
+Legacy saved "Weather" clock mode and stale Android Auto weather media IDs
+safely select Analog instead. The internal Weather renderer is retained for
+the Pause screen. All sizes, colors and existing clock add-ons are unchanged.
 
 ## v0.24: clean Android Auto media card text
 
@@ -189,7 +213,7 @@ tested on the target phone and Android Auto head unit.
 
 ## Download and install
 
-[AutoClock-2-v0.24-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.24.0-beta)
+[AutoClock-2-v0.25-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.25.0-beta)
 
 1. Open the beta release under **Releases**, then tap the APK under **Assets**.
 2. Install it on the Android phone connected to the car.
@@ -200,7 +224,18 @@ tested on the target phone and Android Auto head unit.
 5. Open Auto Clock 2 in the Android Auto media launcher and press Play, then
    switch to navigation's split-screen view.
 
-## Testing checklist (v0.24)
+## Testing checklist (v0.25)
+
+- [ ] Phone and Android Auto show ONLY Analog and Digital clock choices
+- [ ] Play shows the chosen clock with its saved existing add-ons
+- [ ] Pause immediately shows weather-only artwork (not the previous clock)
+- [ ] Mini media-panel artwork also switches to weather on Pause
+- [ ] Pause displays concise weather/temperature/city labels
+- [ ] Paused weather checks only once every 15 minutes while service is alive
+- [ ] Play resumes the originally selected clock, with minute updates
+- [ ] Legacy previously selected Weather style defaults safely to Analog
+- [ ] All previous themes, colors, clock sizes and weather options remain
+
 
 - [ ] Pure analog: only HH:mm in the text below the clock
 - [ ] Analog with weather: HH:mm and only weather glyph + city (e.g. ☁ София)

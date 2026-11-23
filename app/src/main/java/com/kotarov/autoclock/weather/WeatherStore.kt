@@ -21,14 +21,15 @@ import kotlin.math.roundToInt
  * Open-Meteo model at the approximate device location.
  *
  * No continuous GPS listener, wakelock, ongoing background work or per-minute
- * weather requests. Requests are normally capped to once per 15 minutes while Play is active.
+ * weather requests. Requests are capped to once per 15 minutes in weather display.
  */
 object WeatherStore {
     const val PREFS = "clock_settings"
     const val KEY_CITY = "weather_city"
     const val KEY_COLORED_ICONS = "weather_colored_icons"
     const val AUTO_ID = "auto"
-    private const val MIN_RETRY_MS = 15L * 60L * 1000L
+    const val REFRESH_INTERVAL_MS = 15L * 60L * 1000L
+    private const val MIN_RETRY_MS = REFRESH_INTERVAL_MS
     private const val MAX_AGE_MS = 3L * 60L * 60L * 1000L
     private const val MAX_OBSERVATION_AGE_MS = 3L * 60L * 60L * 1000L
 

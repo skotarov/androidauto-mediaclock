@@ -62,6 +62,18 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         }
     }
 
+    // Pause is a weather screen. One small Handler task refreshes it every
+    // 15 minutes while the media service is alive, with no wake lock or GPS
+    // subscription. It is cancelled as soon as Play resumes.
+    private val pausedWeatherTick = object : Runnable {
+        override fun run() {
+            if (running) return
+            requestWeatherIfNecessary()
+            publishClock()
+            schedulePausedWeatherRefresh()
+        }
+    }
+
     private val minuteTick = object : Runnable {
         override fun run() {
             if (!running) return
@@ -99,24 +111,24 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 }
                 override fun onPlayFromSearch(query: String?, extras: Bundle?) {
                     val q = query?.lowercase(Locale.ROOT).orEmpty()
-                    val family = when {
-                        "weather" in q || "врем" in q -> ClockFamily.WEATHER
-                        "digital" in q || "цифр" in q -> ClockFamily.DIGITAL
-                        else -> ClockFamily.ANALOG
-                    }
+                    val family = if ("digital" in q || "цифр" in q)
+                        ClockFamily.DIGITAL else ClockFamily.ANALOG
                     chooseFamily(family)
                     startClock()
                 }
                 override fun onPause() = stopClock()
                 override fun onStop() = stopClock()
                 override fun onSkipToNext() {
-                    val next = ClockFamily.entries[(preset.family.ordinal + 1) % ClockFamily.entries.size]
+                    val options = PlaybackDisplay.selectableFamilies
+                    val next = options[(options.indexOf(preset.family) + 1) % options.size]
                     chooseFamily(next)
                     startClock()
                 }
                 override fun onSkipToPrevious() {
-                    val count = ClockFamily.entries.size
-                    val previous = ClockFamily.entries[(preset.family.ordinal + count - 1) % count]
+                    val options = PlaybackDisplay.selectableFamilies
+                    val previous = options[
+                        (options.indexOf(preset.family) + options.size - 1) % options.size
+                    ]
                     chooseFamily(previous)
                     startClock()
                 }
@@ -127,6 +139,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         prefs.registerOnSharedPreferenceChangeListener(prefsListener)
         publishClock()
         publishPlaybackState()
+        requestWeatherIfNecessary()
+        schedulePausedWeatherRefresh()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int =
@@ -147,9 +161,9 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             return
         }
         val now = LocalDateTime.now()
-        // One simple item per main radio style; checkboxes are configured on
-        // the phone, so Android Auto does not show a confusing 12-item list.
-        val items = ClockFamily.entries.map { family ->
+        // Only Analog and Digital appear in the media browser; weather is
+        // shown through Pause, not as a third selectable clock.
+        val items = PlaybackDisplay.selectableFamilies.map { family ->
             val option = ClockSelectionStore.forFamily(prefs, family)
             val description = MediaDescriptionCompat.Builder()
                 .setMediaId("family_${family.id}")
@@ -173,6 +187,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     override fun onDestroy() {
         running = false
         handler.removeCallbacks(minuteTick)
+        handler.removeCallbacks(pausedWeatherTick)
         handler.removeCallbacks(settingsRefresh)
         prefs.unregisterOnSharedPreferenceChangeListener(prefsListener)
         session.isActive = false
@@ -184,8 +199,9 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         ClockSelectionStore.current(prefs)
 
     private fun chooseFamily(family: ClockFamily) {
-        preset = ClockSelectionStore.forFamily(prefs, family)
-        prefs.edit().putString(ClockPreset.KEY_FAMILY, family.id).apply()
+        val clockFamily = PlaybackDisplay.clockFamily(family)
+        preset = ClockSelectionStore.forFamily(prefs, clockFamily)
+        prefs.edit().putString(ClockPreset.KEY_FAMILY, clockFamily.id).apply()
     }
 
     private fun chooseFromMediaId(id: String?) {
@@ -193,10 +209,15 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         if (family != null) {
             chooseFamily(family)
         } else {
-            // Older Android Auto hosts may retain previous media IDs.
+            // Previously cached weather-only media IDs are interpreted as
+            // analog clock; Pause displays weather independently of selection.
             val selected = ClockPreset.fromId(id)
-            preset = selected
-            ClockSelectionStore.choose(prefs, selected)
+            if (selected.family == ClockFamily.WEATHER) {
+                chooseFamily(ClockFamily.ANALOG)
+            } else {
+                preset = selected
+                ClockSelectionStore.choose(prefs, selected)
+            }
         }
     }
 
@@ -217,6 +238,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     private fun startClock() {
         running = true
+        handler.removeCallbacks(pausedWeatherTick)
         publishClock()
         publishPlaybackState()
         requestWeatherIfNecessary()
@@ -226,8 +248,21 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private fun stopClock() {
         running = false
         handler.removeCallbacks(minuteTick)
+        publishClock()
         publishPlaybackState()
+        requestWeatherIfNecessary()
+        schedulePausedWeatherRefresh()
     }
+
+    private fun schedulePausedWeatherRefresh() {
+        handler.removeCallbacks(pausedWeatherTick)
+        if (!running) {
+            handler.postDelayed(pausedWeatherTick, WeatherStore.REFRESH_INTERVAL_MS)
+        }
+    }
+
+    private fun visiblePreset(): ClockPreset =
+        PlaybackDisplay.visiblePreset(preset, running)
 
     private fun scheduleNextMinute() {
         handler.removeCallbacks(minuteTick)
@@ -239,26 +274,27 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private fun requestWeatherIfNecessary() {
-        if (!running || !preset.usesWeather) return
-        // A successful response is delivered through the SharedPreferences
-        // listener; no separate per-second worker or polling is required.
+        if (!visiblePreset().usesWeather) return
+        // A successful response triggers the preferences listener; Pause
+        // checks once per 15 minutes, while Play uses the minute clock tick.
         WeatherStore.refreshIfDue(this)
     }
 
     private fun publishClock() {
         val now = LocalDateTime.now()
-        val weather = if (preset.usesWeather) WeatherStore.current(this) else null
+        val visible = visiblePreset()
+        val weather = if (visible.usesWeather) WeatherStore.current(this) else null
         val description = weather?.description ?: "Няма данни"
-        val mediaLines = ClockMediaLabels.forClock(preset, now, weather)
+        val mediaLines = ClockMediaLabels.forClock(visible, now, weather)
         val theme = selectedTheme()
         val colored = coloredWeatherIcons()
         val artwork = ClockArtworkProvider.artworkUri(
-            preset.id, now, weather?.observedAtMs ?: 0L,
+            visible.id, now, weather?.observedAtMs ?: 0L,
             compactLayout(), artworkGeneration, theme, colored
         )
         val miniArtwork = ClockArtworkProvider.miniArtworkUri(
-            preset.family, now,
-            if (preset.family == ClockFamily.WEATHER)
+            visible.family, now,
+            if (visible.family == ClockFamily.WEATHER)
                 weather?.observedAtMs ?: 0L else 0L,
             theme, colored
         )
@@ -271,33 +307,33 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val shownAlbum = INVISIBLE_TEXT
 
         val item = MediaDescriptionCompat.Builder()
-            .setMediaId(preset.id)
+            .setMediaId(visible.id)
             .setTitle(shownTitle)
             .setSubtitle(shownSubtitle)
             .setDescription(shownDescription)
             .setIconUri(artwork)
             .build()
         session.setQueueTitle(shownAlbum)
-        session.setQueue(listOf(MediaSessionCompat.QueueItem(item, preset.queueId)))
+        session.setQueue(listOf(MediaSessionCompat.QueueItem(item, visible.queueId)))
 
         // Provide a small direct bitmap as well as an URI, because some Android
         // Auto versions keep the previous URI artwork while text changes live.
         val art = ClockRenderer.render(
-            preset.id, now, weather?.weatherCode, weather?.isDay ?: true,
+            visible.id, now, weather?.weatherCode, weather?.isDay ?: true,
             weather?.formattedTemperature, compactLayout(),
             outputSize = 320, condition = description,
             sourceLabel = weather?.artworkSource, theme = theme,
             coloredWeatherIcons = colored
         )
         val miniBitmap = ClockRenderer.renderMini(
-            preset.family, now, weather?.weatherCode,
+            visible.family, now, weather?.weatherCode,
             weather?.isDay ?: true, weather?.formattedTemperature, theme,
             coloredWeatherIcons = colored
         )
         val metadata = MediaMetadataCompat.Builder()
             .putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, miniBitmap)
             .putBitmap(MediaMetadataCompat.METADATA_KEY_ART, art)
-            .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, preset.id)
+            .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, visible.id)
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, shownTitle)
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, shownSubtitle)
             .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, shownAlbum)
@@ -343,7 +379,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                     SystemClock.elapsedRealtime()
                 )
                 .setActions(actions)
-                .setActiveQueueItemId(preset.queueId)
+                .setActiveQueueItemId(visiblePreset().queueId)
                 .build()
         )
     }
