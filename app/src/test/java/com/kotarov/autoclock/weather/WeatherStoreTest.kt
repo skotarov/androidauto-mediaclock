@@ -24,6 +24,35 @@ class WeatherStoreTest {
         assertEquals("⚡", WeatherStore.symbol(95))
     }
 
+    @Test fun unconfiguredWeatherDefaultsToAutoButRespectsManualCity() {
+        assertEquals(WeatherStore.AUTO_ID, WeatherStore.selectedMode(null))
+        assertEquals(WeatherStore.AUTO_ID, WeatherStore.selectedMode("auto"))
+        assertEquals("sofia", WeatherStore.selectedMode("sofia"))
+        assertEquals("varna", WeatherStore.selectedMode("varna"))
+    }
+
+    @Test fun clockPlaceLabelOmitsStationAndBracketedCode() {
+        assertEquals("София",
+            WeatherStore.simplePlaceLabel("Станция София (LBSF)"))
+        assertEquals("София",
+            WeatherStore.simplePlaceLabel("Район София"))
+        assertEquals("Варна",
+            WeatherStore.simplePlaceLabel("Станция Варна (LBWN)"))
+        val observed = WeatherStore.Snapshot(
+            temperatureC = 12.0,
+            weatherCode = 2,
+            observedAtMs = 10L,
+            isDay = true,
+            originLabel = "Станция София (LBSF)",
+            sourceLabel = "NOAA · измерване METAR",
+            reportTimeMs = 10L,
+            autoSelected = true
+        )
+        assertEquals("София", observed.artworkSource)
+        // Retain full provenance for phone source/status.
+        assertEquals("Станция София (LBSF)", observed.originLabel)
+    }
+
     @Test fun unknownCityFallsBackToSofia() {
         assertEquals(WeatherStore.City.SOFIA, WeatherStore.City.byId("unknown"))
         assertEquals(WeatherStore.City.SOFIA, WeatherStore.City.byId(null))

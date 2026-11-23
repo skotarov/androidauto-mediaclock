@@ -59,12 +59,21 @@ object WeatherStore {
     ) {
         val formattedTemperature: String get() = "${temperatureC.roundToInt()}°C"
         val description: String get() = describe(weatherCode)
+        // Station/ICAO and observation provenance stay in phone settings.
+        // Only the city/place is shown below the clock face.
         val artworkSource: String? get() =
-            if (autoSelected) {
-                if (sourceLabel.contains("модел")) "Модел · $originLabel"
-                else originLabel.removePrefix("Станция ")
-            } else null
+            if (autoSelected) WeatherStore.simplePlaceLabel(originLabel) else null
     }
+
+    /** Strip station markers and bracketed ICAO codes on the main clock. */
+    fun simplePlaceLabel(value: String): String =
+        value.removePrefix("Станция ")
+            .removePrefix("Район ")
+            .substringBefore(" (")
+            .trim()
+
+    /** Automatic weather is the default unless the user chose a source. */
+    fun selectedMode(saved: String?): String = saved ?: AUTO_ID
 
     private data class Reading(
         val temperature: Double,
@@ -77,7 +86,7 @@ object WeatherStore {
 
     fun isAuto(context: Context): Boolean =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_CITY, null) == AUTO_ID
+            .getString(KEY_CITY, null).let { selectedMode(it) } == AUTO_ID
 
     fun city(context: Context): City =
         City.byId(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -113,7 +122,7 @@ object WeatherStore {
     /** Cache is tied to the manual city or auto mode; never show old-city data. */
     fun current(context: Context): Snapshot? {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val selected = prefs.getString(KEY_CITY, null) ?: City.SOFIA.id
+        val selected = selectedMode(prefs.getString(KEY_CITY, null))
         val cachedMode = prefs.getString("weather_cached_mode",
             prefs.getString("weather_cached_city", null))
         if (cachedMode != selected) return null
@@ -155,7 +164,7 @@ object WeatherStore {
     ) {
         val app = context.applicationContext
         val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val selected = prefs.getString(KEY_CITY, null) ?: City.SOFIA.id
+        val selected = selectedMode(prefs.getString(KEY_CITY, null))
         val now = System.currentTimeMillis()
         val lastAttempt = prefs.getLong("weather_attempt_at", 0L)
         if (!force && prefs.getString("weather_attempt_city", null) == selected &&
@@ -198,8 +207,8 @@ object WeatherStore {
             val result = try { request() } catch (_: Exception) { null }
             var saved = false
             if (result != null &&
-                app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                    .getString(KEY_CITY, City.SOFIA.id) == selectionAtStart
+                selectedMode(app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .getString(KEY_CITY, null)) == selectionAtStart
             ) {
                 val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 prefs.edit()

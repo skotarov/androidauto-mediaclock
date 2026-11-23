@@ -1,4 +1,4 @@
-# Auto Clock 2 — beta 0.21
+# Auto Clock 2 — beta 0.22
 
 An experimental battery-conscious clock for Android Auto's media card next to
 navigation. Android Auto officially reserves the media template for audio apps;
@@ -31,6 +31,23 @@ When enabled, progress is a virtual 60-second track anchored to the actual
 second; no second-by-second bitmap or background job is created. When disabled,
 metadata omits duration and reports an unknown position with speed zero. The
 Android Auto host may still draw an empty/static line.
+
+## v0.22 weather and static icon defaults
+
+The weather source defaults to **Auto**, which selects the closest available
+fresh METAR report using one approximate device-location fix, falling back to
+the labeled Open-Meteo model. First launch of phone settings requests coarse
+location permission; the Android Auto media service never requests permission
+by itself. Existing explicitly saved manual city selections remain unchanged.
+
+On Android Auto's main clock the source label shows only the city/place, such
+as **София** rather than **София (LBSF)**; the full station code, original
+observation source and report time remain visible in phone settings.
+The unchanging app/dock vector icon now uses subdued blue-gray clock hands,
+marks and center dot instead of bright white hands.
+
+`v0.21` features remain: Standard clock size, Dark theme, family-only
+large mini-media display and 15-minute weather requests.
 
 ## Weather source
 
@@ -137,7 +154,7 @@ tested on the target phone and Android Auto head unit.
 
 ## Download and install
 
-[AutoClock-2-v0.21-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.21.0-beta)
+[AutoClock-2-v0.22-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.22.0-beta)
 
 1. Open the beta release under **Releases**, then tap the APK under **Assets**.
 2. Install it on the Android phone connected to the car.
@@ -148,7 +165,13 @@ tested on the target phone and Android Auto head unit.
 5. Open Auto Clock 2 in the Android Auto media launcher and press Play, then
    switch to navigation's split-screen view.
 
-## Testing checklist (v0.21)
+## Testing checklist (v0.22)
+
+- [ ] Fresh install defaults to Auto weather; prompts for approximate location on phone
+- [ ] Previously selected manual city persists after an update
+- [ ] Android Auto clock source shows "София" rather than "София (LBSF)"
+- [ ] Phone settings still identify the measured station/source
+- [ ] Static app/dock icon hands look less bright
 
 - [ ] Standard size and dark background selected by default
 - [ ] Light/reversed appearance applies to main clock and mini controls

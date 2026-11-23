@@ -47,6 +47,12 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val prefs = getSharedPreferences(AutoClockMediaService.PREFERENCES, MODE_PRIVATE)
+        // Only a previously UNSET source is initialized to Auto.
+        // Explicitly selected manual cities survive upgrades and restarts.
+        val firstAutoSetup = !prefs.contains(WeatherStore.KEY_CITY)
+        if (firstAutoSetup) {
+            prefs.edit().putString(WeatherStore.KEY_CITY, WeatherStore.AUTO_ID).apply()
+        }
 
         ClockSelectionStore.migrateSimplifiedIfNeeded(prefs)
 
@@ -229,7 +235,13 @@ class MainActivity : AppCompatActivity() {
 
         updateWeatherStatus()
         updatePreview()
-        requestWeatherForPreview()
+        if (firstAutoSetup && !WeatherLocation.permitted(this)) {
+            // The phone may request coarse location once; Android Auto's
+            // media service never opens a runtime permission dialog.
+            askForLocation()
+        } else {
+            requestWeatherForPreview()
+        }
     }
 
     private fun currentPreset(): ClockPreset =
