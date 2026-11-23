@@ -1,9 +1,35 @@
-# Auto Clock 2 — beta 0.33
+# Auto Clock 2 — beta 0.34
 
 An experimental battery-conscious clock for Android Auto's media card next to
 navigation. Android Auto officially reserves the media template for audio apps;
 this project displays a clock without playing audio, so not every head unit is
 guaranteed to support it.
+
+## v0.34: no media lists, test dashboard page dots, digital dial 10px lower
+
+**Goal:** test whether removing media browsing makes Android Auto's
+two dashboard page dots disappear when the clock is beside navigation.
+Android Auto's dashboard compositor owns the dots. The app cannot force
+their removal for just one layout. If they remain, they are host-controlled.
+
+- `onLoadChildren()` returns **zero** media items for every browser root.
+  No playable songs, forecast entries or folders. The MediaSession queue
+  is also empty; only the latest active clock/weather metadata remains.
+- `onPlay()` still shows the chosen clock and `onPause()/onStop()`
+  still show current weather, without fake audio or skip actions.
+- The digital-only face (with or without its weather add-on) is shifted
+  **down 10 artwork pixels**. Analog's original high position and size
+  from v0.33 are left entirely untouched. Weather-only artwork unchanged.
+- With no forecast list, the previous extra 3-day HTTP request is not
+  made anymore. Current weather still refreshes no more often than
+  every 15 minutes; clock art only once each minute while Play is active.
+  Obsolete forecast code is dormant; none of its network methods is called.
+- The phone no longer describes the old forecast library. Existing
+  theme, city, hide-text, analog/digital and size preferences survive.
+
+**Compatibility risk:** Returning an empty media library and queue can
+cause some Android Auto versions to hide the entire media panel. If that
+happens, v0.33 retains the working browseable layout and can be restored.
 
 ## v0.33: return to nearly original high analog dial position
 
@@ -378,7 +404,7 @@ tested on the target phone and Android Auto head unit.
 
 ## Download and install
 
-[AutoClock-2-v0.33-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.33.0-beta)
+[AutoClock-2-v0.34-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.34.0-beta)
 
 1. Open the beta release under **Releases**, then tap the APK under **Assets**.
 2. Install it on the Android phone connected to the car.
@@ -389,7 +415,16 @@ tested on the target phone and Android Auto head unit.
 5. Open Auto Clock 2 in the Android Auto media launcher and press Play, then
    switch to navigation's split-screen view.
 
-## Testing checklist (v0.33)
+## Testing checklist (v0.34)
+
+- [ ] Digital-only clock is slightly lower; analog remains in v0.33 position
+- [ ] No rows/folders are shown in the media browser or queue
+- [ ] Check whether the split-map dashboard loses its two page dots
+- [ ] Main clock tile remains visible and Play/Pause still switches modes
+- [ ] Weather updates continue but no forecast HTTP request is made
+- [ ] If the clock tile vanishes, restore v0.33 and report the host behavior
+
+
 
 - [ ] Full-sized analog dial is again near the TOP of the small dashboard tile
 - [ ] Only ~6px vertical movement from old v0.29/0.30 high position

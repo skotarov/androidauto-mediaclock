@@ -27,6 +27,8 @@ object ClockRenderer {
     // for a minimal 6px downward adjustment to prevent top-rim cropping.
     // No padding, scaling or horizontal translation is applied.
     private const val CONTENT_CENTER_Y = 190f
+    // Slightly lower the pure digital face; analog and weather-only remain.
+    private const val DIGITAL_CENTER_DOWN = 10f
     private const val COMPACT_ANALOG_CENTER_Y = 208f
     // Original standard Y=216 with radius 122. Restore original near-top
     // placement, adding only 6px clearance: Y=222, top=100 instead of 94.
@@ -69,6 +71,8 @@ object ClockRenderer {
         val unit = radius / STANDARD_RADIUS
         val clockY = if (preset.hasAnalog) {
             if (compact) COMPACT_ANALOG_CENTER_Y else STANDARD_ANALOG_CENTER_Y
+        } else if (preset.family == ClockFamily.DIGITAL) {
+            CONTENT_CENTER_Y + DIGITAL_CENTER_DOWN
         } else CONTENT_CENTER_Y
         val analogWeatherOffset = if (compact)
             COMPACT_ANALOG_WEATHER_Y_OFFSET else STANDARD_ANALOG_WEATHER_Y_OFFSET
@@ -154,7 +158,7 @@ object ClockRenderer {
             val sourceY = if (preset.hasAnalog) {
                 val gap = if (compact) 18f * unit else 16f * unit
                 clockY + radius + gap
-            } else CONTENT_CENTER_Y + 118f * unit
+            } else clockY + 118f * unit
 
             val maxWidth = if (preset.hasAnalog)
                 radius * 2f + 40f * unit

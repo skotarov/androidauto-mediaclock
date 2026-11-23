@@ -2,11 +2,9 @@ package com.kotarov.autoclock.media
 
 import android.content.Intent
 import android.content.SharedPreferences
-import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.support.v4.media.MediaBrowserCompat
-import android.support.v4.media.MediaDescriptionCompat
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
@@ -14,14 +12,13 @@ import androidx.media.MediaBrowserServiceCompat
 import com.kotarov.autoclock.artwork.ClockArtworkProvider
 import com.kotarov.autoclock.artwork.ClockRenderer
 import com.kotarov.autoclock.weather.WeatherStore
-import com.kotarov.autoclock.weather.ForecastStore
-import java.time.LocalDate
 import java.time.LocalDateTime
 
 /**
- * v0.31 Play is clock and Pause/Stop is current weather. Browser returns
- * three coming days with icon-only thumbnails and numeric temperatures. Weather API requests are
- * throttled; no foreground activity, audio, wake locks or seconds ticker.
+ * v0.34 single-card layout test: no media-library children and no media queue.
+ * Only the active clock/weather artwork is exposed through MediaSession;
+ * Play shows the clock, Pause/Stop shows weather. The Android Auto host may
+ * hide its dashboard page dots, but only the host controls that layout.
  */
 class AutoClockMediaService : MediaBrowserServiceCompat() {
     private val handler = Handler(Looper.getMainLooper())
@@ -30,15 +27,10 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private var running = false
     private var preset = ClockPreset.ANALOG_PURE
     private var artworkGeneration = 0L
-    private var forecastListDirty = false
 
     private val settingsRefresh = Runnable {
         preset = selectedPreset()
         artworkGeneration += 1L
-        if (forecastListDirty) {
-            forecastListDirty = false
-            notifyChildrenChanged(ROOT_ID)
-        }
         publishClock()
         publishPlaybackState()
         requestWeatherIfNecessary()
@@ -58,16 +50,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             key == "weather_source_name" || key == "weather_fetched_at" ||
             key == "weather_code" || key == "weather_temperature_bits" ||
             key == "weather_is_day" || key == "weather_pressure_bits" ||
-            key == "weather_elevation_bits" ||
-            key == ForecastStore.KEY_SAVED_AT ||
-            key == ForecastStore.KEY_MODE
+            key == "weather_elevation_bits"
         ) {
-            // Observation values update the clock but not the browse forecast.
-            // A new forecast or source/theme change refreshes the three rows.
-            if (key == ForecastStore.KEY_SAVED_AT || key == ForecastStore.KEY_MODE ||
-                key == WeatherStore.KEY_CITY || key == ClockTheme.KEY ||
-                key == WeatherStore.KEY_COLORED_ICONS
-            ) forecastListDirty = true
             handler.removeCallbacks(settingsRefresh)
             handler.postDelayed(settingsRefresh, 120L)
         }
@@ -100,30 +84,19 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         prefs = getSharedPreferences(PREFERENCES, MODE_PRIVATE)
         ClockSelectionStore.migrateSimplifiedIfNeeded(prefs)
         preset = selectedPreset()
-        session = MediaSessionCompat(this, "AutoClock3DayForecastV030").apply {
+        session = MediaSessionCompat(this, "AutoClockNoBrowserV034").apply {
             setFlags(MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS)
             setCallback(object : MediaSessionCompat.Callback() {
-                override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
-                    when (mediaId) {
-                        ClockLibraryRows.CLOCK_ID -> startClock()
-                        ClockLibraryRows.WEATHER_ID -> stopClock()
-                        else -> if (ClockLibraryRows.isKnownId(mediaId)) stopClock()
-                    }
-                }
-
-                override fun onPrepareFromMediaId(mediaId: String?, extras: Bundle?) {
-                    if (ClockLibraryRows.isKnownId(mediaId)) {
-                        publishClock()
-                        publishPlaybackState()
-                    }
-                }
-
                 override fun onPlay() = startClock()
                 override fun onPause() = stopClock()
                 override fun onStop() = stopClock()
             })
             isActive = true
         }
+        // No queued tracks either: only metadata for the current clock/weather
+        // screen is published, so there is nothing to browse or skip.
+        session.setQueue(emptyList())
+        session.setQueueTitle(null)
         sessionToken = session.sessionToken
         prefs.registerOnSharedPreferenceChangeListener(prefsListener)
         // Initially stopped: the weather is visible until Play.
@@ -143,33 +116,10 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         parentId: String,
         result: Result<MutableList<MediaBrowserCompat.MediaItem>>
     ) {
-        if (parentId != ROOT_ID) {
-            result.sendResult(mutableListOf())
-            return
-        }
-        val theme = selectedTheme()
-        val colored = coloredWeatherIcons()
-        val revision = prefs.getLong(ForecastStore.KEY_SAVED_AT, 0L)
-        val rows = ClockLibraryRows.create(ForecastStore.current(this), LocalDate.now())
-        val items = rows.map { row ->
-            val artwork = ClockArtworkProvider.forecastArtworkUri(
-                date = row.date,
-                forecast = row.forecast,
-                revision = revision,
-                theme = theme,
-                coloredWeatherIcons = colored
-            )
-            val description = MediaDescriptionCompat.Builder()
-                .setMediaId(row.id)
-                .setTitle(row.title)
-                .setSubtitle(row.subtitle)
-                .setIconUri(artwork)
-                .build()
-            MediaBrowserCompat.MediaItem(
-                description, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE
-            )
-        }.toMutableList()
-        result.sendResult(items)
+        // Diagnostic experiment: advertise no browseable or playable items
+        // for any parent. The MediaSession remains active with Play/Pause and
+        // clock/weather metadata, including its large clock artwork.
+        result.sendResult(mutableListOf())
     }
 
     override fun onDestroy() {
@@ -235,8 +185,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         PlaybackDisplay.visiblePreset(preset, running)
 
     private fun requestWeatherIfNecessary() {
-        // A three-hour forecast is fetched in the existing weather worker;
-        // the current observations stay capped to 15-minute intervals.
+        // Only current weather is fetched, throttled at 15 minutes.
+        // No daily-forecast request is made when the library is disabled.
         WeatherStore.refreshIfDue(this)
     }
 
@@ -267,16 +217,6 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val compactSubtitle = if (blankCompact) INVISIBLE_TEXT else lines.subtitle
         val activeId = if (running) ClockLibraryRows.CLOCK_ID
             else ClockLibraryRows.WEATHER_ID
-
-        // Exactly ONE active track in the queue, so Next/Previous remain absent.
-        val item = MediaDescriptionCompat.Builder()
-            .setMediaId(activeId)
-            .setTitle(lines.title)
-            .setSubtitle(lines.subtitle)
-            .setIconUri(artwork)
-            .build()
-        session.setQueue(listOf(MediaSessionCompat.QueueItem(item, SINGLE_QUEUE_ID)))
-        session.setQueueTitle(null)
 
         // Keep both a direct reduced-size bitmap and an artwork URI to cope
         // with Android Auto implementations that cache either representation.
@@ -309,10 +249,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private fun publishPlaybackState() {
-        val actions = PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID or
-            PlaybackStateCompat.ACTION_PREPARE_FROM_MEDIA_ID or
-            PlaybackStateCompat.ACTION_PLAY or PlaybackStateCompat.ACTION_PAUSE or
-            PlaybackStateCompat.ACTION_STOP
+        val actions = PlaybackStateCompat.ACTION_PLAY or
+            PlaybackStateCompat.ACTION_PAUSE or PlaybackStateCompat.ACTION_STOP
         session.setPlaybackState(
             PlaybackStateCompat.Builder()
                 .setState(
@@ -322,7 +260,6 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                     0f
                 )
                 .setActions(actions)
-                .setActiveQueueItemId(SINGLE_QUEUE_ID)
                 .build()
         )
     }
@@ -337,6 +274,5 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         const val KEY_PROGRESS_ANIMATED = "progress_animated"
         private const val INVISIBLE_TEXT = ClockMediaLabels.EMPTY
         private const val ROOT_ID = "auto_clock_root"
-        private const val SINGLE_QUEUE_ID = 1L
     }
 }

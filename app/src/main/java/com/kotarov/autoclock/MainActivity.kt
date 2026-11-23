@@ -70,7 +70,7 @@ class MainActivity : AppCompatActivity() {
 
         root.addView(label("Auto Clock 2", 30f, light, dp(5)))
         root.addView(label(
-            "Play — часовник · Stop — времето · прогноза 3 дни",
+            "Play — часовник · Stop — времето · без списъци",
             16f, muted, dp(16)
         ))
 
@@ -119,8 +119,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         root.addView(label(
-            "В Android Auto: Play показва часовника, Stop/Pause — времето. " +
-                "Вторият екран показва прогнозата за следващите три дни.",
+            "Тест без медийни списъци: Play показва часовника, " +
+                "Stop/Pause — времето. Android Auto управлява дали " +
+                "двете точки за превключване ще изчезнат.",
             14f, muted, dp(14)
         ))
 
@@ -219,7 +220,7 @@ class MainActivity : AppCompatActivity() {
         weatherStatus = label("", 14f, muted, dp(10))
         root.addView(weatherStatus)
         val refresh = Button(this).apply {
-            text = "Обнови прогнозата"
+            text = "Обнови времето"
             isAllCaps = false
         }
         refresh.setOnClickListener {
@@ -242,9 +243,9 @@ class MainActivity : AppCompatActivity() {
         root.addView(refresh)
 
         root.addView(label(
-            "Трите реда са утре и още два дни, с минимална/максимална " +
-                "температура и вероятност за валежи. Прогнозата се обновява " +
-                "най-много веднъж на 3 часа, текущото време — през 15 минути.",
+            "Списъкът с песни и тридневната прогноза са премахнати. " +
+                "Проверяваме дали това скрива превключването в комбинирания екран. " +
+                "Текущото време остава с обновяване до веднъж на 15 минути.",
             14f, muted, dp(8)
         ))
         root.addView(label("Източници: NOAA Aviation Weather (METAR измервания) " +
@@ -323,8 +324,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun requestWeatherForPreview(force: Boolean = false) {
-        val prefs = getSharedPreferences(AutoClockMediaService.PREFERENCES, MODE_PRIVATE)
-        // Always allow refreshing forecast even for a pure analog clock.
+        // Fetch current weather when the phone requests it.
         if (WeatherStore.isAuto(this) && !WeatherLocation.permitted(this)) {
             updateWeatherStatus()
             return

@@ -36,17 +36,17 @@ jobs:
       - name: Copy APK with friendly filename
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk dist/AutoClock-2-v0.33-beta.apk
+          cp app/build/outputs/apk/debug/app-debug.apk dist/AutoClock-2-v0.34-beta.apk
 
       - name: Create or update public beta download
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if ! gh release view v0.33.0-beta >/dev/null 2>&1; then
-            gh release create v0.33.0-beta \
+          if ! gh release view v0.34.0-beta >/dev/null 2>&1; then
+            gh release create v0.34.0-beta \
               --target "$GITHUB_SHA" \
-              --title "Auto Clock 2 — beta 0.33.0" \
-              --notes "Analog positioning correction: original v0.29/v0.30 Y=216 with radius122. Set large analog Y=222, only 6px below original to barely clear upper edge, not centered Y=254. Keep original X=256, radius122 and zero added padding. All other UI, forecast and playback unchanged." \
+              --title "Auto Clock 2 — beta 0.34.0" \
+              --notes "Dashboard single-card experiment: no media-library items and an empty media queue, while keeping metadata artwork and Play clock / Pause weather working. Move digital-only clock down 10 artwork pixels; analog remains original v0.33. Remove unused three-day forecast network fetching to save resources. Android Auto decides whether it hides its two dashboard page dots." \
               --prerelease
           fi
-          gh release upload v0.33.0-beta dist/AutoClock-2-v0.33-beta.apk --clobber
+          gh release upload v0.34.0-beta dist/AutoClock-2-v0.34-beta.apk --clobber
