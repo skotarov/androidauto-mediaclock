@@ -2,44 +2,67 @@ package com.kotarov.autoclock.media
 
 import com.kotarov.autoclock.weather.ForecastStore
 import com.kotarov.autoclock.weather.WeatherStore
-import java.time.LocalDate
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.util.Locale
 
-/** Exactly three daily forecast leaves, not an animated clock or playlist. */
+/** Six next-hour forecast leaves. No live clock or browse refresh each minute. */
 object ClockLibraryRows {
-    // Retained for active Now Playing metadata; these are not library rows.
     const val CLOCK_ID = "autoclock_clock"
     const val WEATHER_ID = "autoclock_weather"
-    private const val FORECAST_ID_PREFIX = "autoclock_forecast_day_"
+    private const val FORECAST_ID_PREFIX = "autoclock_forecast_hour_"
+    private val timeFormat = DateTimeFormatter.ofPattern("HH:mm")
 
     data class Row(
-        val id: String, val title: String, val subtitle: String,
-        val date: LocalDate, val forecast: ForecastStore.Day?
+        val id: String,
+        val title: String,
+        val subtitle: String,
+        val forecast: ForecastStore.Hour?,
+        /** Unique timestamp for the forecast artwork cache. */
+        val epochSeconds: Long
     )
-    private val dateFormat = DateTimeFormatter.ofPattern("EEE dd.MM", Locale("bg", "BG"))
 
-    fun create(days: List<ForecastStore.Day>, today: LocalDate): List<Row> {
-        val byDate = days.associateBy { it.date }
-        return (1..3).map { index ->
-            val date = today.plusDays(index.toLong())
-            val day = byDate[date]
-            val label = date.format(dateFormat)
-            if (day == null) {
-                Row("$FORECAST_ID_PREFIX$index", "$label · Няма прогноза",
-                    "Данните още не са заредени", date, null)
-            } else {
-                val text = WeatherStore.describe(day.code)
-                val rain = day.precipitationPercent?.let { " · Валежи до $it%" } ?: ""
+    fun create(
+        hours: List<ForecastStore.Hour>,
+        nowEpochSeconds: Long
+    ): List<Row> {
+        val next = ForecastStore.nextSixHours(hours, nowEpochSeconds)
+        // For missing data, show only hour labels, never invented temps/code.
+        val firstHour = ((nowEpochSeconds / 3600L) + 1L) * 3600L
+        val byEpoch = next.associateBy { it.epochSeconds }
+        return (0 until 6).map { offset ->
+            val epoch = firstHour + offset * 3600L
+            // Model results include a location timezone. Use the predicted
+            // hour's own local time even if the device is elsewhere.
+            val forecast = byEpoch[epoch]
+            val local = forecast?.localDateTime ?: LocalDateTime.ofInstant(
+                Instant.ofEpochSecond(epoch), ZoneId.systemDefault()
+            )
+            val label = local.format(timeFormat)
+            if (forecast == null) {
                 Row(
-                    "$FORECAST_ID_PREFIX$index",
-                    "$label  ↑${day.maxText} ↓${day.minText}",
-                    "$text$rain", date, day
+                    "${FORECAST_ID_PREFIX}${offset + 1}",
+                    "$label · Няма прогноза",
+                    "Данните още не са заредени",
+                    null,
+                    epoch
+                )
+            } else {
+                val conditions = WeatherStore.describe(forecast.code)
+                val probability = forecast.precipitationPercent
+                    ?.let { " · Валежи $it%" } ?: ""
+                Row(
+                    "${FORECAST_ID_PREFIX}${offset + 1}",
+                    "$label · ${forecast.temperatureText}",
+                    "$conditions$probability",
+                    forecast,
+                    epoch
                 )
             }
         }
     }
 
     fun isKnownId(mediaId: String?): Boolean =
-        mediaId != null && (1..3).any { mediaId == "$FORECAST_ID_PREFIX$it" }
+        mediaId != null && (1..6).any { mediaId == "$FORECAST_ID_PREFIX$it" }
 }

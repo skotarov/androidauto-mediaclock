@@ -155,18 +155,22 @@ class ClockArtworkProvider : ContentProvider() {
         ): Uri = artworkUri("mini_${family.id}", now, weatherRevision,
             theme = theme, coloredWeatherIcons = coloredWeatherIcons)
 
-        /** Day-specific forecast weather miniature. Cache key includes the
-         * forecast revision and date; no unnecessary minute-by-minute bitmap.
+        /** Hour-specific symbol-only forecast art, cached by model revision
+         * and predicted hour (not minute ticks). Temperature stays in row text.
          */
         fun forecastArtworkUri(
-            date: java.time.LocalDate,
-            forecast: com.kotarov.autoclock.weather.ForecastStore.Day?,
+            epochSeconds: Long,
+            forecast: com.kotarov.autoclock.weather.ForecastStore.Hour?,
             revision: Long,
             theme: ClockTheme = ClockTheme.DARK,
             coloredWeatherIcons: Boolean = true
         ): Uri = artworkUri(
-            "mini_forecast", date.atTime(12, 0),
-            revision + date.toEpochDay(),
+            "mini_forecast",
+            java.time.LocalDateTime.ofInstant(
+                java.time.Instant.ofEpochSecond(epochSeconds),
+                java.time.ZoneOffset.UTC
+            ),
+            revision,
             theme = theme, coloredWeatherIcons = coloredWeatherIcons
         ).buildUpon()
             .appendQueryParameter("code", (forecast?.code ?: -1).toString())
