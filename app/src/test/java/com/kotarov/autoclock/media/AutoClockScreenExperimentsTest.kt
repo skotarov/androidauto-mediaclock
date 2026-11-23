@@ -22,6 +22,18 @@ class AutoClockScreenExperimentsTest {
             AutoClockScreenExperiments.playbackState(false, true))
     }
 
+    @Test fun testStateStoppedOverridesBothRunningStates() {
+        assertEquals(PlaybackStateCompat.STATE_STOPPED,
+            AutoClockScreenExperiments.playbackState(true, false, true))
+        assertEquals(PlaybackStateCompat.STATE_STOPPED,
+            AutoClockScreenExperiments.playbackState(false, false, true))
+    }
+
+    @Test fun stateNoneTakesPrecedenceWhenBothExperimentsEnabled() {
+        assertEquals(PlaybackStateCompat.STATE_NONE,
+            AutoClockScreenExperiments.playbackState(true, true, true))
+    }
+
     @Test fun browseTestUsesDocumentedIntentAndRoot() {
         assertEquals("auto_clock_root", AutoClockMediaService.ROOT_ID)
         assertEquals("androidx.car.app.mediaextensions.action.MEDIA_TEMPLATE_V2",
