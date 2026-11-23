@@ -153,6 +153,49 @@ object ClockRenderer {
         return bitmap
     }
 
+    /**
+     * Low-resolution media-browse thumbnail refreshed every seven minutes.
+     * Unlike the main artwork, this tiny clock avoids weather and padding,
+     * so the hands remain distinguishable at Android Auto icon sizes.
+     * This is NOT the system launcher/dock icon from AndroidManifest.xml.
+     */
+    fun renderBrowseClock(time: LocalDateTime, outputSize: Int = 160): Bitmap {
+        require(outputSize in 64..256)
+        val bitmap = Bitmap.createBitmap(outputSize, outputSize, Bitmap.Config.RGB_565)
+        val canvas = Canvas(bitmap)
+        canvas.scale(outputSize / 160f, outputSize / 160f)
+        canvas.drawColor(Color.rgb(2, 5, 11))
+        val cx = 80f
+        val cy = 76f
+        val radius = 66f
+        canvas.drawCircle(cx, cy, radius, fill(Color.rgb(9, 23, 34)))
+        canvas.drawCircle(cx, cy, radius, stroke(pale, 3.4f))
+        val ticks = stroke(Color.rgb(182, 214, 227), 3f)
+        repeat(12) { i ->
+            val angle = Math.toRadians(i * 30.0 - 90.0)
+            val dx = cos(angle).toFloat()
+            val dy = sin(angle).toFloat()
+            canvas.drawLine(cx + dx * 50f, cy + dy * 50f,
+                cx + dx * 60f, cy + dy * 60f, ticks)
+        }
+        val hour = Math.toRadians(
+            (time.hour % 12) * 30.0 + time.minute * 0.5 - 90.0
+        )
+        val minute = Math.toRadians(time.minute * 6.0 - 90.0)
+        canvas.drawLine(cx, cy,
+            cx + cos(hour).toFloat() * 39f,
+            cy + sin(hour).toFloat() * 39f,
+            stroke(white, 9f))
+        canvas.drawLine(cx, cy,
+            cx + cos(minute).toFloat() * 51f,
+            cy + sin(minute).toFloat() * 51f,
+            stroke(cyan, 5.5f))
+        canvas.drawCircle(cx, cy, 4.5f, fill(white))
+        // At tiny resolutions, the short label is better than a date or weather.
+        drawText(canvas, time.format(timeFormat), cx, 117f, 25f, white, 0.65f)
+        return bitmap
+    }
+
     private fun drawSourceLabel(
         canvas: Canvas,
         value: String,
