@@ -6,6 +6,7 @@ import android.content.SharedPreferences
 object ClockSelectionStore {
     private const val KEY_SCHEMA_V13 = "display_simplified_v13"
     private const val KEY_ANALOG_DEFAULT_OFF_V20 = "analog_digital_default_off_v20"
+    private const val KEY_SHARED_WEATHER_MIGRATED_V40 = "shared_weather_migrated_v40"
 
     /**
      * New installs show the clean analog dial without digital digits.
@@ -37,6 +38,16 @@ object ClockSelectionStore {
                 editor.putBoolean(ClockPreset.KEY_ANALOG_ADD_DIGITAL, false)
             }
             editor.apply()
+        }
+        // Preserve weather if it had been enabled for EITHER clock before v0.40.
+        // The removed analog digital-time option is never read when rendering.
+        if (!prefs.getBoolean(KEY_SHARED_WEATHER_MIGRATED_V40, false)) {
+            val weatherOn = prefs.getBoolean(ClockPreset.KEY_ANALOG_ADD_WEATHER, false) ||
+                prefs.getBoolean(ClockPreset.KEY_DIGITAL_ADD_WEATHER, false)
+            prefs.edit()
+                .putBoolean(ClockPreset.KEY_ADD_WEATHER, weatherOn)
+                .putBoolean(KEY_SHARED_WEATHER_MIGRATED_V40, true)
+                .apply()
         }
     }
 
@@ -92,15 +103,14 @@ object ClockSelectionStore {
     fun forFamily(prefs: SharedPreferences, family: ClockFamily): ClockPreset =
         when (family) {
             ClockFamily.ANALOG ->
-                ClockPreset.fromAddons(
-                    ClockFamily.ANALOG,
-                    first = prefs.getBoolean(ClockPreset.KEY_ANALOG_ADD_DIGITAL, false),
-                    second = prefs.getBoolean(ClockPreset.KEY_ANALOG_ADD_WEATHER, false)
-                )
+                if (prefs.getBoolean(ClockPreset.KEY_ADD_WEATHER, false))
+                    ClockPreset.ANALOG_WEATHER
+                else ClockPreset.ANALOG_PURE
             ClockFamily.DIGITAL ->
-                if (prefs.getBoolean(ClockPreset.KEY_DIGITAL_ADD_WEATHER, false))
+                if (prefs.getBoolean(ClockPreset.KEY_ADD_WEATHER, false))
                     ClockPreset.DIGITAL_TIME_WEATHER
                 else ClockPreset.DIGITAL_TIME
+            // WEATHER_ONLY is the unmodified pause artwork.
             ClockFamily.WEATHER ->
                 if (prefs.getBoolean(ClockPreset.KEY_WEATHER_ADD_DIGITAL, false))
                     ClockPreset.WEATHER_WITH_TIME
@@ -108,23 +118,13 @@ object ClockSelectionStore {
         }
 
     fun choose(prefs: SharedPreferences, preset: ClockPreset) {
-        val family = preset.family
-        prefs.edit()
-            .putString(ClockPreset.KEY_FAMILY, family.id)
-            .putBoolean(ClockPreset.KEY_ANALOG_ADD_DIGITAL,
-                if (family == ClockFamily.ANALOG) preset.hasDigitalTime
-                else prefs.getBoolean(ClockPreset.KEY_ANALOG_ADD_DIGITAL, false))
-            .putBoolean(ClockPreset.KEY_ANALOG_ADD_WEATHER,
-                if (family == ClockFamily.ANALOG) preset.usesWeather
-                else prefs.getBoolean(ClockPreset.KEY_ANALOG_ADD_WEATHER, false))
-            .putBoolean(ClockPreset.KEY_DIGITAL_ADD_ANALOG, false)
-            .putBoolean(ClockPreset.KEY_DIGITAL_ADD_WEATHER,
-                if (family == ClockFamily.DIGITAL) preset.usesWeather
-                else prefs.getBoolean(ClockPreset.KEY_DIGITAL_ADD_WEATHER, false))
-            .putBoolean(ClockPreset.KEY_WEATHER_ADD_ANALOG, false)
-            .putBoolean(ClockPreset.KEY_WEATHER_ADD_DIGITAL,
-                if (family == ClockFamily.WEATHER) preset.hasDigitalTime
-                else prefs.getBoolean(ClockPreset.KEY_WEATHER_ADD_DIGITAL, false))
-            .apply()
+        val editor = prefs.edit()
+            .putString(ClockPreset.KEY_FAMILY, preset.family.id)
+        if (preset.family != ClockFamily.WEATHER) {
+            editor.putBoolean(ClockPreset.KEY_ADD_WEATHER, preset.usesWeather)
+        } else {
+            editor.putBoolean(ClockPreset.KEY_WEATHER_ADD_DIGITAL, preset.hasDigitalTime)
+        }
+        editor.apply()
     }
 }
