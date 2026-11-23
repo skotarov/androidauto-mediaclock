@@ -31,6 +31,9 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private var running = false
     private var preset = ClockPreset.ANALOG_PURE
     private var artworkGeneration = 0L
+    // Browse artwork changes at seven-minute boundaries, using the existing
+    // minute timer. This does not change Android Auto's manifest app icon.
+    private var lastBrowseIconBucket: Long? = null
 
     private val settingsRefresh = Runnable {
         preset = selectedPreset()
@@ -67,6 +70,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             preset = selectedPreset()
             publishClock()
             publishPlaybackState()
+            refreshBrowseIconIfDue()
             requestWeatherIfNecessary()
             scheduleNextMinute()
         }
@@ -77,6 +81,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         prefs = getSharedPreferences(PREFERENCES, MODE_PRIVATE)
         ClockSelectionStore.migrateSimplifiedIfNeeded(prefs)
         preset = selectedPreset()
+        lastBrowseIconBucket = ClockIconSchedule.bucket(LocalDateTime.now())
         session = MediaSessionCompat(this, "AutoClockV3").apply {
             setFlags(
                 MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS or
@@ -146,7 +151,6 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             return
         }
         val now = LocalDateTime.now()
-        val rev = weatherRevision()
         // One simple item per main radio style; checkboxes are configured on
         // the phone, so Android Auto does not show a confusing 12-item list.
         val items = ClockFamily.entries.map { family ->
@@ -155,13 +159,10 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 .setMediaId("family_${family.id}")
                 .setTitle(family.label)
                 .setSubtitle(option.label)
-                .setIconUri(
-                    ClockArtworkProvider.artworkUri(
-                        option.id, now,
-                        if (option.usesWeather) rev else 0L,
-                        compactLayout(), artworkGeneration
-                    )
-                ).build()
+                // The clock thumbnail is a distinct 7-minute artwork asset.
+                // The app icon shown in Android Auto's dock is still the
+                // static icon supplied by AndroidManifest.xml.
+                .setIconUri(ClockArtworkProvider.miniIconUri(now)).build()
             MediaBrowserCompat.MediaItem(
                 description, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE
             )
@@ -238,7 +239,13 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         WeatherStore.refreshIfDue(this)
     }
 
-    private fun weatherRevision(): Long = WeatherStore.current(this)?.observedAtMs ?: 0L
+    private fun refreshBrowseIconIfDue() {
+        val bucket = ClockIconSchedule.bucket(LocalDateTime.now())
+        if (bucket != lastBrowseIconBucket) {
+            lastBrowseIconBucket = bucket
+            notifyChildrenChanged(ROOT_ID)
+        }
+    }
 
     private fun publishClock() {
         val now = LocalDateTime.now()
