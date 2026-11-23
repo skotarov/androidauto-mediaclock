@@ -15,15 +15,15 @@ import com.kotarov.autoclock.artwork.ClockArtworkProvider
 import com.kotarov.autoclock.artwork.ClockRenderer
 import com.kotarov.autoclock.weather.WeatherStore
 import com.kotarov.autoclock.weather.ForecastStore
-import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import java.time.LocalDateTime
 
 /**
- * v0.35 split browser diagnostic: full-screen Android Auto library has the
- * three-day forecast, while requests for system suggestions / "For You"
- * are declined. This cannot force the Android Auto dashboard to remove its
- * second page; host behavior must be checked on the real screen.
- * The MediaSession queue stays empty, Play=clock and Pause=weather.
+ * v0.36: confirmed v0.35 routing keeps the map dashboard on the clock
+ * while the normal full-screen library exposes SIX next-hour weather rows.
+ * No minute browse refresh. No public Android Auto fullscreen/compact
+ * callback exists: full date is supplied in standard track metadata only.
  */
 class AutoClockMediaService : MediaBrowserServiceCompat() {
     private val handler = Handler(Looper.getMainLooper())
@@ -64,7 +64,11 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             key == ForecastStore.KEY_SAVED_AT ||
             key == ForecastStore.KEY_MODE
         ) {
+            // Hour rows roll forward on the next observation (up to 15m),
+            // or immediately when a new hourly model forecast is saved.
+            // No per-minute browse update or extra location request.
             if (key == ForecastStore.KEY_SAVED_AT || key == ForecastStore.KEY_MODE ||
+                key == "weather_fetched_at" ||
                 key == WeatherStore.KEY_CITY || key == ClockTheme.KEY ||
                 key == WeatherStore.KEY_COLORED_ICONS
             ) forecastListDirty = true
@@ -100,7 +104,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         prefs = getSharedPreferences(PREFERENCES, MODE_PRIVATE)
         ClockSelectionStore.migrateSimplifiedIfNeeded(prefs)
         preset = selectedPreset()
-        session = MediaSessionCompat(this, "AutoClockBrowseVsSuggestedV035").apply {
+        session = MediaSessionCompat(this, "AutoClockSixHoursV036").apply {
             setFlags(MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS)
             setCallback(object : MediaSessionCompat.Callback() {
                 override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
@@ -165,10 +169,11 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val theme = selectedTheme()
         val colored = coloredWeatherIcons()
         val revision = prefs.getLong(ForecastStore.KEY_SAVED_AT, 0L)
-        val rows = ClockLibraryRows.create(ForecastStore.current(this), LocalDate.now())
+        val epoch = System.currentTimeMillis() / 1000L
+        val rows = ClockLibraryRows.create(ForecastStore.current(this, epoch), epoch)
         val items = rows.map { row ->
             val artwork = ClockArtworkProvider.forecastArtworkUri(
-                date = row.date,
+                epochSeconds = row.epochSeconds,
                 forecast = row.forecast,
                 revision = revision,
                 theme = theme,
@@ -250,8 +255,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         PlaybackDisplay.visiblePreset(preset, running)
 
     private fun requestWeatherIfNecessary() {
-        // Also updates the three-day forecast at most every three hours.
-        // Both reuse the same existing one-shot location acquisition.
+        // Hourly forecast data is refreshed at most once per hour while the
+        // existing current-weather worker runs; no second GPS subscription.
         WeatherStore.refreshIfDue(this)
     }
 
@@ -273,15 +278,21 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 weather?.observedAtMs ?: 0L else 0L,
             theme, colored
         )
-        // Split standard title/artist (available to full Now Playing players)
-        // from display title/subtitle (used by some compact dashboards).
-        // Android Auto may use the same fields in both layouts: its layout
-        // state is not exposed by MediaBrowserService / MediaSession APIs.
+        // The host does not expose whether this session appears in the compact
+        // dashboard or the full Now Playing view. Supply a date in STANDARD
+        // metadata but keep display metadata's original compact behavior.
+        // This is a best-effort display hint, not reliable view detection.
         val blankCompact = hideCompactMediaText()
         val compactTitle = if (blankCompact) INVISIBLE_TEXT else lines.title
         val compactSubtitle = if (blankCompact) INVISIBLE_TEXT else lines.subtitle
         val activeId = if (running) ClockLibraryRows.CLOCK_ID
             else ClockLibraryRows.WEATHER_ID
+        val fullDate = now.format(
+            DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy", Locale("bg", "BG"))
+        )
+        val fullSubtitle = if (lines.subtitle.isBlank() ||
+            lines.subtitle == INVISIBLE_TEXT
+        ) fullDate else "$fullDate · ${lines.subtitle}"
 
         // Keep both a direct reduced-size bitmap and an artwork URI to cope
         // with Android Auto implementations that cache either representation.
@@ -302,7 +313,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             .putBitmap(MediaMetadataCompat.METADATA_KEY_ART, art)
             .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, activeId)
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, lines.title)
-            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, lines.subtitle)
+            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, fullSubtitle)
             .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, compactTitle)
             .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, compactSubtitle)
             .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_DESCRIPTION, INVISIBLE_TEXT)

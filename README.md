@@ -1,9 +1,45 @@
-# Auto Clock 2 — beta 0.35
+# Auto Clock 2 — beta 0.36
 
 An experimental battery-conscious clock for Android Auto's media card next to
 navigation. Android Auto officially reserves the media template for audio apps;
 this project displays a clock without playing audio, so not every head unit is
 guaranteed to support it.
+
+## v0.36: next six hours in fullscreen media library
+
+The v0.35 split has been confirmed on a physical car screen: the system
+suggestions / second card no longer appear alongside navigation, while the
+full-screen Auto Clock library remains accessible. This separation is
+preserved without changes.
+
+- Six playable library rows for the next 6 full hourly boundaries, crossing
+  midnight correctly. Weather *icon only* on the left. Text includes HH:mm,
+  predicted °C, condition, and precipitation probability when available.
+- ForecastStore now fetches Open-Meteo HOURLY
+  `temperature_2m,weather_code,precipitation_probability` with
+  `timeformat=unixtime&timezone=auto`. Parse timezone-aware UNIX seconds
+  for the forecast location instead of assuming Sofia / phone local time.
+  Cache freshness: 1 hour; retry after 20 minutes; max 4-hour cache age.
+  Fresh keys separate hourly data from v0.35's daily cached forecast.
+- Reuse the existing weather worker and one-shot location fix, no separate
+  GPS polling or minute fetch. The library gets
+  `notifyChildrenChanged(ROOT_ID)` on an updated forecast, location/theme
+  change or newly saved current weather (up to 15-minute intervals); its
+  rows also shift to the next six hours when reloaded.
+- No added audio, skip actions, or library updates every minute. Active
+  clock artwork still updates once a minute.
+
+**Fullscreen vs split-screen detection:** Google's `MediaBrowserService`
+and `MediaSession` expose browser root hints, playback state, and metadata,
+but not whether their Now Playing presentation is fullscreen or on the
+Coolwalk dashboard. An onLoadChildren browser request is not a reliable
+signal that full Now Playing is visible. We therefore leave all existing
+clock artwork sizing unchanged, and put the Bulgarian full weekday/date
+in standard `METADATA_KEY_ARTIST` while retaining the separate hidden
+compact display fields. The host may or may not render the full date in
+the fullscreen Now Playing player. The 100% scaling goal requires a
+different host-controlled or user-selected presentation; no unsupported
+screen detection is claimed.
 
 ## v0.35: separate full media browser from dashboard suggestions
 
@@ -437,7 +473,7 @@ tested on the target phone and Android Auto head unit.
 
 ## Download and install
 
-[AutoClock-2-v0.35-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.35.0-beta)
+[AutoClock-2-v0.36-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.36.0-beta)
 
 1. Open the beta release under **Releases**, then tap the APK under **Assets**.
 2. Install it on the Android phone connected to the car.
@@ -448,7 +484,18 @@ tested on the target phone and Android Auto head unit.
 5. Open Auto Clock 2 in the Android Auto media launcher and press Play, then
    switch to navigation's split-screen view.
 
-## Testing checklist (v0.35)
+## Testing checklist (v0.36)
+
+- [ ] Full-screen library shows exactly six next whole-hour weather rows
+- [ ] Weather artwork contains symbol only, temperatures are in the row text
+- [ ] Probabilities appear only when supplied by Open-Meteo
+- [ ] Late-evening list crosses midnight and shows proper local forecast time
+- [ ] Split screen with navigation still has NO extra recommended-list card
+- [ ] Date is offered as full metadata; verify whether the host displays it
+- [ ] Analog/digital dimensions, position and Play/Pause remain unchanged
+- [ ] No hourly forecast network calls beyond once per hour / same location fix
+
+
 
 - [ ] Full-screen Auto Clock media library shows exactly 3 forecast days
 - [ ] Compact dashboard stays on the clock; check whether its second dot hides
