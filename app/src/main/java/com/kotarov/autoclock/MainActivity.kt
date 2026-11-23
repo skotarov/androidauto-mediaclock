@@ -7,14 +7,12 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
-import android.view.View
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.RadioButton
-import android.widget.RadioGroup
+import android.widget.SeekBar
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -41,7 +39,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var digitalImage: ImageView
     private lateinit var analogLabel: TextView
     private lateinit var digitalLabel: TextView
-    private lateinit var optionsContainer: LinearLayout
     private var analogBitmap: Bitmap? = null
     private var digitalBitmap: Bitmap? = null
 
@@ -108,34 +105,47 @@ class MainActivity : AppCompatActivity() {
             updatePreviewTiles()
         })
 
-        optionsContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-        root.addView(optionsContainer)
-        val firstFamily = ClockSelectionStore.current(prefs).family
-        updateVariantOptions(firstFamily)
+        root.addView(checkOption(
+            "Добави времето",
+            prefs.getBoolean(ClockPreset.KEY_ADD_WEATHER, false)
+        ) { checked ->
+            prefs.edit().putBoolean(ClockPreset.KEY_ADD_WEATHER, checked).apply()
+            // Both thumbnails always reflect this one preference immediately.
+            updatePreviewTiles()
+        })
         updatePreviewTiles()
 
         root.addView(text("Размер", 18f, dp(5)))
-        val sizeGroup = RadioGroup(this).apply {
-            orientation = RadioGroup.HORIZONTAL
+        val sizeRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
         }
-        val compact = radio("Компактен")
-        val standard = radio("Стандартен")
-        sizeGroup.addView(compact, LinearLayout.LayoutParams(0,
-            LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        sizeGroup.addView(standard, LinearLayout.LayoutParams(0,
-            LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        sizeGroup.check(
-            if (prefs.getString(AutoClockMediaService.KEY_LAYOUT, "standard") == "compact")
-                compact.id else standard.id
-        )
-        sizeGroup.setOnCheckedChangeListener { _, id ->
-            prefs.edit().putString(AutoClockMediaService.KEY_LAYOUT,
-                if (id == compact.id) "compact" else "standard").apply()
-            updatePreviewTiles()
+        sizeRow.addView(text("А", 14f, 0))
+        val sizeSlider = SeekBar(this).apply {
+            max = 1 // Keep the two validated render sizes: compact / standard.
+            progress = if (prefs.getString(
+                    AutoClockMediaService.KEY_LAYOUT, "standard"
+                ) == "compact") 0 else 1
+            contentDescription = "Размер на часовника"
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(
+                    seekBar: SeekBar?, value: Int, fromUser: Boolean
+                ) {
+                    if (!fromUser) return
+                    prefs.edit().putString(
+                        AutoClockMediaService.KEY_LAYOUT,
+                        if (value == 0) "compact" else "standard"
+                    ).apply()
+                    updatePreviewTiles()
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+                override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+            })
         }
-        root.addView(sizeGroup)
+        sizeRow.addView(sizeSlider,
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        sizeRow.addView(text("А", 28f, 0))
+        root.addView(sizeRow)
 
         root.addView(text("Тестове", 18f, dp(6)))
         val probeResult = text("", 13f, dp(2))
@@ -176,13 +186,6 @@ class MainActivity : AppCompatActivity() {
                 AutoClockMediaService.KEY_TEST_STATE_STOPPED, enabled).apply()
         })
 
-        if (!WeatherLocation.permitted(this)) {
-            root.addView(Button(this).apply {
-                text = "Разреши местоположение"
-                isAllCaps = false
-                setOnClickListener { requestLocation() }
-            })
-        }
     }
 
     override fun onResume() {
@@ -237,7 +240,6 @@ class MainActivity : AppCompatActivity() {
             addView(caption)
             setOnClickListener {
                 settings().edit().putString(ClockPreset.KEY_FAMILY, family.id).apply()
-                updateVariantOptions(family)
                 updatePreviewTiles()
             }
         }
@@ -288,28 +290,6 @@ class MainActivity : AppCompatActivity() {
         title.setTextColor(if (selected) accent else ink)
     }
 
-    private fun updateVariantOptions(family: ClockFamily) {
-        optionsContainer.removeAllViews()
-        val prefs = settings()
-        fun add(text: String, key: String) {
-            optionsContainer.addView(checkOption(
-                text, prefs.getBoolean(key, false)
-            ) { checked ->
-                prefs.edit().putBoolean(key, checked).apply()
-                updatePreviewTiles()
-            })
-        }
-        when (family) {
-            ClockFamily.ANALOG -> {
-                add("Добави цифров час", ClockPreset.KEY_ANALOG_ADD_DIGITAL)
-                add("Добави времето", ClockPreset.KEY_ANALOG_ADD_WEATHER)
-            }
-            ClockFamily.DIGITAL ->
-                add("Добави времето", ClockPreset.KEY_DIGITAL_ADD_WEATHER)
-            ClockFamily.WEATHER -> Unit
-        }
-    }
-
     private fun requestLocation() {
         if (!WeatherLocation.permitted(this)) {
             ActivityCompat.requestPermissions(this,
@@ -341,13 +321,6 @@ class MainActivity : AppCompatActivity() {
         setTextColor(ink)
         isChecked = checked
         setOnCheckedChangeListener { _, value -> onChange(value) }
-    }
-
-    private fun radio(title: String): RadioButton = RadioButton(this).apply {
-        id = View.generateViewId()
-        text = title
-        textSize = 15f
-        setTextColor(ink)
     }
 
     private fun text(text: String, size: Float, bottom: Int): TextView =
