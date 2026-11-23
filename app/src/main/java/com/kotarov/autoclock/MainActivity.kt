@@ -169,6 +169,13 @@ class MainActivity : AppCompatActivity() {
                 AutoClockMediaService.KEY_TEST_STATE_NONE, enabled).apply()
         })
 
+        root.addView(checkOption("Тест 3 — STATE_STOPPED",
+            prefs.getBoolean(AutoClockMediaService.KEY_TEST_STATE_STOPPED, false)
+        ) { enabled ->
+            prefs.edit().putBoolean(
+                AutoClockMediaService.KEY_TEST_STATE_STOPPED, enabled).apply()
+        })
+
         if (!WeatherLocation.permitted(this)) {
             root.addView(Button(this).apply {
                 text = "Разреши местоположение"
