@@ -24,16 +24,17 @@ object ClockRenderer {
     const val SIZE = 512
     private const val CENTER_X = 256f
     // Different optical centres for compact and standard Android Auto tiles.
-    // Compact stays unchanged; the standard large ANALOG face is 12px lower.
-    // Center digits, optional weather and source label move with that dial.
+    // Restore the full original large analog radius and original horizontal
+    // centre. Lower only the standard dial, leaving room for the host crop.
+    // The clock's own digits, weather and source label move together with it.
     private const val CONTENT_CENTER_Y = 190f
     private const val COMPACT_ANALOG_CENTER_Y = 208f
-    // The head unit crops the large dial near its upper edge. A slightly
-    // smaller dial shifted right protects the rim and avoids the Play button.
-    private const val STANDARD_ANALOG_CENTER_Y = 236f
+    // Previously 216px (v0.30) / 236px with smaller 104px radius (v0.31).
+    // With the original 122px radius, centre 254 keeps the same top rim as
+    // v0.31: 254 - 122 = 132px, but restores the original large size.
+    private const val STANDARD_ANALOG_CENTER_Y = 254f
     private const val COMPACT_RADIUS = 96f
-    private const val STANDARD_RADIUS = 104f
-    private const val STANDARD_ANALOG_RIGHT_SHIFT = 38f
+    private const val STANDARD_RADIUS = 122f
     // Keep the analog forecast at the same size and vertical position with
     // or without the optional digital HH:mm. Compact / standard use slightly
     // different offsets to match the size of the dial in Android Auto.
@@ -73,14 +74,6 @@ object ClockRenderer {
         } else CONTENT_CENTER_Y
         val analogWeatherOffset = if (compact)
             COMPACT_ANALOG_WEATHER_Y_OFFSET else STANDARD_ANALOG_WEATHER_Y_OFFSET
-
-        // Keep the compact dial unchanged. In the standard car card the host
-        // crops the album art; the right shift avoids the floating Play button.
-        val shiftDial = preset.hasAnalog && !compact
-        if (shiftDial) {
-            canvas.save()
-            canvas.translate(STANDARD_ANALOG_RIGHT_SHIFT, 0f)
-        }
 
         // The primary style establishes the visual hierarchy. Add-ons are
         // independent: no checkboxes means no secondary information at all.
@@ -171,7 +164,6 @@ object ClockRenderer {
 
             drawSourceLabel(canvas, sourceLabel, CENTER_X, sourceY, unit, maxWidth)
         }
-        if (shiftDial) canvas.restore()
         return applyTheme(bitmap, theme)
     }
 

@@ -1,9 +1,24 @@
-# Auto Clock 2 — beta 0.31
+# Auto Clock 2 — beta 0.32
 
 An experimental battery-conscious clock for Android Auto's media card next to
 navigation. Android Auto officially reserves the media template for audio apps;
 this project displays a clock without playing audio, so not every head unit is
 guaranteed to support it.
+
+## v0.32: restore original large analog face without horizontal shift
+
+- **Standard (large) analog artwork only:** restore the original full
+  122px artwork radius from v0.30 (v0.31 reduced it to 104px).
+- Restore the previous **horizontal center X=256px** by removing the
+  38px right-shift applied in v0.31.
+- Move the standard analog dial **down only** to Y=254px, so that
+  its upper rim is at Y=132px, matching v0.31's upper margin despite
+  the larger radius. This makes it less likely the Android Auto host will
+  clip the upper rim. The saved user size setting still works normally.
+- Compact analog, digital-only and weather-only drawings are unchanged.
+  The existing forecast-only browse refresh and three weather icon rows
+  remain unchanged, as does Play clock / Pause weather.
+- Bump artwork cache identity to avoid stale v0.31 images after updating.
 
 ## v0.31: clean forecast icons, less list work, safer dial geometry
 
@@ -350,7 +365,7 @@ tested on the target phone and Android Auto head unit.
 
 ## Download and install
 
-[AutoClock-2-v0.31-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.31.0-beta)
+[AutoClock-2-v0.32-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.32.0-beta)
 
 1. Open the beta release under **Releases**, then tap the APK under **Assets**.
 2. Install it on the Android phone connected to the car.
@@ -361,7 +376,15 @@ tested on the target phone and Android Auto head unit.
 5. Open Auto Clock 2 in the Android Auto media launcher and press Play, then
    switch to navigation's split-screen view.
 
-## Testing checklist (v0.31)
+## Testing checklist (v0.32)
+
+- [ ] Standard large analog dial regains full pre-v0.31 size
+- [ ] Analog horizontal center is the original position, not shifted right
+- [ ] Dial has more top clearance; upper rim does not clip
+- [ ] Compact analog size and position stay unchanged
+- [ ] Three forecast rows, controls and weather refresh remain unchanged
+
+
 
 - [ ] Browse forecast icon has weather glyph only; temperatures are in text
 - [ ] No clock/forecast list redraw at each minute while split with map
