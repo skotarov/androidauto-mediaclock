@@ -25,7 +25,8 @@ object ClockLibraryRows {
 
     fun create(
         hours: List<ForecastStore.Hour>,
-        nowEpochSeconds: Long
+        nowEpochSeconds: Long,
+        fallbackZone: ZoneId = ZoneId.systemDefault()
     ): List<Row> {
         val next = ForecastStore.nextSixHours(hours, nowEpochSeconds)
         // For missing data, show only hour labels, never invented temps/code.
@@ -37,7 +38,7 @@ object ClockLibraryRows {
             // hour's own local time even if the device is elsewhere.
             val forecast = byEpoch[epoch]
             val local = forecast?.localDateTime ?: LocalDateTime.ofInstant(
-                Instant.ofEpochSecond(epoch), ZoneId.systemDefault()
+                Instant.ofEpochSecond(epoch), fallbackZone
             )
             val label = local.format(timeFormat)
             if (forecast == null) {

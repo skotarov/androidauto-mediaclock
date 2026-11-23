@@ -45,7 +45,7 @@ class ClockLibraryRowsTest {
     }
 
     @Test fun missingDataNeverInventsWeather() {
-        val rows = ClockLibraryRows.create(emptyList(), now)
+        val rows = ClockLibraryRows.create(emptyList(), now, zone)
         assertEquals(6, rows.size)
         assertEquals("00:00 · Няма прогноза", rows[0].title)
         assertTrue(rows.all { it.forecast == null && it.subtitle.contains("заредени") })
