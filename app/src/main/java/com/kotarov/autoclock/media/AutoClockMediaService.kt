@@ -18,15 +18,16 @@ import com.kotarov.autoclock.weather.WeatherStore
 import java.time.LocalDateTime
 
 /**
- * v0.27 diagnostic: ONE playable library item and ONE queue entry but
- * no advertised transport actions, audio or duration. Android Auto may still
- * draw inactive native controls even with zero media actions.
+ * v0.28 single selectable track test: the one library item responds to
+ * Android Auto's playFromMediaId requests. Artwork is virtual and silent;
+ * no audio stream, no next/previous and no media duration are supplied.
  */
 class AutoClockMediaService : MediaBrowserServiceCompat() {
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var session: MediaSessionCompat
     private lateinit var prefs: SharedPreferences
     private var running = false
+    private var itemActivated = false
     private var preset = ClockPreset.ANALOG_PURE
     private var artworkGeneration = 0L
     private val settingsRefresh = Runnable {
@@ -94,9 +95,34 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         prefs = getSharedPreferences(PREFERENCES, MODE_PRIVATE)
         ClockSelectionStore.migrateSimplifiedIfNeeded(prefs)
         preset = selectedPreset()
-        session = MediaSessionCompat(this, "AutoClockOneItemV027").apply {
-            // No media button flags and no transport callbacks.
-            setFlags(0)
+        session = MediaSessionCompat(this, "AutoClockOnePlayableV028").apply {
+            setFlags(MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS)
+            setCallback(object : MediaSessionCompat.Callback() {
+                override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
+                    if (mediaId == SINGLE_MEDIA_ID) activateMediaItem()
+                }
+
+                override fun onPrepareFromMediaId(mediaId: String?, extras: Bundle?) {
+                    if (mediaId == SINGLE_MEDIA_ID) {
+                        // Preparation does not start actual audio: it only
+                        // confirms the single media item and refreshes art.
+                        publishClock()
+                        publishPlaybackState()
+                    }
+                }
+
+                override fun onPlay() = activateMediaItem()
+
+                override fun onPause() {
+                    itemActivated = false
+                    publishPlaybackState()
+                }
+
+                override fun onStop() {
+                    itemActivated = false
+                    publishPlaybackState()
+                }
+            })
             isActive = true
         }
         // publishClock() creates one queue entry before the session is used.
@@ -142,7 +168,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             .setSubtitle(labels.subtitle)
             .setIconUri(icon)
             .build()
-        // Exactly one playable media item; no transport commands advertised.
+        // Exactly ONE playable leaf (not a browsable folder/channel).
+        // Selecting it calls onPlayFromMediaId(SINGLE_MEDIA_ID).
         result.sendResult(mutableListOf(MediaBrowserCompat.MediaItem(
             description, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE
         )))
@@ -161,6 +188,19 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     private fun selectedPreset(): ClockPreset =
         ClockSelectionStore.current(prefs)
+
+    private fun activateMediaItem() {
+        // Distinct from the Clock/Weather selection: selecting the sole
+        // library item activates a Now Playing item, not a new mode or song.
+        // The phone's weather checkbox still chooses which image is shown.
+        itemActivated = true
+        preset = selectedPreset()
+        if (prefs.getBoolean(KEY_SHOW_WEATHER_WITHOUT_BUTTONS, false)) {
+            stopClock()
+        } else {
+            startClock()
+        }
+    }
 
     private fun compactLayout(): Boolean =
         prefs.getString(KEY_LAYOUT, "standard") == "compact"
@@ -290,17 +330,25 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private fun publishPlaybackState() {
-        // Keep the v0.26 zero-action experiment unchanged. The ONLY variable
-        // being tested in v0.27 is one playable item / one queue entry.
-        // Native Android Auto controls may still be drawn inactive.
+        // A real, selectable media library entry must publish a controllable
+        // state instead of STATE_NONE. Google documents that STATE_NONE makes
+        // the playback UI inaccessible. We support Play/Pause for activation
+        // but deliberately do not offer Next/Previous, seek or song duration.
+        val actions = PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID or
+            PlaybackStateCompat.ACTION_PREPARE_FROM_MEDIA_ID or
+            PlaybackStateCompat.ACTION_PLAY or
+            PlaybackStateCompat.ACTION_PAUSE or
+            PlaybackStateCompat.ACTION_STOP
+
         session.setPlaybackState(
             PlaybackStateCompat.Builder()
                 .setState(
-                    PlaybackStateCompat.STATE_NONE,
+                    if (itemActivated) PlaybackStateCompat.STATE_PLAYING
+                    else PlaybackStateCompat.STATE_PAUSED,
                     PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN,
                     0f
                 )
-                .setActions(0L)
+                .setActions(actions)
                 .setActiveQueueItemId(SINGLE_QUEUE_ID)
                 .build()
         )

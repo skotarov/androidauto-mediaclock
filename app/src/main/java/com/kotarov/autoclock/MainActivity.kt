@@ -70,7 +70,7 @@ class MainActivity : AppCompatActivity() {
 
         root.addView(label("Auto Clock 2", 30f, light, dp(5)))
         root.addView(label(
-            "Експеримент: една песен, без команди",
+            "Тест: една песен с работещо избиране",
             16f, muted, dp(16)
         ))
 
@@ -129,8 +129,8 @@ class MainActivity : AppCompatActivity() {
             requestWeatherForPreview()
         })
         root.addView(label(
-            "Тест: една медийна позиция, но без Play/Pause и Next/Previous " +
-                "команди. Превключването часовник/време е от телефона.",
+            "Само една избираема медийна позиция. Натискането ѝ отваря " +
+                "часовника като активен елемент. Без Next/Previous и звук.",
             14f, muted, dp(14)
         ))
 
@@ -183,8 +183,8 @@ class MainActivity : AppCompatActivity() {
         })
 
         root.addView(label(
-            "Подаваме една песен, но без команди за бутони. " +
-                "Android Auto определя окончателния вид на панела.",
+            "Единият запис вече приема стартиране от Android Auto. " +
+                "Системата сама рисува Play/Pause; Next/Previous не се подават.",
             13f, muted, dp(15)
         ))
 
@@ -252,9 +252,9 @@ class MainActivity : AppCompatActivity() {
         root.addView(refresh)
 
         root.addView(label(
-            "Тест с точно една песен и без заявени медийни команди. " +
-                "Часовникът се обновява на минута, времето — на 15 минути. " +
-                "Android Auto все още може да рисува неактивни бутони.",
+            "Тест с една избираема песен: при натискане часовникът става " +
+                "активен в медийния панел. Няма реално аудио и Next/Previous. " +
+                "Времето се обновява през 15 минути.",
             14f, muted, dp(8)
         ))
         root.addView(label("Източници: NOAA Aviation Weather (METAR измервания) " +

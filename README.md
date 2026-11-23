@@ -1,9 +1,31 @@
-# Auto Clock 2 — beta 0.27
+# Auto Clock 2 — beta 0.28
 
 An experimental battery-conscious clock for Android Auto's media card next to
 navigation. Android Auto officially reserves the media template for audio apps;
 this project displays a clock without playing audio, so not every head unit is
 guaranteed to support it.
+
+## v0.28: one actually selectable Now Playing item
+
+v0.27 already returned one `FLAG_PLAYABLE` media **leaf** and one queue
+entry. However, the app had **no MediaSession callback** and returned
+`STATE_NONE` / zero actions; pressing that item in Android Auto's
+library opened nothing. It was not a browseable folder/channel — it
+was a playable leaf without a working play handler.
+
+This version registers `MediaSessionCompat.Callback` and recognizes the
+stable single media ID through `onPlayFromMediaId`; it also handles
+`onPrepareFromMediaId`, Play, Pause and Stop. Its playback state is
+`STATE_PAUSED` until activated and `STATE_PLAYING` after selection,
+with the corresponding actions and active queue item. This is a **silent
+clock artwork media item**, not audio playback. The selected analog/digital
+mode and phone weather toggle still control the art. There are no skip
+actions, no track seeking and no track duration.
+
+The sole leaf remains visible in Android Auto's library because that is how
+a `MediaBrowserServiceCompat` exposes content. The difference is that
+**tapping the leaf now handles the playback request and activates the
+one item**. Android Auto may show Play/Pause buttons; it owns the layout.
 
 ## v0.27 experiment: exactly one item; still zero actions
 
@@ -250,7 +272,7 @@ tested on the target phone and Android Auto head unit.
 
 ## Download and install
 
-[AutoClock-2-v0.27-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.27.0-beta)
+[AutoClock-2-v0.28-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.28.0-beta)
 
 1. Open the beta release under **Releases**, then tap the APK under **Assets**.
 2. Install it on the Android phone connected to the car.
@@ -261,7 +283,16 @@ tested on the target phone and Android Auto head unit.
 5. Open Auto Clock 2 in the Android Auto media launcher and press Play, then
    switch to navigation's split-screen view.
 
-## Testing checklist (v0.27)
+## Testing checklist (v0.28)
+
+- [ ] The library contains exactly one playable Auto Clock item
+- [ ] Tapping it activates clock Now Playing instead of doing nothing
+- [ ] MediaSession reports PLAYING and the matching single queue item
+- [ ] No Next/Previous or song progress/seeking
+- [ ] Play/Pause can respond while the graphic remains silent
+- [ ] Clock and weather phone selections and their updates still work
+
+
 
 - [ ] Browse view lists exactly one Auto Clock media item
 - [ ] Media session reports exactly one matching queue item
