@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.support.v4.media.MediaBrowserCompat
+import android.support.v4.media.MediaDescriptionCompat
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
@@ -17,9 +18,9 @@ import com.kotarov.autoclock.weather.WeatherStore
 import java.time.LocalDateTime
 
 /**
- * v0.26 diagnostic: NO playable entries and NO transport actions.
- * The media session still publishes clock art, though Android Auto may hide
- * the entire card if the browse root is empty and playback is STATE_NONE.
+ * v0.27 diagnostic: ONE playable library item and ONE queue entry but
+ * no advertised transport actions, audio or duration. Android Auto may still
+ * draw inactive native controls even with zero media actions.
  */
 class AutoClockMediaService : MediaBrowserServiceCompat() {
     private val handler = Handler(Looper.getMainLooper())
@@ -31,6 +32,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private val settingsRefresh = Runnable {
         preset = selectedPreset()
         artworkGeneration += 1L
+        notifyChildrenChanged(ROOT_ID)
         val wantWeather = prefs.getBoolean(KEY_SHOW_WEATHER_WITHOUT_BUTTONS, false)
         if (wantWeather == running) {
             // Only the phone settings can switch the display in this test.
@@ -92,13 +94,12 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         prefs = getSharedPreferences(PREFERENCES, MODE_PRIVATE)
         ClockSelectionStore.migrateSimplifiedIfNeeded(prefs)
         preset = selectedPreset()
-        session = MediaSessionCompat(this, "AutoClockNoButtonsV026").apply {
+        session = MediaSessionCompat(this, "AutoClockOneItemV027").apply {
             // No media button flags and no transport callbacks.
             setFlags(0)
             isActive = true
         }
-        session.setQueue(emptyList())
-        session.setQueueTitle(null)
+        // publishClock() creates one queue entry before the session is used.
         sessionToken = session.sessionToken
         prefs.registerOnSharedPreferenceChangeListener(prefsListener)
         if (prefs.getBoolean(KEY_SHOW_WEATHER_WITHOUT_BUTTONS, false)) {
@@ -121,8 +122,30 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         parentId: String,
         result: Result<MutableList<MediaBrowserCompat.MediaItem>>
     ) {
-        // Deliberately no "songs" or selectable media content.
-        result.sendResult(mutableListOf())
+        if (parentId != ROOT_ID) {
+            result.sendResult(mutableListOf())
+            return
+        }
+        val now = LocalDateTime.now()
+        val visible = visiblePreset()
+        val weather = if (visible.usesWeather) WeatherStore.current(this) else null
+        val labels = ClockMediaLabels.forClock(visible, now, weather)
+        val icon = ClockArtworkProvider.miniArtworkUri(
+            visible.family, now,
+            if (visible.family == ClockFamily.WEATHER)
+                weather?.observedAtMs ?: 0L else 0L,
+            selectedTheme(), coloredWeatherIcons()
+        )
+        val description = MediaDescriptionCompat.Builder()
+            .setMediaId(SINGLE_MEDIA_ID)
+            .setTitle(labels.title)
+            .setSubtitle(labels.subtitle)
+            .setIconUri(icon)
+            .build()
+        // Exactly one playable media item; no transport commands advertised.
+        result.sendResult(mutableListOf(MediaBrowserCompat.MediaItem(
+            description, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE
+        )))
     }
 
     override fun onDestroy() {
@@ -220,7 +243,21 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val shownSubtitle = if (blank) INVISIBLE_TEXT else mediaLines.subtitle
         val shownDescription = INVISIBLE_TEXT
 
-        // Metadata remains published without any playlist or current track.
+        // Exactly one active queue entry, matching the sole media-browser item.
+        // The queue is rewritten with current labels/artwork on each artwork
+        // refresh; it never accumulates multiple pseudo-songs.
+        val queueDescription = MediaDescriptionCompat.Builder()
+            .setMediaId(SINGLE_MEDIA_ID)
+            .setTitle(shownTitle)
+            .setSubtitle(shownSubtitle)
+            .setDescription(shownDescription)
+            .setIconUri(artwork)
+            .build()
+        session.setQueue(listOf(MediaSessionCompat.QueueItem(
+            queueDescription, SINGLE_QUEUE_ID
+        )))
+        session.setQueueTitle(null)
+
         // Provide a small direct bitmap as well as an URI, because some Android
         // Auto versions keep the previous URI artwork while text changes live.
         val art = ClockRenderer.render(
@@ -238,6 +275,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val metadata = MediaMetadataCompat.Builder()
             .putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, miniBitmap)
             .putBitmap(MediaMetadataCompat.METADATA_KEY_ART, art)
+            .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, SINGLE_MEDIA_ID)
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, shownTitle)
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, shownSubtitle)
             .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, shownTitle)
@@ -252,9 +290,9 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private fun publishPlaybackState() {
-        // No Play/Pause, Next, Previous, Stop or custom media actions.
-        // STATE_NONE may cause Android Auto to hide the tile; that is what
-        // this experimental release is testing.
+        // Keep the v0.26 zero-action experiment unchanged. The ONLY variable
+        // being tested in v0.27 is one playable item / one queue entry.
+        // Native Android Auto controls may still be drawn inactive.
         session.setPlaybackState(
             PlaybackStateCompat.Builder()
                 .setState(
@@ -263,6 +301,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                     0f
                 )
                 .setActions(0L)
+                .setActiveQueueItemId(SINGLE_QUEUE_ID)
                 .build()
         )
     }
@@ -276,5 +315,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         const val KEY_SHOW_WEATHER_WITHOUT_BUTTONS = "no_buttons_show_weather"
         private const val INVISIBLE_TEXT = ClockMediaLabels.EMPTY
         private const val ROOT_ID = "auto_clock_root"
+        private const val SINGLE_MEDIA_ID = "autoclock_one_item"
+        private const val SINGLE_QUEUE_ID = 1L
     }
 }

@@ -70,7 +70,7 @@ class MainActivity : AppCompatActivity() {
 
         root.addView(label("Auto Clock 2", 30f, light, dp(5)))
         root.addView(label(
-            "Експеримент: без бутони и песни",
+            "Експеримент: една песен, без команди",
             16f, muted, dp(16)
         ))
 
@@ -129,8 +129,8 @@ class MainActivity : AppCompatActivity() {
             requestWeatherForPreview()
         })
         root.addView(label(
-            "Тази версия не подава песни и медийни команди. " +
-                "Превключването часовник/време е само от телефона.",
+            "Тест: една медийна позиция, но без Play/Pause и Next/Previous " +
+                "команди. Превключването часовник/време е от телефона.",
             14f, muted, dp(14)
         ))
 
@@ -183,8 +183,8 @@ class MainActivity : AppCompatActivity() {
         })
 
         root.addView(label(
-            "Изпращаме само часовник/време, без песни и бутони. " +
-                "Android Auto сам решава дали да покаже медийния панел.",
+            "Подаваме една песен, но без команди за бутони. " +
+                "Android Auto определя окончателния вид на панела.",
             13f, muted, dp(15)
         ))
 
@@ -252,9 +252,9 @@ class MainActivity : AppCompatActivity() {
         root.addView(refresh)
 
         root.addView(label(
-            "Тест без заредени песни, Play/Pause, Next/Previous и Stop. " +
+            "Тест с точно една песен и без заявени медийни команди. " +
                 "Часовникът се обновява на минута, времето — на 15 минути. " +
-                "Android Auto може да скрие целия панел.",
+                "Android Auto все още може да рисува неактивни бутони.",
             14f, muted, dp(8)
         ))
         root.addView(label("Източници: NOAA Aviation Weather (METAR измервания) " +

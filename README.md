@@ -1,9 +1,25 @@
-# Auto Clock 2 — beta 0.26
+# Auto Clock 2 — beta 0.27
 
 An experimental battery-conscious clock for Android Auto's media card next to
 navigation. Android Auto officially reserves the media template for audio apps;
 this project displays a clock without playing audio, so not every head unit is
 guaranteed to support it.
+
+## v0.27 experiment: exactly one item; still zero actions
+
+Following the v0.26 car test, where the clock card remained visible but native
+transport buttons were drawn **disabled**, this build changes ONLY the media
+library/queue content: one playable browser item and one media-session queue
+entry (a single Auto Clock display item, **not** actual audio). The selected
+clock/weather mode shares the same stable media ID across artwork refreshes.
+
+Zero actions, no transport callbacks, no media-button flags, no duration, and
+`STATE_NONE` are retained from v0.26. The phone's clock/weather toggle and
+all previous visual preferences remain intact. This isolates whether Android
+Auto adjusts its controls or the layout when there is exactly **one** item.
+
+**Android Auto still owns the buttons**; one item does not guarantee they will
+disappear, nor that it will show playable controls. No audio is played.
 
 ## v0.26 experiment: zero buttons and zero songs
 
@@ -234,7 +250,7 @@ tested on the target phone and Android Auto head unit.
 
 ## Download and install
 
-[AutoClock-2-v0.26-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.26.0-beta)
+[AutoClock-2-v0.27-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.27.0-beta)
 
 1. Open the beta release under **Releases**, then tap the APK under **Assets**.
 2. Install it on the Android phone connected to the car.
@@ -245,7 +261,16 @@ tested on the target phone and Android Auto head unit.
 5. Open Auto Clock 2 in the Android Auto media launcher and press Play, then
    switch to navigation's split-screen view.
 
-## Testing checklist (v0.26)
+## Testing checklist (v0.27)
+
+- [ ] Browse view lists exactly one Auto Clock media item
+- [ ] Media session reports exactly one matching queue item
+- [ ] Compare buttons against v0.26: fewer, same disabled, or different
+- [ ] Clock continues changing its artwork each minute
+- [ ] Phone switch continues selecting weather or clock
+- [ ] No new progress bar, audio, or extra transport commands
+
+
 
 - [ ] No playable songs or browse entries appear
 - [ ] No Play/Pause/Next/Previous/Stop controls (host dependent)
