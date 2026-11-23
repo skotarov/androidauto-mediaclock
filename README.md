@@ -1,9 +1,42 @@
-# Auto Clock 2 — beta 0.34
+# Auto Clock 2 — beta 0.35
 
 An experimental battery-conscious clock for Android Auto's media card next to
 navigation. Android Auto officially reserves the media template for audio apps;
 this project displays a clock without playing audio, so not every head unit is
 guaranteed to support it.
+
+## v0.35: separate full media browser from dashboard suggestions
+
+Real-world v0.34 result: Android Auto kept its second dashboard page even
+though `onLoadChildren` returned zero items and MediaSession had an empty queue.
+That demonstrates the second page is **not solely controlled** by whether
+our MediaBrowserService advertises songs.
+
+v0.35 tests a more targeted distinction:
+- Normal media browsers (such as `com.google.android.projection.gearhead`)
+  receive a root with the familiar **three daily forecast rows** and weather
+  icon miniatures. Full-screen media browsing is restored.
+- Clients requesting the Android `BrowserRoot.EXTRA_SUGGESTED` root hint
+  are **not offered a browser root**. The same applies to the separate
+  `com.google.android.googlequicksearchbox` caller reported by Android Auto
+  developers to request the dashboard's "For You" recommendations.
+- The media queue remains empty. The active session still supplies the
+  same clock/weather artwork: Play = clock, Pause/Stop = current weather,
+  no Next/Previous. No changes to digital or analog positioning.
+- ForecastStore again updates only from the existing weather worker,
+  at most once every three hours, with no additional location fix.
+  `notifyChildrenChanged` is emitted only on new forecast/source/theme,
+  never at minute boundaries.
+
+**Important:** The host may still show the two dots and populate suggestions
+from other apps, even if our app refuses recommendations. Android Auto's
+dashboard UI is not controllable from a single media app. No workaround
+using an undocumented "hide the dots" flag is claimed.
+
+Reference: Android official `MediaBrowserServiceCompat.BrowserRoot.EXTRA_SUGGESTED`
+and observation from androidx/media issue #1731 that the main full-screen
+browser and "For You" may use different package-name controllers.
+Changing the root may require restarting Android Auto because of cache.
 
 ## v0.34: no media lists, test dashboard page dots, digital dial 10px lower
 
@@ -404,7 +437,7 @@ tested on the target phone and Android Auto head unit.
 
 ## Download and install
 
-[AutoClock-2-v0.34-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.34.0-beta)
+[AutoClock-2-v0.35-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.35.0-beta)
 
 1. Open the beta release under **Releases**, then tap the APK under **Assets**.
 2. Install it on the Android phone connected to the car.
@@ -415,7 +448,16 @@ tested on the target phone and Android Auto head unit.
 5. Open Auto Clock 2 in the Android Auto media launcher and press Play, then
    switch to navigation's split-screen view.
 
-## Testing checklist (v0.34)
+## Testing checklist (v0.35)
+
+- [ ] Full-screen Auto Clock media library shows exactly 3 forecast days
+- [ ] Compact dashboard stays on the clock; check whether its second dot hides
+- [ ] If second page remains, check for other-app suggestions or empty panel
+- [ ] Play/Pause clock/weather works; no Next/Previous
+- [ ] Weather forecast updates on fetch, not every minute
+- [ ] If results seem cached, disconnect/reconnect Android Auto and reopen
+
+
 
 - [ ] Digital-only clock is slightly lower; analog remains in v0.33 position
 - [ ] No rows/folders are shown in the media browser or queue

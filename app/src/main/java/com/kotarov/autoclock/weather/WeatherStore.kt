@@ -208,14 +208,16 @@ object WeatherStore {
                 if (location == null) {
                     callback(false)
                 } else {
-                    fetchOnThread(app, selected, callback) {
+                    fetchOnThread(
+                        app, selected, callback, location.latitude, location.longitude
+                    ) {
                         fetchNearestStation(location) ?: fetchAutoModelFallback(location)
                     }
                 }
             }
         } else {
             val manual = City.byId(selected)
-            fetchOnThread(app, selected, callback) {
+            fetchOnThread(app, selected, callback, manual.lat, manual.lon) {
                 fetchModel(
                     manual.lat, manual.lon,
                     manual.label, "Open-Meteo · модел"
@@ -228,10 +230,21 @@ object WeatherStore {
         app: Context,
         selectionAtStart: String,
         callback: (Boolean) -> Unit,
+        latitude: Double,
+        longitude: Double,
         request: () -> Reading?
     ) {
         Thread({
             val result = try { request() } catch (_: Exception) { null }
+            // Forecast uses the same approximate coordinates; no extra GPS.
+            // ForecastStore handles three-hour throttle and retry internally.
+            try {
+                ForecastStore.refreshIfDueOnWorker(
+                    app, selectionAtStart, latitude, longitude
+                )
+            } catch (_: Exception) {
+                // An unavailable forecast must not break the current weather.
+            }
             var saved = false
             if (result != null &&
                 selectedMode(app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

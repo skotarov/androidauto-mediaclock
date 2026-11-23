@@ -70,7 +70,7 @@ class MainActivity : AppCompatActivity() {
 
         root.addView(label("Auto Clock 2", 30f, light, dp(5)))
         root.addView(label(
-            "Play — часовник · Stop — времето · без списъци",
+            "Play — часовник · Stop — времето · прогноза 3 дни",
             16f, muted, dp(16)
         ))
 
@@ -119,9 +119,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         root.addView(label(
-            "Тест без медийни списъци: Play показва часовника, " +
-                "Stop/Pause — времето. Android Auto управлява дали " +
-                "двете точки за превключване ще изчезнат.",
+            "Тест: прогнозата е достъпна през пълния екран на Auto Clock. " +
+                "Не предлагаме препоръки в комбинирания изглед. " +
+                "Android Auto решава дали да скрие двете точки.",
             14f, muted, dp(14)
         ))
 
@@ -220,7 +220,7 @@ class MainActivity : AppCompatActivity() {
         weatherStatus = label("", 14f, muted, dp(10))
         root.addView(weatherStatus)
         val refresh = Button(this).apply {
-            text = "Обнови времето"
+            text = "Обнови времето и прогнозата"
             isAllCaps = false
         }
         refresh.setOnClickListener {
@@ -243,9 +243,10 @@ class MainActivity : AppCompatActivity() {
         root.addView(refresh)
 
         root.addView(label(
-            "Списъкът с песни и тридневната прогноза са премахнати. " +
-                "Проверяваме дали това скрива превключването в комбинирания екран. " +
-                "Текущото време остава с обновяване до веднъж на 15 минути.",
+            "Трите реда на прогнозата се подават на пълния екран. " +
+                "Предложенията за комбинирания екран са изключени експериментално. " +
+                "Прогнозата се обновява до веднъж на 3 часа, " +
+                "текущото време — през 15 минути.",
             14f, muted, dp(8)
         ))
         root.addView(label("Източници: NOAA Aviation Weather (METAR измервания) " +
