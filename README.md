@@ -1,9 +1,41 @@
-# Auto Clock 2 — beta 0.29
+# Auto Clock 2 — beta 0.30
 
 An experimental battery-conscious clock for Android Auto's media card next to
 navigation. Android Auto officially reserves the media template for audio apps;
 this project displays a clock without playing audio, so not every head unit is
 guaranteed to support it.
+
+## v0.30: 3-day forecast rows + compact labels hidden by default
+
+The library screen contains exactly **three daily forecast rows**, one for
+each of the three **upcoming** days (tomorrow, the day after, and the third
+day). No clock/minute, pressure or terrain-elevation rows remain:
+- Each row includes its date, a weather miniature, daytime high/overnight
+  low temperatures and the model's maximum chance of precipitation.
+- Open-Meteo's daily `weather_code`, `temperature_2m_max`,
+  `temperature_2m_min`, and `precipitation_probability_max` fields are used.
+- The forecast is cached and fetched **at most every 3 hours** in the
+  existing background weather worker using the same approximate coordinates
+  it already obtained. For manual cities no location fix is needed.
+  Current METAR observations remain independent and capped to 15 minutes.
+- If forecast data cannot be obtained, display dated "Няма прогноза"
+  rows instead of inventing numbers.
+- Browse rows do not need minute-aligned re-fetches because Android Auto
+  did not redraw them while the dashboard was split with navigation.
+
+**Text labels:** compact media display-title/subtitle fields now default
+to hidden (a new setting key also makes this the default after upgrading
+from v0.29). Full real title/artist remain in standard
+`METADATA_KEY_TITLE`/`ARTIST` and the queue item description for
+clients that use them on the fullscreen Now Playing screen.
+Android Auto does not expose a reliable compact-vs-fullscreen state to
+`MediaSessionCompat`, and may use display-title fields for both layouts.
+Therefore differing compact/full text is **best effort and host-dependent**.
+
+Play still shows the saved clock; Pause/Stop shows current weather.
+No Next/Previous or audio. Minute updates run only while Play is active;
+while stopped, weather is checked at most every 15 minutes and no
+per-minute redraw is scheduled. No wake lock or persistent GPS polling.
 
 ## v0.29: Play clock, Stop weather, 3 live browse rows
 
@@ -298,7 +330,7 @@ tested on the target phone and Android Auto head unit.
 
 ## Download and install
 
-[AutoClock-2-v0.29-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.29.0-beta)
+[AutoClock-2-v0.30-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.30.0-beta)
 
 1. Open the beta release under **Releases**, then tap the APK under **Assets**.
 2. Install it on the Android phone connected to the car.
@@ -309,7 +341,19 @@ tested on the target phone and Android Auto head unit.
 5. Open Auto Clock 2 in the Android Auto media launcher and press Play, then
    switch to navigation's split-screen view.
 
-## Testing checklist (v0.29)
+## Testing checklist (v0.30)
+
+- [ ] Browse shows three dates tomorrow/next 2 days, NO pressure/altitude
+- [ ] Each day shows icon, forecast high/low, precipitation probability
+- [ ] Forecast remains useful even if Android Auto does not redraw the list
+- [ ] Forecast refetch at most every 3h; uses existing weather worker/location
+- [ ] Compact media text hidden by default (new preference key)
+- [ ] Fullscreen Now Playing title/subtitle visible if host uses standard fields
+- [ ] Play clock, Pause/Stop current weather, no skip controls
+- [ ] Minute clock redraw only in Play, 15-minute paused weather refresh
+- [ ] Invalid/missing forecast displays placeholders without fake values
+
+
 
 - [ ] Play: clock, Pause/Stop: weather, Play: same clock again
 - [ ] Library: three rows, each with distinct miniature artwork

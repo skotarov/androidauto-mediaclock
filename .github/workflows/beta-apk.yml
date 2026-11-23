@@ -36,17 +36,17 @@ jobs:
       - name: Copy APK with friendly filename
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk dist/AutoClock-2-v0.29-beta.apk
+          cp app/build/outputs/apk/debug/app-debug.apk dist/AutoClock-2-v0.30-beta.apk
 
       - name: Create or update public beta download
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if ! gh release view v0.29.0-beta >/dev/null 2>&1; then
-            gh release create v0.29.0-beta \
+          if ! gh release view v0.30.0-beta >/dev/null 2>&1; then
+            gh release create v0.30.0-beta \
               --target "$GITHUB_SHA" \
-              --title "Auto Clock 2 — beta 0.29.0" \
-              --notes "Play shows clock, Pause/Stop shows weather. Android Auto library has three selectable rows: minute clock, live current conditions, and pressure + station/model elevation. Media browser calls notifyChildrenChanged on each minute boundary; weather API throttle stays 15 min." \
+              --title "Auto Clock 2 — beta 0.30.0" \
+              --notes "Three-day forecast browse view for tomorrow+2 days with day icons, max/min temps and maximum precipitation chance. Forecast cache refresh 3h in existing weather worker; no per-minute list redraw. Compact text hidden by default while standard title/artist metadata remain for fullscreen fallback. Play clock/Stop weather." \
               --prerelease
           fi
-          gh release upload v0.29.0-beta dist/AutoClock-2-v0.29-beta.apk --clobber
+          gh release upload v0.30.0-beta dist/AutoClock-2-v0.30-beta.apk --clobber
