@@ -55,13 +55,22 @@ class ClockArtworkProvider : ContentProvider() {
         // phone settings invalidates both Android Auto and disk artwork caches.
         val layout = if (compact) "compact" else "standard"
         val destination = File(directory,
-            "v29-$layout-${theme.id}-${if (coloredWeatherIcons) "color" else "mono"}-$clockMode-$key-$weatherRevision.png")
+            "v30-$layout-${theme.id}-${if (coloredWeatherIcons) "color" else "mono"}-$clockMode-$key-$weatherRevision.png")
 
         synchronized(lock) {
             if (!destination.isFile || destination.length() == 0L) {
                 val temp = File(directory, "inflight-${System.nanoTime()}.tmp")
                 val mini = miniFamily(clockMode)
-                val bitmap = if (clockMode == "mini_metrics") {
+                val bitmap = if (clockMode == "mini_forecast") {
+                    ClockRenderer.renderMini(
+                        ClockFamily.WEATHER, requestedMinute,
+                        uri.getQueryParameter("code")?.toIntOrNull(),
+                        true,
+                        uri.getQueryParameter("temp") ?: "--°C",
+                        theme,
+                        coloredWeatherIcons = coloredWeatherIcons
+                    )
+                } else if (clockMode == "mini_metrics") {
                     ClockRenderer.renderMiniMetrics(theme)
                 } else if (mini != null) {
                     val weather = if (mini == ClockFamily.WEATHER)
@@ -132,7 +141,7 @@ class ClockArtworkProvider : ContentProvider() {
         const val AUTHORITY = "com.kotarov.autoclock2.artwork"
         private const val MAX_FILES = 6
         private val VALID_MODES = ClockPreset.entries.map { it.id }.toSet() +
-            setOf("clock", "analog", "weather", "both", "mini_metrics")
+            setOf("clock", "analog", "weather", "both", "mini_metrics", "mini_forecast")
         private val KEY_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd_HHmm")
 
         private fun miniFamily(id: String): ClockFamily? =
@@ -146,6 +155,23 @@ class ClockArtworkProvider : ContentProvider() {
             coloredWeatherIcons: Boolean = true
         ): Uri = artworkUri("mini_${family.id}", now, weatherRevision,
             theme = theme, coloredWeatherIcons = coloredWeatherIcons)
+
+        /** Day-specific forecast weather miniature. Cache key includes the
+         * forecast revision and date; no unnecessary minute-by-minute bitmap.
+         */
+        fun forecastArtworkUri(
+            day: com.kotarov.autoclock.weather.ForecastStore.Day,
+            revision: Long,
+            theme: ClockTheme = ClockTheme.DARK,
+            coloredWeatherIcons: Boolean = true
+        ): Uri = artworkUri(
+            "mini_forecast", day.date.atTime(12, 0),
+            revision + day.date.toEpochDay(),
+            theme = theme, coloredWeatherIcons = coloredWeatherIcons
+        ).buildUpon()
+            .appendQueryParameter("code", day.code.toString())
+            .appendQueryParameter("temp", day.iconTemperature)
+            .build()
 
         fun metricsArtworkUri(
             now: LocalDateTime,
@@ -168,7 +194,7 @@ class ClockArtworkProvider : ContentProvider() {
             .appendPath(mode)
             .appendPath("clock_${now.format(KEY_FORMAT)}.png")
             .appendQueryParameter("rev", weatherRevision.coerceAtLeast(0L).toString())
-            .appendQueryParameter("style", "v29")
+            .appendQueryParameter("style", "v30")
             .appendQueryParameter("weather_color", coloredWeatherIcons.toString())
             .appendQueryParameter("theme", theme.id)
             .appendQueryParameter("generation", generation.toString())

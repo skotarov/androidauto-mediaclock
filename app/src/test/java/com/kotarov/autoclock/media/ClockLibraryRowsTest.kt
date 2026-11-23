@@ -1,56 +1,47 @@
 package com.kotarov.autoclock.media
 
-import com.kotarov.autoclock.weather.WeatherStore
-import java.time.LocalDateTime
+import com.kotarov.autoclock.weather.ForecastStore
+import java.time.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ClockLibraryRowsTest {
-    private val time = LocalDateTime.of(2026, 11, 23, 13, 48)
-    private val observation = WeatherStore.Snapshot(
-        temperatureC = 10.9, weatherCode = 3, observedAtMs = 100L,
-        isDay = true, originLabel = "Станция София (LBSF)",
-        sourceLabel = "NOAA · измерване METAR", reportTimeMs = 100L,
-        autoSelected = true, pressureHpa = 1014.4, elevationMeters = 548.6
-    )
+    private val today = LocalDate.of(2026, 11, 23)
+    private val days = (0..3).map { offset ->
+        ForecastStore.Day(
+            today.plusDays(offset.toLong()),
+            code = if (offset == 1) 61 else 2,
+            maxC = 10.5 + offset,
+            minC = 2.5 + offset,
+            precipitationPercent = 20 + offset
+        )
+    }
 
-    @Test fun exactlyThreeDistinctItemsWithFormattedWeatherAndElevation() {
-        val rows = ClockLibraryRows.create(time, ClockPreset.ANALOG_PURE, observation)
+    @Test fun threeRowsReferToTomorrowAndNextTwoDays() {
+        val rows = ClockLibraryRows.create(days, today)
         assertEquals(3, rows.size)
+        assertEquals(listOf(today.plusDays(1), today.plusDays(2), today.plusDays(3)),
+            rows.map { it.date })
         assertEquals(3, rows.map { it.id }.toSet().size)
-        assertEquals("13:48", rows[0].title)
-        assertEquals("Аналогов часовник", rows[0].subtitle)
-        assertTrue(rows[1].title.startsWith("☁ София · 11°C"))
-        assertFalse(rows[1].title.contains("Станция"))
-        assertEquals("Налягане: 1014 hPa", rows[2].title)
-        assertEquals("Надм. височина (станция): 549 м", rows[2].subtitle)
-        assertEquals(listOf(
-            ClockLibraryRows.Icon.CLOCK, ClockLibraryRows.Icon.WEATHER,
-            ClockLibraryRows.Icon.METRICS
-        ), rows.map { it.icon })
+        assertTrue(rows[0].title.contains("↑12°"))
+        assertTrue(rows[0].title.contains("↓4°"))
+        assertTrue(rows[0].subtitle.contains("Валежи до 21%"))
     }
 
-    @Test fun oneMinuteLaterClockTextChangesWithoutRefetchingWeather() {
-        val later = ClockLibraryRows.create(time.plusMinutes(1),
-            ClockPreset.DIGITAL_TIME, observation)
-        assertEquals("13:49", later[0].title)
-        assertEquals("Цифров часовник", later[0].subtitle)
-        assertEquals("Налягане: 1014 hPa", later[2].title)
+    @Test fun missingForecastNeverInventsTemperatures() {
+        val rows = ClockLibraryRows.create(emptyList(), today)
+        assertEquals(3, rows.size)
+        assertTrue(rows.all { it.forecast == null && it.title.contains("Няма прогноза") })
     }
 
-    @Test fun missingDataIsNeverInvented() {
-        val rows = ClockLibraryRows.create(time, ClockPreset.ANALOG_PURE, null)
-        assertTrue(rows[1].title.contains("няма данни"))
-        assertEquals("Налягане: няма данни", rows[2].title)
-        assertEquals("Надм. височина (терен): няма данни", rows[2].subtitle)
-    }
-
-    @Test fun knownIdsMatchOnlyThreeRows() {
-        ClockLibraryRows.create(time, ClockPreset.ANALOG_PURE, observation)
-            .forEach { assertTrue(ClockLibraryRows.isKnownId(it.id)) }
-        assertFalse(ClockLibraryRows.isKnownId("family_analog"))
+    @Test fun idMatchingIsLimitedToThreeDays() {
+        ClockLibraryRows.create(days, today).forEach {
+            assertTrue(ClockLibraryRows.isKnownId(it.id))
+        }
+        assertFalse(ClockLibraryRows.isKnownId("autoclock_metrics"))
+        assertFalse(ClockLibraryRows.isKnownId(ClockLibraryRows.CLOCK_ID))
         assertFalse(ClockLibraryRows.isKnownId(null))
     }
 }

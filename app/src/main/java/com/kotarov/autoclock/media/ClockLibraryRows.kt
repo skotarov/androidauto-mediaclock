@@ -1,47 +1,46 @@
 package com.kotarov.autoclock.media
 
+import com.kotarov.autoclock.weather.ForecastStore
 import com.kotarov.autoclock.weather.WeatherStore
-import java.time.LocalDateTime
+import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
-/** Three readable media leaves; missing weather values must never be fabricated. */
+/** Exactly three daily forecast leaves, not an animated clock or playlist. */
 object ClockLibraryRows {
+    // Retained for active Now Playing metadata; these are not library rows.
     const val CLOCK_ID = "autoclock_clock"
     const val WEATHER_ID = "autoclock_weather"
-    const val METRICS_ID = "autoclock_metrics"
+    private const val FORECAST_ID_PREFIX = "autoclock_forecast_day_"
 
-    enum class Icon { CLOCK, WEATHER, METRICS }
-    data class Row(val id: String, val title: String, val subtitle: String, val icon: Icon)
-    private val format = DateTimeFormatter.ofPattern("HH:mm")
+    data class Row(
+        val id: String, val title: String, val subtitle: String,
+        val date: LocalDate, val forecast: ForecastStore.Day?
+    )
+    private val dateFormat = DateTimeFormatter.ofPattern("EEE dd.MM", Locale("bg", "BG"))
 
-    fun create(
-        now: LocalDateTime, selected: ClockPreset, weather: WeatherStore.Snapshot?
-    ): List<Row> {
-        val clock = Row(
-            CLOCK_ID, now.format(format),
-            if (selected.family == ClockFamily.DIGITAL) "Цифров часовник"
-            else "Аналогов часовник",
-            Icon.CLOCK
-        )
-        val conditions = if (weather != null) {
-            val location = WeatherStore.simplePlaceLabel(weather.originLabel)
-            val glyph = WeatherStore.symbol(weather.weatherCode, weather.isDay)
-            Row(WEATHER_ID, "$glyph $location · ${weather.formattedTemperature}",
-                weather.description, Icon.WEATHER)
-        } else Row(WEATHER_ID, "Времето · няма данни",
-            "Изчаква се актуално измерване", Icon.WEATHER)
-
-        val heightType = if (weather?.autoSelected == true &&
-            weather.sourceLabel.contains("METAR")) "станция" else "терен"
-        val metrics = Row(
-            METRICS_ID,
-            "Налягане: ${weather?.pressureText ?: "няма данни"}",
-            "Надм. височина ($heightType): ${weather?.elevationText ?: "няма данни"}",
-            Icon.METRICS
-        )
-        return listOf(clock, conditions, metrics)
+    fun create(days: List<ForecastStore.Day>, today: LocalDate): List<Row> {
+        val byDate = days.associateBy { it.date }
+        return (1..3).map { index ->
+            val date = today.plusDays(index.toLong())
+            val day = byDate[date]
+            val label = date.format(dateFormat)
+            if (day == null) {
+                Row("$FORECAST_ID_PREFIX$index", "$label · Няма прогноза",
+                    "Данните още не са заредени", date, null)
+            } else {
+                val icon = WeatherStore.symbol(day.code, true)
+                val text = WeatherStore.describe(day.code)
+                val rain = day.precipitationPercent?.let { " · Валежи до $it%" } ?: ""
+                Row(
+                    "$FORECAST_ID_PREFIX$index",
+                    "$label  $icon  ↑${day.maxText} ↓${day.minText}",
+                    "$text$rain", date, day
+                )
+            }
+        }
     }
 
-    fun isKnownId(id: String?): Boolean =
-        id == CLOCK_ID || id == WEATHER_ID || id == METRICS_ID
+    fun isKnownId(mediaId: String?): Boolean =
+        mediaId != null && (1..3).any { mediaId == "$FORECAST_ID_PREFIX$it" }
 }
