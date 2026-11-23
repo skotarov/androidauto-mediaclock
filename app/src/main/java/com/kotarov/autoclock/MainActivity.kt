@@ -5,10 +5,10 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.content.res.ColorStateList
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.widget.Button
-import android.widget.CheckBox
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -16,6 +16,7 @@ import android.widget.SeekBar
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.SwitchCompat
 import androidx.core.app.ActivityCompat
 import com.kotarov.autoclock.artwork.ClockRenderer
 import com.kotarov.autoclock.media.AutoClockBrowseHostLaunch
@@ -313,14 +314,53 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Spacious settings row. A compact switch on the right replaces the
+     * old checkbox, while the entire row remains a generous touch target.
+     */
     private fun checkOption(
         title: String, checked: Boolean, onChange: (Boolean) -> Unit
-    ): CheckBox = CheckBox(this).apply {
-        text = title
-        textSize = 16f
-        setTextColor(ink)
-        isChecked = checked
-        setOnCheckedChangeListener { _, value -> onChange(value) }
+    ): LinearLayout {
+        val toggle = SwitchCompat(this).apply {
+            showText = false
+            isChecked = checked
+            contentDescription = title
+            scaleX = 0.85f
+            scaleY = 0.85f
+            thumbTintList = ColorStateList(
+                arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                intArrayOf(Color.WHITE, Color.rgb(198, 202, 211))
+            )
+            trackTintList = ColorStateList(
+                arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                intArrayOf(accent, faint)
+            )
+            setOnCheckedChangeListener { _, value -> onChange(value) }
+        }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            minimumHeight = dp(52)
+            setPadding(0, dp(10), 0, dp(10))
+            val label = text(title, 16f, 0).apply {
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(0, 0, dp(12), 0)
+            }
+            addView(label, LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
+            ))
+            addView(toggle, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                marginBottom = dp(16)
+            }
+            setOnClickListener { toggle.isChecked = !toggle.isChecked }
+        }
     }
 
     private fun text(text: String, size: Float, bottom: Int): TextView =
