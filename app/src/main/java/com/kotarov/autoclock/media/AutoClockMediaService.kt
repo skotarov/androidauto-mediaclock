@@ -51,10 +51,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == ClockPreset.KEY_FAMILY ||
-            key == ClockPreset.KEY_ANALOG_ADD_DIGITAL ||
-            key == ClockPreset.KEY_ANALOG_ADD_WEATHER ||
-            key == ClockPreset.KEY_DIGITAL_ADD_ANALOG ||
-            key == ClockPreset.KEY_DIGITAL_ADD_WEATHER ||
+            key == ClockPreset.KEY_ADD_WEATHER ||
             key == KEY_MODE ||
             key == KEY_TEST_DIRECT_BROWSE || key == KEY_TEST_STATE_NONE ||
             key == KEY_TEST_STATE_STOPPED ||
