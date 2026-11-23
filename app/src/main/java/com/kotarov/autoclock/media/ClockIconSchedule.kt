@@ -3,13 +3,14 @@ package com.kotarov.autoclock.media
 import java.time.LocalDateTime
 
 /**
- * Round the browse-thumbnail clock down to a seven-minute window.
- * Based on local wall-clock minutes, so refreshes align to 00:00, 00:07,
- * 00:14... rather than an arbitrary time after service startup.
+ * A new browse/display icon image is eligible every minute while Play runs.
+ * Alternating red and green makes Android Auto's image caching easy to test.
  */
 object ClockIconSchedule {
-    private const val INTERVAL_MINUTES = 7L
-    private const val BUCKETS_PER_DAY = 206L // ceil(1440 / 7)
+    private const val INTERVAL_MINUTES = 1L
+    private const val BUCKETS_PER_DAY = 1440L
+
+    fun isRed(time: LocalDateTime): Boolean = time.minute % 2 == 0
 
     fun bucket(time: LocalDateTime): Long =
         time.toLocalDate().toEpochDay() * BUCKETS_PER_DAY +

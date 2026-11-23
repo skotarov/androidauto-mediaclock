@@ -31,7 +31,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private var running = false
     private var preset = ClockPreset.ANALOG_PURE
     private var artworkGeneration = 0L
-    // Browse artwork changes at seven-minute boundaries, using the existing
+    // Browse artwork changes at minute boundaries, using the existing
     // minute timer. This does not change Android Auto's manifest app icon.
     private var lastBrowseIconBucket: Long? = null
 
@@ -159,7 +159,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 .setMediaId("family_${family.id}")
                 .setTitle(family.label)
                 .setSubtitle(option.label)
-                // The clock thumbnail is a distinct 7-minute artwork asset.
+                // The clock thumbnail is a distinct 1-minute red/green diagnostic asset.
                 // The app icon shown in Android Auto's dock is still the
                 // static icon supplied by AndroidManifest.xml.
                 .setIconUri(ClockArtworkProvider.miniIconUri(now)).build()
@@ -277,7 +277,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             compactLayout(), artworkGeneration
         )
         // Keep a separate, tightly cropped icon for the fullscreen-map media
-        // quick-control chip. It changes on the same seven-minute schedule
+        // quick-control chip. It changes on the same one-minute schedule
         // as the browse thumbnail, even though main album art changes
         // every minute. The host decides which metadata field to display.
         val miniArtwork = ClockArtworkProvider.miniIconUri(now)
@@ -307,7 +307,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         )
         // The full art stays on the media card; the display icon is now
         // independently large and legible when Android Auto uses it for the
-        // tiny now-playing bar. The small icon occupies ~50 KiB RGB_565.
+        // tiny now-playing bar. Red/green alternate every minute while Play runs.
+        // The small icon occupies ~50 KiB RGB_565.
         val miniBitmap = ClockRenderer.renderBrowseClock(
             ClockIconSchedule.slotStart(now), outputSize = 160
         )

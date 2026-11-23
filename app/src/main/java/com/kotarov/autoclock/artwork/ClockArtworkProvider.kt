@@ -50,7 +50,7 @@ class ClockArtworkProvider : ContentProvider() {
         // Include the layout and release design in the filename, so changing
         // phone settings invalidates both Android Auto and disk artwork caches.
         val layout = if (compact) "compact" else "standard"
-        val destination = File(directory, "v18-$layout-$clockMode-$key-$weatherRevision.png")
+        val destination = File(directory, "v19-$layout-$clockMode-$key-$weatherRevision.png")
 
         synchronized(lock) {
             if (!destination.isFile || destination.length() == 0L) {
@@ -119,7 +119,7 @@ class ClockArtworkProvider : ContentProvider() {
             setOf("clock", "analog", "weather", "both", "mini")
         private val KEY_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd_HHmm")
 
-        /** Seven-minute thumbnail for media browse item icons.
+        /** One-minute red/green diagnostic media browse icon (while playing).
          * Android Auto's manifest-based launcher/dock icon is independent.
          */
         fun miniIconUri(now: LocalDateTime = LocalDateTime.now()): Uri =
@@ -137,7 +137,7 @@ class ClockArtworkProvider : ContentProvider() {
             .appendPath(mode)
             .appendPath("clock_${now.format(KEY_FORMAT)}.png")
             .appendQueryParameter("rev", weatherRevision.coerceAtLeast(0L).toString())
-            .appendQueryParameter("style", "v18")
+            .appendQueryParameter("style", "v19")
             .appendQueryParameter("generation", generation.toString())
             .appendQueryParameter("layout", if (compact) "compact" else "standard")
             .build()

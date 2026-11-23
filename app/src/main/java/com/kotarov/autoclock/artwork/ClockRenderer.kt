@@ -8,6 +8,7 @@ import android.graphics.Path
 import android.graphics.Typeface
 import com.kotarov.autoclock.media.ClockPreset
 import com.kotarov.autoclock.media.ClockFamily
+import com.kotarov.autoclock.media.ClockIconSchedule
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import kotlin.math.cos
@@ -154,7 +155,7 @@ object ClockRenderer {
     }
 
     /**
-     * Low-resolution media-browse thumbnail refreshed every seven minutes.
+     * Low-resolution diagnostic media thumbnail refreshed every minute while playing.
      * Unlike the main artwork, this tiny clock avoids weather and padding,
      * so the hands remain distinguishable at Android Auto icon sizes.
      * This is NOT the system launcher/dock icon from AndroidManifest.xml.
@@ -170,13 +171,18 @@ object ClockRenderer {
         val bitmap = Bitmap.createBitmap(outputSize, outputSize, Bitmap.Config.RGB_565)
         val canvas = Canvas(bitmap)
         canvas.scale(outputSize / 160f, outputSize / 160f)
-        canvas.drawColor(Color.rgb(2, 5, 11))
+        // v0.19 diagnostic: high-contrast RED on even minutes, GREEN on odd.
+        // This affects display/browse artwork only, not the launcher icon.
+        val red = ClockIconSchedule.isRed(time)
+        val accent = if (red) Color.rgb(255, 36, 36) else Color.rgb(32, 255, 96)
+        canvas.drawColor(if (red) Color.rgb(55, 7, 9) else Color.rgb(5, 55, 20))
         val cx = 80f
         val cy = 80f
         val radius = 74f
 
-        canvas.drawCircle(cx, cy, radius, fill(Color.rgb(9, 23, 34)))
-        canvas.drawCircle(cx, cy, radius, stroke(pale, 4.4f))
+        canvas.drawCircle(cx, cy, radius,
+            fill(if (red) Color.rgb(75, 9, 14) else Color.rgb(7, 75, 25)))
+        canvas.drawCircle(cx, cy, radius, stroke(accent, 7f))
         val tick = stroke(white, 4.5f)
         repeat(12) { i ->
             val angle = Math.toRadians(i * 30.0 - 90.0)
