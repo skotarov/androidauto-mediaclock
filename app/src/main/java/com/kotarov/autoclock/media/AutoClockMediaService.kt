@@ -17,7 +17,6 @@ import com.kotarov.autoclock.artwork.ClockRenderer
 import com.kotarov.autoclock.media.ClockTheme
 import com.kotarov.autoclock.weather.WeatherStore
 import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /**
@@ -214,7 +213,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         prefs.getBoolean(KEY_PROGRESS_ANIMATED, false)
 
     private fun hideMediaText(): Boolean =
-        prefs.getBoolean(KEY_HIDE_MEDIA_TEXT, true)
+        prefs.getBoolean(KEY_HIDE_MEDIA_TEXT, false)
 
     private fun startClock() {
         running = true
@@ -249,28 +248,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private fun publishClock() {
         val now = LocalDateTime.now()
         val weather = if (preset.usesWeather) WeatherStore.current(this) else null
-        val temp = weather?.formattedTemperature ?: "--°C"
         val description = weather?.description ?: "Няма данни"
-        val shortWeather = if (weather == null) "Няма данни" else
-            "${WeatherStore.symbol(weather.weatherCode, weather.isDay)} $temp"
-        val time = now.format(TIME_FORMAT)
-
-        val title = when (preset.family) {
-            ClockFamily.ANALOG ->
-                if (preset.hasDigitalTime) time
-                else if (preset.usesWeather) shortWeather
-                else "Аналогов часовник"
-            ClockFamily.DIGITAL -> time
-            ClockFamily.WEATHER -> shortWeather
-        }
-        val subtitle = when {
-            preset.family == ClockFamily.WEATHER && preset.hasDigitalTime ->
-                "$time • $description"
-            preset.usesWeather -> if (weather != null && weather.autoSelected)
-                "${weather.originLabel} · ${weather.sourceLabel}" else description
-            preset.hasDigitalTime -> now.format(DATE_FORMAT)
-            else -> preset.label
-        }
+        val mediaLines = ClockMediaLabels.forClock(preset, now, weather)
         val theme = selectedTheme()
         val colored = coloredWeatherIcons()
         val artwork = ClockArtworkProvider.artworkUri(
@@ -284,10 +263,12 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             theme, colored
         )
         val blank = hideMediaText()
-        val shownTitle = if (blank) INVISIBLE_TEXT else title
-        val shownSubtitle = if (blank) INVISIBLE_TEXT else subtitle
-        val shownDescription = if (blank) INVISIBLE_TEXT else preset.label
-        val shownAlbum = if (blank) INVISIBLE_TEXT else "Auto Clock 2"
+        // The Android Auto playback tile should contain only the useful
+        // clock/weather labels, never preset names or METAR station metadata.
+        val shownTitle = if (blank) INVISIBLE_TEXT else mediaLines.title
+        val shownSubtitle = if (blank) INVISIBLE_TEXT else mediaLines.subtitle
+        val shownDescription = INVISIBLE_TEXT
+        val shownAlbum = INVISIBLE_TEXT
 
         val item = MediaDescriptionCompat.Builder()
             .setMediaId(preset.id)
@@ -373,9 +354,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         const val KEY_HIDE_MEDIA_TEXT = "hide_media_text"
         const val KEY_LAYOUT = "clock_layout"
         const val KEY_PROGRESS_ANIMATED = "progress_animated"
-        private const val INVISIBLE_TEXT = "\u00A0"
+        private const val INVISIBLE_TEXT = ClockMediaLabels.EMPTY
         private const val ROOT_ID = "auto_clock_root"
-        private val TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm", Locale("bg", "BG"))
-        private val DATE_FORMAT = DateTimeFormatter.ofPattern("EEEE, dd.MM.yyyy", Locale("bg", "BG"))
     }
 }

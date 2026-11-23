@@ -157,8 +157,8 @@ class MainActivity : AppCompatActivity() {
         })
 
         root.addView(checkOption(
-            "Само фон — скрий системните надписи за песента",
-            prefs.getBoolean(AutoClockMediaService.KEY_HIDE_MEDIA_TEXT, true)
+            "Скрий часа и времето под часовника в Android Auto",
+            prefs.getBoolean(AutoClockMediaService.KEY_HIDE_MEDIA_TEXT, false)
         ) { checked ->
             prefs.edit().putBoolean(AutoClockMediaService.KEY_HIDE_MEDIA_TEXT, checked).apply()
         })
