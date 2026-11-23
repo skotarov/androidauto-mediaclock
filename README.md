@@ -1,4 +1,4 @@
-# Auto Clock 2 — beta 0.17
+# Auto Clock 2 — beta 0.18
 
 An experimental battery-conscious clock for Android Auto's media card next to
 navigation. Android Auto officially reserves the media template for audio apps;
@@ -120,6 +120,33 @@ host. The main media card's clock still updates every minute. Test the new
 media browse icon when you reopen the clock's media list and check whether
 your particular Android Auto version also updates the shortcut.
 
+## Fullscreen-map quick-control clock (v0.18)
+
+On the user's Android Auto display, a fullscreen map places the media
+now-playing quick controls in the bottom taskbar. The tiny analog clock inside
+that bar is media **artwork**, not the static app-dock launcher shortcut.
+
+The service now sends **two separate images** in the active MediaSession:
+
+- Main media artwork: unchanged full design at 320×320 RGB_565 (also available
+  via a 512×512 ContentProvider URI), refreshed every minute during Play
+- Display icon: a dedicated 160×160 RGB_565 analog face whose diameter fills
+  148/160 pixels (92.5% of the square), with bright hands, bold tick marks
+  and no illegible tiny weather or digital text. Its time is sampled every
+  seven minutes, using the existing minute refresh
+
+The display icon is provided both as
+`METADATA_KEY_DISPLAY_ICON` and `METADATA_KEY_DISPLAY_ICON_URI`, while
+`METADATA_KEY_ART`, `METADATA_KEY_ART_URI` and album art URI keep the large
+media card design. The Android Auto host chooses which image its quick
+controls use, so the result must be verified on the target car screen.
+This does **not** make the dock application shortcut dynamic.
+
+**Play vs Pause:** in the current Auto Clock media service the main minute
+refresh and seven-minute browse refresh run only while the Play state is
+active. The mini controls can remain visible on Pause, but their clock image
+then stays frozen. No fake audio is played and no wake lock is acquired.
+
 ## Resource and compatibility design
 
 - Minute-aligned clock artwork and media metadata only while the clock is active
@@ -135,7 +162,7 @@ tested on the target phone and Android Auto head unit.
 
 ## Download and install
 
-[AutoClock-2-v0.17-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.17.0-beta)
+[AutoClock-2-v0.18-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.18.0-beta)
 
 1. Open the beta release under **Releases**, then tap the APK under **Assets**.
 2. Install it on the Android phone connected to the car.
@@ -147,6 +174,13 @@ tested on the target phone and Android Auto head unit.
    switch to navigation's split-screen view.
 
 ## Testing checklist
+
+- [ ] With fullscreen navigation, press Play in Auto Clock then check that the bottom mini clock fills most of its artwork thumbnail
+- [ ] Leave Play active at least one seven-minute boundary and verify dial changes
+- [ ] Check whether Pause leaves clock frozen; resume Play to verify clock catches up
+- [ ] Return to split screen and ensure large analog layout and weather station labels are unchanged
+- [ ] Confirm bottom app dock shortcut itself remains static (Android Auto limitation)
+
 
 - [ ] The analog clock in the media browsing list shows the current seven-minute window
 - [ ] The thumbnail changes on or after a 7-minute boundary while clock is active
