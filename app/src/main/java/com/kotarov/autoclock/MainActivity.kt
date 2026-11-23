@@ -255,7 +255,6 @@ class MainActivity : AppCompatActivity() {
             "Тест без заредени песни, Play/Pause, Next/Previous и Stop. " +
                 "Часовникът се обновява на минута, времето — на 15 минути. " +
                 "Android Auto може да скрие целия панел.",
-,
             14f, muted, dp(8)
         ))
         root.addView(label("Източници: NOAA Aviation Weather (METAR измервания) " +
@@ -363,7 +362,6 @@ class MainActivity : AppCompatActivity() {
                 AutoClockMediaService.KEY_SHOW_WEATHER_WITHOUT_BUTTONS, false
             )) ClockPreset.WEATHER_ONLY else currentPreset()
         val weather = if (preset.usesWeather) WeatherStore.current(this) else null
-        val prefs = getSharedPreferences(AutoClockMediaService.PREFERENCES, MODE_PRIVATE)
         val compact = prefs.getString(AutoClockMediaService.KEY_LAYOUT, "standard") == "compact"
         val image = ClockRenderer.render(
             preset.id, LocalDateTime.now(),

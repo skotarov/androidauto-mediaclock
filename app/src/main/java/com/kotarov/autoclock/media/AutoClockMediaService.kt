@@ -240,7 +240,6 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             .putBitmap(MediaMetadataCompat.METADATA_KEY_ART, art)
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, shownTitle)
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, shownSubtitle)
-            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, shownAlbum)
             .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, shownTitle)
             .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, shownSubtitle)
             .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_DESCRIPTION, shownDescription)
