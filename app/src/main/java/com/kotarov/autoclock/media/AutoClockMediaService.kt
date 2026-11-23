@@ -276,6 +276,11 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             preset.id, now, weather?.observedAtMs ?: 0L,
             compactLayout(), artworkGeneration
         )
+        // Keep a separate, tightly cropped icon for the fullscreen-map media
+        // quick-control chip. It changes on the same seven-minute schedule
+        // as the browse thumbnail, even though main album art changes
+        // every minute. The host decides which metadata field to display.
+        val miniArtwork = ClockArtworkProvider.miniIconUri(now)
         val blank = hideMediaText()
         val shownTitle = if (blank) INVISIBLE_TEXT else title
         val shownSubtitle = if (blank) INVISIBLE_TEXT else subtitle
@@ -300,8 +305,14 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             outputSize = 320, condition = description,
             sourceLabel = weather?.artworkSource
         )
+        // The full art stays on the media card; the display icon is now
+        // independently large and legible when Android Auto uses it for the
+        // tiny now-playing bar. The small icon occupies ~50 KiB RGB_565.
+        val miniBitmap = ClockRenderer.renderBrowseClock(
+            ClockIconSchedule.slotStart(now), outputSize = 160
+        )
         val metadata = MediaMetadataCompat.Builder()
-            .putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, art)
+            .putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, miniBitmap)
             .putBitmap(MediaMetadataCompat.METADATA_KEY_ART, art)
             .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, preset.id)
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, shownTitle)
@@ -312,7 +323,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_DESCRIPTION, shownDescription)
             .putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ART_URI, artwork.toString())
             .putString(MediaMetadataCompat.METADATA_KEY_ART_URI, artwork.toString())
-            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON_URI, artwork.toString())
+            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON_URI, miniArtwork.toString())
 
         if (animateProgress()) {
             metadata.putLong(
