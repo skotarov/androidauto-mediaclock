@@ -1,9 +1,35 @@
-# Auto Clock 2 — beta 0.28
+# Auto Clock 2 — beta 0.29
 
 An experimental battery-conscious clock for Android Auto's media card next to
 navigation. Android Auto officially reserves the media template for audio apps;
 this project displays a clock without playing audio, so not every head unit is
 guaranteed to support it.
+
+## v0.29: Play clock, Stop weather, 3 live browse rows
+
+Press **Play** to show the selected analog/digital clock. **Pause or Stop**
+immediately shows the weather-only artwork. Play restores the saved clock.
+No real audio, Next/Previous or song duration.
+
+The media-library screen returns three playable rows:
+1. Mini analog/digital clock + HH:mm and chosen clock style;
+2. Mini weather graphic + city, temperature, condition;
+3. Mini barometer/mountain + pressure in **hPa** and station/model elevation
+   in **meters**.
+
+For Auto weather, pressure is from NOAA METAR `altim` (hPa) and elevation
+from `elev` (m). For model weather, Open-Meteo supplies
+`surface_pressure` and `elevation` from the *existing request*.
+The pressure quantities differ: METAR altimeter setting and modeled
+surface pressure. Elevation describes the station/terrain, **not the car**.
+Missing values display "няма данни".
+
+The service calls `notifyChildrenChanged(ROOT_ID)` each minute even when
+stopped, and uses fresh minute-specific mini clock artwork. Whether an
+already-open Android Auto list updates is host-dependent and must be
+tested. Network weather checks are still limited to 15 minutes; one
+minute-aligned Handler ticker runs without a wake lock. The obsolete
+phone weather override checkbox is removed.
 
 ## v0.28: one actually selectable Now Playing item
 
@@ -272,7 +298,7 @@ tested on the target phone and Android Auto head unit.
 
 ## Download and install
 
-[AutoClock-2-v0.28-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.28.0-beta)
+[AutoClock-2-v0.29-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.29.0-beta)
 
 1. Open the beta release under **Releases**, then tap the APK under **Assets**.
 2. Install it on the Android phone connected to the car.
@@ -283,7 +309,19 @@ tested on the target phone and Android Auto head unit.
 5. Open Auto Clock 2 in the Android Auto media launcher and press Play, then
    switch to navigation's split-screen view.
 
-## Testing checklist (v0.28)
+## Testing checklist (v0.29)
+
+- [ ] Play: clock, Pause/Stop: weather, Play: same clock again
+- [ ] Library: three rows, each with distinct miniature artwork
+- [ ] Clock row title and mini hands advance at each minute boundary
+- [ ] Open library updates without reopening if Android Auto honors refresh
+- [ ] Weather city, temperature and condition are shown
+- [ ] Third row uses actual pressure/elevation or "няма данни"
+- [ ] Elevation represents station/model, not car GPS
+- [ ] No additional requests; weather throttle 15 minutes
+- [ ] No audio, Next/Previous or per-second animation
+
+
 
 - [ ] The library contains exactly one playable Auto Clock item
 - [ ] Tapping it activates clock Now Playing instead of doing nothing
