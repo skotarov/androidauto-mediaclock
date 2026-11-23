@@ -61,11 +61,11 @@ class ClockPresetTest {
             ClockPreset.fromAddons(ClockFamily.WEATHER, first = true, second = true))
     }
 
-    @Test fun activeAnalogSelectionHonorsBothSavedCheckboxes() {
-        fun prefs(digital: Boolean, weather: Boolean): SharedPreferences {
+    @Test fun oneWeatherPreferenceControlsBothFamiliesAndAnalogHasNoDigitalAddOn() {
+        fun prefs(weather: Boolean, oldAnalogDigital: Boolean): SharedPreferences {
             val flags = mapOf(
-                ClockPreset.KEY_ANALOG_ADD_DIGITAL to digital,
-                ClockPreset.KEY_ANALOG_ADD_WEATHER to weather
+                ClockPreset.KEY_ADD_WEATHER to weather,
+                ClockPreset.KEY_ANALOG_ADD_DIGITAL to oldAnalogDigital
             )
             return Proxy.newProxyInstance(
                 SharedPreferences::class.java.classLoader,
@@ -77,15 +77,57 @@ class ClockPresetTest {
                 }
             } as SharedPreferences
         }
+        for (legacyDigital in listOf(false, true)) {
+            assertEquals(ClockPreset.ANALOG_PURE,
+                ClockSelectionStore.forFamily(prefs(false, legacyDigital), ClockFamily.ANALOG))
+            assertEquals(ClockPreset.ANALOG_WEATHER,
+                ClockSelectionStore.forFamily(prefs(true, legacyDigital), ClockFamily.ANALOG))
+            assertEquals(ClockPreset.DIGITAL_TIME,
+                ClockSelectionStore.forFamily(prefs(false, legacyDigital), ClockFamily.DIGITAL))
+            assertEquals(ClockPreset.DIGITAL_TIME_WEATHER,
+                ClockSelectionStore.forFamily(prefs(true, legacyDigital), ClockFamily.DIGITAL))
+        }
+    }
 
-        assertEquals(ClockPreset.ANALOG_PURE,
-            ClockSelectionStore.forFamily(prefs(false, false), ClockFamily.ANALOG))
-        assertEquals(ClockPreset.ANALOG_TIME,
-            ClockSelectionStore.forFamily(prefs(true, false), ClockFamily.ANALOG))
-        assertEquals(ClockPreset.ANALOG_WEATHER,
-            ClockSelectionStore.forFamily(prefs(false, true), ClockFamily.ANALOG))
-        assertEquals(ClockPreset.ANALOG_TIME_WEATHER,
-            ClockSelectionStore.forFamily(prefs(true, true), ClockFamily.ANALOG))
+    @Test fun legacyWeatherFlagsAreCombinedOnceForBothClockTypes() {
+        for (analog in listOf(false, true)) {
+            for (digital in listOf(false, true)) {
+                val values = mutableMapOf<String, Any>(
+                    ClockPreset.KEY_SCHEMA_V11 to true,
+                    "display_simplified_v13" to true,
+                    "analog_digital_default_off_v20" to true,
+                    ClockPreset.KEY_ANALOG_ADD_WEATHER to analog,
+                    ClockPreset.KEY_DIGITAL_ADD_WEATHER to digital
+                )
+                val editor = Proxy.newProxyInstance(
+                    SharedPreferences.Editor::class.java.classLoader,
+                    arrayOf(SharedPreferences.Editor::class.java)
+                ) { proxy, method, args ->
+                    when (method.name) {
+                        "putBoolean" -> { values[args!![0] as String] = args[1] as Boolean; proxy }
+                        "apply" -> null
+                        else -> throw UnsupportedOperationException(method.name)
+                    }
+                } as SharedPreferences.Editor
+                val prefs = Proxy.newProxyInstance(
+                    SharedPreferences::class.java.classLoader,
+                    arrayOf(SharedPreferences::class.java)
+                ) { _, method, args ->
+                    when (method.name) {
+                        "getBoolean" ->
+                            values[args!![0] as String] as? Boolean ?: args[1] as Boolean
+                        "edit" -> editor
+                        else -> throw UnsupportedOperationException(method.name)
+                    }
+                } as SharedPreferences
+                ClockSelectionStore.migrateSimplifiedIfNeeded(prefs)
+                assertEquals(analog || digital, values[ClockPreset.KEY_ADD_WEATHER])
+                // Following launches must preserve the new checkbox choice.
+                values[ClockPreset.KEY_ADD_WEATHER] = false
+                ClockSelectionStore.migrateSimplifiedIfNeeded(prefs)
+                assertEquals(false, values[ClockPreset.KEY_ADD_WEATHER])
+            }
+        }
     }
 
     @Test fun analogStartsWithoutDigitalTimeWhenNoPreferenceIsSaved() {
