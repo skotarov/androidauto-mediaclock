@@ -55,10 +55,9 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             key == ClockPreset.KEY_ANALOG_ADD_WEATHER ||
             key == ClockPreset.KEY_DIGITAL_ADD_ANALOG ||
             key == ClockPreset.KEY_DIGITAL_ADD_WEATHER ||
-            key == KEY_MODE || key == KEY_HIDE_COMPACT_TEXT ||
+            key == KEY_MODE ||
             key == KEY_TEST_DIRECT_BROWSE || key == KEY_TEST_STATE_NONE ||
             key == KEY_LAYOUT || key == ClockTheme.KEY ||
-            key == WeatherStore.KEY_COLORED_ICONS ||
             key == WeatherStore.KEY_CITY || key == "weather_cached_city" ||
             key == "weather_cached_mode" || key == "weather_station_label" ||
             key == "weather_source_name" || key == "weather_fetched_at" ||
@@ -73,8 +72,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             // No per-minute browse update or extra location request.
             if (key == ForecastStore.KEY_SAVED_AT || key == ForecastStore.KEY_MODE ||
                 key == "weather_fetched_at" ||
-                key == WeatherStore.KEY_CITY || key == ClockTheme.KEY ||
-                key == WeatherStore.KEY_COLORED_ICONS
+                key == WeatherStore.KEY_CITY || key == ClockTheme.KEY
             ) forecastListDirty = true
             handler.removeCallbacks(settingsRefresh)
             handler.postDelayed(settingsRefresh, 120L)
@@ -106,6 +104,11 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     override fun onCreate() {
         super.onCreate()
         prefs = getSharedPreferences(PREFERENCES, MODE_PRIVATE)
+        // Force automatic local weather even when Android Auto starts the
+        // service before the phone settings activity is opened.
+        if (prefs.getString(WeatherStore.KEY_CITY, null) != WeatherStore.AUTO_ID) {
+            WeatherStore.setCity(this, WeatherStore.AUTO_ID)
+        }
         ClockSelectionStore.migrateSimplifiedIfNeeded(prefs)
         preset = selectedPreset()
         session = MediaSessionCompat(this, "AutoClockMediaTestsV037").apply {
@@ -114,8 +117,9 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
                     when (mediaId) {
                         ClockLibraryRows.CLOCK_ID -> startClock()
-                        ClockLibraryRows.WEATHER_ID -> stopClock()
-                        else -> if (ClockLibraryRows.isKnownId(mediaId)) stopClock()
+                        ClockLibraryRows.WEATHER_ID -> stopClock(forceRefresh = true)
+                        else -> if (ClockLibraryRows.isKnownId(mediaId))
+                            stopClock(forceRefresh = true)
                     }
                 }
 
@@ -127,8 +131,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 }
 
                 override fun onPlay() = startClock()
-                override fun onPause() = stopClock()
-                override fun onStop() = stopClock()
+                override fun onPause() = stopClock(forceRefresh = true)
+                override fun onStop() = stopClock(forceRefresh = true)
             })
             isActive = true
         }
@@ -236,10 +240,13 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private fun selectedTheme(): ClockTheme =
         ClockTheme.fromId(prefs.getString(ClockTheme.KEY, null))
 
-    private fun coloredWeatherIcons(): Boolean = WeatherStore.coloredIcons(prefs)
+    // The built-in Canvas glyphs remain; no external icon library or
+    // colorful-icon resource package is used. No color preference exists.
+    private fun coloredWeatherIcons(): Boolean = true
 
-    private fun hideCompactMediaText(): Boolean =
-        prefs.getBoolean(KEY_HIDE_COMPACT_TEXT, true)
+    // No compact-text setting: retain only the standard title/artist/date
+    // metadata for hosts that display it in full-screen Now Playing.
+    private fun hideCompactMediaText(): Boolean = true
 
     private fun startClock() {
         preset = selectedPreset()
@@ -251,12 +258,14 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         scheduleNextMinute()
     }
 
-    private fun stopClock() {
+    private fun stopClock(forceRefresh: Boolean = false) {
         running = false
         handler.removeCallbacks(minuteTick)
         publishClock()
         publishPlaybackState()
-        requestWeatherIfNecessary()
+        // Pause/Stop explicitly requests fresh weather. The routine clock
+        // and stopped-weather ticks remain at their existing 15m throttle.
+        requestWeatherIfNecessary(forceRefresh)
         scheduleStoppedWeatherTick()
     }
 
@@ -279,10 +288,10 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private fun visiblePreset(): ClockPreset =
         PlaybackDisplay.visiblePreset(preset, running)
 
-    private fun requestWeatherIfNecessary() {
-        // Hourly forecast data is refreshed at most once per hour while the
-        // existing current-weather worker runs; no second GPS subscription.
-        WeatherStore.refreshIfDue(this)
+    private fun requestWeatherIfNecessary(force: Boolean = false) {
+        // Hourly forecast shares the same worker/approximate location fix.
+        // Force only on explicit Pause/Stop; routine checks keep 15m interval.
+        WeatherStore.refreshIfDue(this, force = force)
     }
 
     private fun publishClock() {
@@ -372,9 +381,6 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     companion object {
         const val PREFERENCES = "clock_settings"
         const val KEY_MODE = "display_mode"
-        // Fresh key: on upgrade from v0.29 the new default is hidden even
-        // when the old, differently-scoped checkbox had been unchecked.
-        const val KEY_HIDE_COMPACT_TEXT = "hide_compact_media_text_v30"
         const val KEY_LAYOUT = "clock_layout"
         const val KEY_PROGRESS_ANIMATED = "progress_animated"
         const val KEY_TEST_DIRECT_BROWSE = "try_media_host_browse_link_v37"
