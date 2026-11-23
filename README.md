@@ -1,9 +1,28 @@
-# Auto Clock 2 — beta 0.25
+# Auto Clock 2 — beta 0.26
 
 An experimental battery-conscious clock for Android Auto's media card next to
 navigation. Android Auto officially reserves the media template for audio apps;
 this project displays a clock without playing audio, so not every head unit is
 guaranteed to support it.
+
+## v0.26 experiment: zero buttons and zero songs
+
+This diagnostic Android Auto version deliberately advertises **zero playable
+media items** and an **empty queue**, registers no media transport callbacks,
+and publishes a playback state of **STATE_NONE** with **zero actions**.
+No Play/Pause/Next/Previous/Stop commands are advertised and no audio is played.
+
+The media session is still active and continues generating the clock's main
+artwork once a minute. Since the car can no longer switch between Play and
+Pause, a checkbox on the phone ("Показвай времето вместо часовника") selects
+the weather-only artwork. In that mode the existing 15-minute weather check
+is used instead of the minute clock tick. Existing selected clock, sizes,
+themes, colored weather icons and source settings are retained.
+
+**Important:** Android Auto may hide the *whole media card* or continue to
+draw a system button regardless. This is a compatibility experiment, not a
+guarantee of a fully buttonless visible card. The previous **v0.25** APK
+remains available for restoring normal Play/Pause switching.
 
 ## Phone settings
 
@@ -213,7 +232,7 @@ tested on the target phone and Android Auto head unit.
 
 ## Download and install
 
-[AutoClock-2-v0.25-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.25.0-beta)
+[AutoClock-2-v0.26-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.26.0-beta)
 
 1. Open the beta release under **Releases**, then tap the APK under **Assets**.
 2. Install it on the Android phone connected to the car.
@@ -224,7 +243,17 @@ tested on the target phone and Android Auto head unit.
 5. Open Auto Clock 2 in the Android Auto media launcher and press Play, then
    switch to navigation's split-screen view.
 
-## Testing checklist (v0.25)
+## Testing checklist (v0.26)
+
+- [ ] No playable songs or browse entries appear
+- [ ] No Play/Pause/Next/Previous/Stop controls (host dependent)
+- [ ] Clock artwork is visible; note if the entire media panel disappears
+- [ ] Clock advances once per minute without pressing Play
+- [ ] Phone checkbox switches to weather and back
+- [ ] Weather refresh remains at most once every 15 minutes
+- [ ] Restore v0.25 if Android Auto hides the media card
+
+
 
 - [ ] Phone and Android Auto show ONLY Analog and Digital clock choices
 - [ ] Play shows the chosen clock with its saved existing add-ons

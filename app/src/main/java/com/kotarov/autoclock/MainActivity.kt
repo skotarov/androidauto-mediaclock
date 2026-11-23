@@ -70,7 +70,7 @@ class MainActivity : AppCompatActivity() {
 
         root.addView(label("Auto Clock 2", 30f, light, dp(5)))
         root.addView(label(
-            "Play — избраният часовник · Pause — времето",
+            "Експеримент: без бутони и песни",
             16f, muted, dp(16)
         ))
 
@@ -103,7 +103,8 @@ class MainActivity : AppCompatActivity() {
         root.addView(optionsContainer)
         root.addView(label(
             "При аналоговия можеш да оставиш само циферблата и стрелките. " +
-                "Времето се появява автоматично при Pause, без да сменя избрания часовник.",
+                "Времето се включва с отметката по-долу, " +
+                "без да сменя избрания часовник.",
             14f, muted, dp(18)
         ))
 
@@ -116,6 +117,22 @@ class MainActivity : AppCompatActivity() {
                 requestWeatherForPreview()
             }
         }
+
+        root.addView(checkOption(
+            "Показвай времето вместо часовника (тест без Play/Pause)",
+            prefs.getBoolean(AutoClockMediaService.KEY_SHOW_WEATHER_WITHOUT_BUTTONS, false)
+        ) { checked ->
+            prefs.edit().putBoolean(
+                AutoClockMediaService.KEY_SHOW_WEATHER_WITHOUT_BUTTONS, checked
+            ).apply()
+            updatePreview()
+            requestWeatherForPreview()
+        })
+        root.addView(label(
+            "Тази версия не подава песни и медийни команди. " +
+                "Превключването часовник/време е само от телефона.",
+            14f, muted, dp(14)
+        ))
 
         root.addView(label("Размер на екрана", 20f, light, dp(7)))
         root.addView(label(
@@ -153,12 +170,10 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(themes)
 
-        root.addView(checkOption(
-            "Движение на прогрес бара (секунди)",
-            prefs.getBoolean(AutoClockMediaService.KEY_PROGRESS_ANIMATED, false)
-        ) { checked ->
-            prefs.edit().putBoolean(AutoClockMediaService.KEY_PROGRESS_ANIMATED, checked).apply()
-        })
+        root.addView(label(
+            "В тази версия няма лента за прогрес и транспортни бутони.",
+            14f, muted, dp(8)
+        ))
 
         root.addView(checkOption(
             "Скрий часа и времето под часовника в Android Auto",
@@ -237,9 +252,10 @@ class MainActivity : AppCompatActivity() {
         root.addView(refresh)
 
         root.addView(label(
-            "В Android Auto избираш аналогов или цифров часовник. " +
-                "Play показва часовника (с избраните добавки), Pause — времето. " +
-                "Часовникът се обновява на минута, времето — на 15 минути.",
+            "Тест без заредени песни, Play/Pause, Next/Previous и Stop. " +
+                "Часовникът се обновява на минута, времето — на 15 минути. " +
+                "Android Auto може да скрие целия панел.",
+,
             14f, muted, dp(8)
         ))
         root.addView(label("Източници: NOAA Aviation Weather (METAR измервания) " +
@@ -318,7 +334,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun requestWeatherForPreview(force: Boolean = false) {
-        if (!currentPreset().usesWeather && !force) return
+        val prefs = getSharedPreferences(AutoClockMediaService.PREFERENCES, MODE_PRIVATE)
+        if (!currentPreset().usesWeather &&
+            !prefs.getBoolean(AutoClockMediaService.KEY_SHOW_WEATHER_WITHOUT_BUTTONS, false) &&
+            !force) return
         if (WeatherStore.isAuto(this) && !WeatherLocation.permitted(this)) {
             updateWeatherStatus()
             return
@@ -339,7 +358,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun updatePreview() {
         if (!::preview.isInitialized) return
-        val preset = currentPreset()
+        val prefs = getSharedPreferences(AutoClockMediaService.PREFERENCES, MODE_PRIVATE)
+        val preset = if (prefs.getBoolean(
+                AutoClockMediaService.KEY_SHOW_WEATHER_WITHOUT_BUTTONS, false
+            )) ClockPreset.WEATHER_ONLY else currentPreset()
         val weather = if (preset.usesWeather) WeatherStore.current(this) else null
         val prefs = getSharedPreferences(AutoClockMediaService.PREFERENCES, MODE_PRIVATE)
         val compact = prefs.getString(AutoClockMediaService.KEY_LAYOUT, "standard") == "compact"
