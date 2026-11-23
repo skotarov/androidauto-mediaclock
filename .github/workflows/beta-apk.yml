@@ -36,17 +36,17 @@ jobs:
       - name: Copy APK with friendly filename
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk dist/AutoClock-2-v0.37-beta.apk
+          cp app/build/outputs/apk/debug/app-debug.apk dist/AutoClock-2-v0.38-beta.apk
 
       - name: Create or update public beta download
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if ! gh release view v0.37.0-beta >/dev/null 2>&1; then
-            gh release create v0.37.0-beta \
+          if ! gh release view v0.38.0-beta >/dev/null 2>&1; then
+            gh release create v0.38.0-beta \
               --target "$GITHUB_SHA" \
-              --title "Auto Clock 2 — beta 0.37.0" \
-              --notes "Two INDEPENDENT phone-settings experiments, both OFF by default. Test 1 supplies MediaSession sessionActivity with optional AAOS MEDIA_TEMPLATE_V2 browse-root deep-link, plus manual host-support button. Android Auto projection may ignore it. Test 2 sets playback STATE_NONE (may hide clock/card). Six-hour forecast, dashboard recommendation routing and clock drawings preserved." \
+              --title "Auto Clock 2 — beta 0.38.0" \
+              --notes "Redesigned minimalist phone settings: two square analog/digital preview thumbnails with a blue selection border, both live-update with Light theme checkbox immediately below. Remove explanatory text, colored icon switch, manual city choice, refresh button and compact text switch. Auto-only weather on both phone/service, refreshed on settings open and Pause/Stop plus regular 15m current/forecast checks. Both existing screen experiments remain available. Six-hour full-screen forecast and quiet dashboard preserved." \
               --prerelease
           fi
-          gh release upload v0.37.0-beta dist/AutoClock-2-v0.37-beta.apk --clobber
+          gh release upload v0.38.0-beta dist/AutoClock-2-v0.38-beta.apk --clobber

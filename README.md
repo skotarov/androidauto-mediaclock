@@ -1,9 +1,43 @@
-# Auto Clock 2 — beta 0.37
+# Auto Clock 2 — beta 0.38
 
 An experimental battery-conscious clock for Android Auto's media card next to
 navigation. Android Auto officially reserves the media template for audio apps;
 this project displays a clock without playing audio, so not every head unit is
 guaranteed to support it.
+
+## v0.38: visual clock-selector settings and automatic weather
+
+Phone settings contain two equal selectable **square thumbnails**:
+Analog and Digital. The selected clock has a blue outline and both
+thumbnails always show their saved add-ons in the current theme.
+The checkbox immediately below is **Светла тема**, unchecked by
+default. It re-renders both previews even when one is not selected.
+The previous redundant single, full-size preview has been removed.
+
+All explanatory paragraphs are removed from phone settings, along with
+compact-media-text, colored-icons and manual weather refresh toggles,
+and city/source selection. The independent Test 1 (direct browse) and
+Test 2 (STATE_NONE) switches remain OFF by default, with optional
+Test 1 manual probe. Size and clock add-on options remain.
+
+Weather source is always AUTO, including existing installations that
+previously chose a fixed city and media-service-first launches.
+No external weather icon library exists: icon glyphs are painted via
+Canvas, so no optional icon package needed removing.
+
+Automatic weather requests:
+- Every settings screen foreground opening refreshes current weather
+  and the next 6 hours of forecast using the same one-shot location fix.
+- Explicit Pause/Stop asks for new weather and forecast asynchronously.
+- Routine running/stopped checks continue at 15 minutes, and the
+  forecast's normal cache window is 15 minutes. Force refresh from
+  settings/Pause bypasses this throttle.
+- No new persistent worker, wake lock or GPS subscription.
+
+Analog/digital artwork geometry and the proven six-hour full-screen
+library versus map-dashboard recommendation split are preserved.
+Compact display fields are always hidden; the date remains in standard
+metadata for full-screen hosts that honor it.
 
 ## v0.37: two independent full-screen display experiments
 
@@ -502,7 +536,7 @@ tested on the target phone and Android Auto head unit.
 
 ## Download and install
 
-[AutoClock-2-v0.37-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.37.0-beta)
+[AutoClock-2-v0.38-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.38.0-beta)
 
 1. Open the beta release under **Releases**, then tap the APK under **Assets**.
 2. Install it on the Android phone connected to the car.
@@ -513,7 +547,19 @@ tested on the target phone and Android Auto head unit.
 5. Open Auto Clock 2 in the Android Auto media launcher and press Play, then
    switch to navigation's split-screen view.
 
-## Testing checklist (v0.37)
+## Testing checklist (v0.38)
+
+- [ ] Both square thumbnails show the current theme and saved add-ons
+- [ ] Only the selected thumbnail has the bright blue outline
+- [ ] Light-theme checkbox directly below thumbnails redraws BOTH
+- [ ] No explanatory text, city/source picker, manual refresh, icon switch
+- [ ] Older manual city selections reset to Auto
+- [ ] Settings open and Pause force a fresh current/forecast request
+- [ ] Normal background update cadence remains 15 minutes
+- [ ] Test 1 and Test 2 remain independent and reversible
+- [ ] Map split stays clock-only and full-screen shows 6 hourly entries
+
+
 
 - [ ] Both tests OFF: original clock and six-hour fullscreen forecast
 - [ ] Test 1 only: check whether media app opens in browser rather than player

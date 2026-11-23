@@ -26,7 +26,6 @@ import kotlin.math.roundToInt
 object WeatherStore {
     const val PREFS = "clock_settings"
     const val KEY_CITY = "weather_city"
-    const val KEY_COLORED_ICONS = "weather_colored_icons"
     const val AUTO_ID = "auto"
     const val REFRESH_INTERVAL_MS = 15L * 60L * 1000L
     private const val MIN_RETRY_MS = REFRESH_INTERVAL_MS
@@ -86,9 +85,6 @@ object WeatherStore {
 
     /** Automatic weather is the default unless the user chose a source. */
     fun selectedMode(saved: String?): String = saved ?: AUTO_ID
-
-    fun coloredIcons(prefs: android.content.SharedPreferences): Boolean =
-        prefs.getBoolean(KEY_COLORED_ICONS, true)
 
     private data class Reading(
         val temperature: Double,
