@@ -36,17 +36,17 @@ jobs:
       - name: Copy APK with friendly filename
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk dist/AutoClock-2-v0.40-beta.apk
+          cp app/build/outputs/apk/debug/app-debug.apk dist/AutoClock-2-v0.41-beta.apk
 
       - name: Create or update public beta download
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if ! gh release view v0.40.0-beta >/dev/null 2>&1; then
-            gh release create v0.40.0-beta \
+          if ! gh release view v0.41.0-beta >/dev/null 2>&1; then
+            gh release create v0.41.0-beta \
               --target "$GITHUB_SHA" \
-              --title "Auto Clock 2 — beta 0.40.0" \
-              --notes "One shared Add weather checkbox for analog and digital, no analog digital add-on, native A-to-A size slider preserving compact/standard artwork, and automatic location permission without a settings button. Android Auto Test 3 STATE_STOPPED remains available." \
+              --title "Auto Clock 2 — beta 0.41.0" \
+              --notes "Settings visual refresh: double spacing between toggle options and small right-aligned switches replacing checkboxes. Shared weather, theme, A-to-A size slider, automatic location permission and Android Auto experiments are unchanged." \
               --prerelease
           fi
-          gh release upload v0.40.0-beta dist/AutoClock-2-v0.40-beta.apk --clobber
+          gh release upload v0.41.0-beta dist/AutoClock-2-v0.41-beta.apk --clobber
