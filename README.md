@@ -1,9 +1,38 @@
-# Auto Clock 2 — beta 0.36
+# Auto Clock 2 — beta 0.37
 
 An experimental battery-conscious clock for Android Auto's media card next to
 navigation. Android Auto officially reserves the media template for audio apps;
 this project displays a clock without playing audio, so not every head unit is
 guaranteed to support it.
+
+## v0.37: two independent full-screen display experiments
+
+Both preferences default OFF. They are independent and can be switched
+back from the phone. The 6-hour forecast, dashboard recommendation
+suppression and clock positions from v0.36 remain unchanged.
+
+**Test 1 (direct list):** when enabled, the MediaSession exposes a
+`setSessionActivity(PendingIntent)` link to a minimal trampoline Activity.
+If an Android Auto media host honors that link, the trampoline attempts
+the documented `MEDIA_TEMPLATE_V2` system activity intent, passing our
+`AutoClockMediaService` component and `auto_clock_root` as the browse
+media ID. The phone settings also include a manual "open forecast list"
+probe button. It first checks `queryIntentActivities` and never launches
+an unsupported intent. Successfully sending the intent is **not proof**
+that Android Auto navigated to the list. The API is officially documented
+for Android Automotive OS, not Android Auto phone projection, so the
+launcher icon might continue opening Now Playing even with Test 1 ON.
+No hidden background Activity launches are attempted.
+
+**Test 2 (STATE_NONE):** when enabled, all publishing of playback state
+uses `PlaybackStateCompat.STATE_NONE` instead of the normal
+`STATE_PLAYING` or `STATE_PAUSED`. Clock/weather artwork generation
+remains unchanged, but Android Auto can hide the entire playback panel
+and remove access to controls, as Google's documentation warns.
+Disable Test 2 from phone settings and reconnect if this happens.
+
+The toggles intentionally have different mechanisms, so the user can
+test only one at a time. Both OFF restores original v0.36 behavior.
 
 ## v0.36: next six hours in fullscreen media library
 
@@ -473,7 +502,7 @@ tested on the target phone and Android Auto head unit.
 
 ## Download and install
 
-[AutoClock-2-v0.36-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.36.0-beta)
+[AutoClock-2-v0.37-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.37.0-beta)
 
 1. Open the beta release under **Releases**, then tap the APK under **Assets**.
 2. Install it on the Android phone connected to the car.
@@ -484,7 +513,16 @@ tested on the target phone and Android Auto head unit.
 5. Open Auto Clock 2 in the Android Auto media launcher and press Play, then
    switch to navigation's split-screen view.
 
-## Testing checklist (v0.36)
+## Testing checklist (v0.37)
+
+- [ ] Both tests OFF: original clock and six-hour fullscreen forecast
+- [ ] Test 1 only: check whether media app opens in browser rather than player
+- [ ] Test 1 button: verify system V2 capability (may say unsupported)
+- [ ] Test 2 only: observe any change in full Now Playing and compact clock
+- [ ] Return both toggles OFF from phone, reconnect Android Auto
+- [ ] Confirm weather refresh and existing graphics remain unchanged
+
+
 
 - [ ] Full-screen library shows exactly six next whole-hour weather rows
 - [ ] Weather artwork contains symbol only, temperatures are in the row text

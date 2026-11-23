@@ -19,6 +19,7 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.kotarov.autoclock.artwork.ClockRenderer
 import com.kotarov.autoclock.media.AutoClockMediaService
+import com.kotarov.autoclock.media.AutoClockBrowseHostLaunch
 import com.kotarov.autoclock.media.ClockFamily
 import com.kotarov.autoclock.media.ClockPreset
 import com.kotarov.autoclock.media.ClockSelectionStore
@@ -179,6 +180,65 @@ class MainActivity : AppCompatActivity() {
                 "екран, затова автоматичното уголемяване само там не е възможно " +
                 "с използвания медиен интерфейс.",
             13f, muted, dp(15)
+        ))
+
+        root.addView(label("Експерименти с пълноекранния изглед", 20f, light, dp(8)))
+        root.addView(label(
+            "Двете настройки са независими и изключени по подразбиране. " +
+                "Пробвай първо само Тест 1, после само Тест 2, " +
+                "за да разберем кое влияе на екрана.",
+            14f, muted, dp(8)
+        ))
+
+        val browseTestStatus = label(
+            "Тест 1: изключен",
+            13f, muted, dp(6)
+        )
+        val browseTestButton = Button(this).apply {
+            text = "Пробвай да отвориш почасовия списък"
+            isAllCaps = false
+            isEnabled = prefs.getBoolean(
+                AutoClockMediaService.KEY_TEST_DIRECT_BROWSE, false)
+            setOnClickListener {
+                val result = AutoClockBrowseHostLaunch.tryOpen(this@MainActivity)
+                browseTestStatus.text = when (result) {
+                    AutoClockBrowseHostLaunch.Outcome.SENT ->
+                        "Тест 1: изпратена заявка. Провери дали хостът отвори списъка."
+                    AutoClockBrowseHostLaunch.Outcome.UNSUPPORTED ->
+                        "Тест 1: няма системен MEDIA_TEMPLATE_V2 хост на телефона. " +
+                            "Тази функция е документирана за Android Automotive OS."
+                    AutoClockBrowseHostLaunch.Outcome.FAILED ->
+                        "Тест 1: хостът отказа да отвори списъка."
+                }
+            }
+        }
+        root.addView(checkOption(
+            "Тест 1 — директно отваряне на списъка (медиен хост)",
+            browseTestButton.isEnabled
+        ) { enabled ->
+            prefs.edit().putBoolean(
+                AutoClockMediaService.KEY_TEST_DIRECT_BROWSE, enabled).apply()
+            browseTestButton.isEnabled = enabled
+            browseTestStatus.text = if (enabled)
+                "Тест 1 е включен. Можеш да пробваш бутона отдолу. " +
+                    "Android Auto може да игнорира връзката на медийната сесия."
+            else "Тест 1 е изключен."
+        })
+        root.addView(browseTestButton)
+        root.addView(browseTestStatus)
+
+        root.addView(checkOption(
+            "Тест 2 — STATE_NONE вместо Play/Pause",
+            prefs.getBoolean(AutoClockMediaService.KEY_TEST_STATE_NONE, false)
+        ) { enabled ->
+            prefs.edit().putBoolean(
+                AutoClockMediaService.KEY_TEST_STATE_NONE, enabled).apply()
+        })
+        root.addView(label(
+            "Внимание: STATE_NONE може да скрие и часовника до картата " +
+                "и да блокира Play/Pause. За връщане изключи Тест 2 " +
+                "в телефона и свържи Android Auto отново.",
+            13f, muted, dp(17)
         ))
 
         root.addView(checkOption(
