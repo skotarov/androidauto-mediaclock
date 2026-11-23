@@ -1,15 +1,16 @@
 package com.kotarov.autoclock
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
-import androidx.core.app.ActivityCompat
-import com.kotarov.autoclock.weather.WeatherLocation
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.view.View
 import android.widget.Button
 import android.widget.CheckBox
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.RadioButton
@@ -17,453 +18,359 @@ import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
 import com.kotarov.autoclock.artwork.ClockRenderer
-import com.kotarov.autoclock.media.AutoClockMediaService
 import com.kotarov.autoclock.media.AutoClockBrowseHostLaunch
+import com.kotarov.autoclock.media.AutoClockMediaService
 import com.kotarov.autoclock.media.ClockFamily
 import com.kotarov.autoclock.media.ClockPreset
 import com.kotarov.autoclock.media.ClockSelectionStore
 import com.kotarov.autoclock.media.ClockTheme
-import com.kotarov.autoclock.media.PlaybackDisplay
+import com.kotarov.autoclock.weather.WeatherLocation
 import com.kotarov.autoclock.weather.WeatherStore
-import java.text.SimpleDateFormat
 import java.time.LocalDateTime
-import java.util.Date
-import java.util.Locale
 
 /**
- * Phone-side configuration: two clock styles; Pause always shows weather.
- * SharedPreferences updates are observed by the bound media service immediately,
- * without recurring worker, polling timer, location permission or wake lock.
+ * Compact phone settings. Each selectable card is a LIVE preview of that
+ * clock family's saved add-ons; both cards always render in the chosen theme.
  */
 class MainActivity : AppCompatActivity() {
-    private var previewBitmap: Bitmap? = null
-    private lateinit var preview: ImageView
-    private lateinit var weatherStatus: TextView
+    private lateinit var analogCard: LinearLayout
+    private lateinit var digitalCard: LinearLayout
+    private lateinit var analogImage: ImageView
+    private lateinit var digitalImage: ImageView
+    private lateinit var analogLabel: TextView
+    private lateinit var digitalLabel: TextView
     private lateinit var optionsContainer: LinearLayout
+    private var analogBitmap: Bitmap? = null
+    private var digitalBitmap: Bitmap? = null
 
-    private val light = Color.WHITE
-    private val muted = Color.LTGRAY
+    private val ink = Color.WHITE
     private val background = Color.rgb(10, 10, 12)
+    private val accent = Color.rgb(35, 155, 255)
+    private val faint = Color.rgb(87, 93, 105)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val prefs = getSharedPreferences(AutoClockMediaService.PREFERENCES, MODE_PRIVATE)
-        // Only a previously UNSET source is initialized to Auto.
-        // Explicitly selected manual cities survive upgrades and restarts.
-        val firstAutoSetup = !prefs.contains(WeatherStore.KEY_CITY)
-        if (firstAutoSetup) {
-            prefs.edit().putString(WeatherStore.KEY_CITY, WeatherStore.AUTO_ID).apply()
+        val prefs = settings()
+        // This is now an auto-location-only product, including old installs.
+        if (prefs.getString(WeatherStore.KEY_CITY, null) != WeatherStore.AUTO_ID) {
+            WeatherStore.setCity(this, WeatherStore.AUTO_ID)
         }
-
         ClockSelectionStore.migrateSimplifiedIfNeeded(prefs)
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(22), dp(27), dp(22), dp(32))
-            setBackgroundColor(this@MainActivity.background)
+            setPadding(dp(16), dp(22), dp(16), dp(24))
+            setBackgroundColor(background)
         }
-        val scroll = ScrollView(this).apply {
+        setContentView(ScrollView(this).apply {
             isFillViewport = true
             addView(root)
+        })
+        root.addView(text("Auto Clock 2", 27f, dp(16)))
+
+        // The blue outline is the exclusive selection, as in phone display
+        // settings. No radio-circle UI is added next to the thumbnails.
+        val choices = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 0, 0, dp(6))
         }
-        setContentView(scroll)
+        val (analog, analogPreview, analogTitle) =
+            createChoiceCard("Аналогов", ClockFamily.ANALOG)
+        val (digital, digitalPreview, digitalTitle) =
+            createChoiceCard("Цифров", ClockFamily.DIGITAL)
+        analogCard = analog
+        digitalCard = digital
+        analogImage = analogPreview
+        digitalImage = digitalPreview
+        analogLabel = analogTitle
+        digitalLabel = digitalTitle
+        choices.addView(analogCard,
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginEnd = dp(6)
+            })
+        choices.addView(digitalCard,
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginStart = dp(6)
+            })
+        root.addView(choices)
 
-        root.addView(label("Auto Clock 2", 30f, light, dp(5)))
-        root.addView(label(
-            "Play — часовник · Stop — време · следващите 6 часа",
-            16f, muted, dp(16)
-        ))
+        // Directly BELOW the two thumbnails, with no explanatory widgets.
+        root.addView(checkOption(
+            "Светла тема",
+            ClockTheme.fromId(prefs.getString(ClockTheme.KEY, null)) == ClockTheme.LIGHT
+        ) { checked ->
+            prefs.edit().putString(
+                ClockTheme.KEY,
+                if (checked) ClockTheme.LIGHT.id else ClockTheme.DARK.id
+            ).apply()
+            updatePreviewTiles()
+        })
 
-        preview = ImageView(this).apply {
-            scaleType = ImageView.ScaleType.FIT_CENTER
-            adjustViewBounds = true
-            contentDescription = "Преглед на избраната визия"
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(225)
-            )
-        }
-        root.addView(preview)
-
-        root.addView(label("1. Основна визия", 21f, light, dp(8)))
-        val mainGroup = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
-        val familyIds = mutableMapOf<Int, ClockFamily>()
-        val initial = currentPreset()
-        for (family in PlaybackDisplay.selectableFamilies) {
-            val rb = radio(family.label)
-            familyIds[rb.id] = family
-            mainGroup.addView(rb)
-            if (family == initial.family) mainGroup.check(rb.id)
-        }
-        root.addView(mainGroup)
-
-        root.addView(label("2. Добави към избраната визия", 21f, light, dp(7)))
         optionsContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
         }
         root.addView(optionsContainer)
-        root.addView(label(
-            "При аналоговия можеш да оставиш само циферблата и стрелките. " +
-                "При Stop се показва времето, " +
-                "без да се сменя избраният часовник.",
-            14f, muted, dp(18)
-        ))
+        val firstFamily = ClockSelectionStore.current(prefs).family
+        updateVariantOptions(firstFamily)
+        updatePreviewTiles()
 
-        updateVariantOptions(initial.family)
-        mainGroup.setOnCheckedChangeListener { _, id ->
-            familyIds[id]?.let { family ->
-                prefs.edit().putString(ClockPreset.KEY_FAMILY, family.id).apply()
-                updateVariantOptions(family)
-                updatePreview()
-                requestWeatherForPreview()
-            }
+        root.addView(text("Размер", 18f, dp(5)))
+        val sizeGroup = RadioGroup(this).apply {
+            orientation = RadioGroup.HORIZONTAL
         }
-
-        root.addView(label(
-            "На пълен екран: прогноза за следващите 6 часа. " +
-                "В комбинирания екран остава само часовникът. " +
-                "Датата се подава като допълнителен текст за пълния плеър.",
-            14f, muted, dp(14)
-        ))
-
-        root.addView(label("Размер на екрана", 20f, light, dp(7)))
-        root.addView(label(
-            "Компактният размер оставя повече свободно място над бутоните.",
-            14f, muted, dp(5)
-        ))
-        val sizeGroup = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
-        val small = radio("Компактен (за малка карта)")
-        val large = radio("Стандартен (по-голяма визия)")
-        sizeGroup.addView(small)
-        sizeGroup.addView(large)
+        val compact = radio("Компактен")
+        val standard = radio("Стандартен")
+        sizeGroup.addView(compact, LinearLayout.LayoutParams(0,
+            LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        sizeGroup.addView(standard, LinearLayout.LayoutParams(0,
+            LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         sizeGroup.check(
             if (prefs.getString(AutoClockMediaService.KEY_LAYOUT, "standard") == "compact")
-                small.id else large.id
+                compact.id else standard.id
         )
         sizeGroup.setOnCheckedChangeListener { _, id ->
-            val size = if (id == large.id) "standard" else "compact"
-            prefs.edit().putString(AutoClockMediaService.KEY_LAYOUT, size).apply()
-            updatePreview()
+            prefs.edit().putString(AutoClockMediaService.KEY_LAYOUT,
+                if (id == compact.id) "compact" else "standard").apply()
+            updatePreviewTiles()
         }
         root.addView(sizeGroup)
 
-        root.addView(label("Тема на часовника", 20f, light, dp(7)))
-        val themes = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
-        val dark = radio("Тъмна — черен фон (по подразбиране)")
-        val reverse = radio("Светла — обратни цветове")
-        themes.addView(dark)
-        themes.addView(reverse)
-        themes.check(if (ClockTheme.fromId(prefs.getString(ClockTheme.KEY, null)) ==
-            ClockTheme.LIGHT) reverse.id else dark.id)
-        themes.setOnCheckedChangeListener { _, id ->
-            prefs.edit().putString(ClockTheme.KEY,
-                if (id == reverse.id) ClockTheme.LIGHT.id else ClockTheme.DARK.id).apply()
-            updatePreview()
-        }
-        root.addView(themes)
-
-        root.addView(label(
-            "Няма Next/Previous или прогрес. Play/Pause превключва изгледа.",
-            14f, muted, dp(8)
-        ))
-
-        root.addView(checkOption(
-            "Скрий текста в компактния медиен панел (експеримент)",
-            prefs.getBoolean(AutoClockMediaService.KEY_HIDE_COMPACT_TEXT, true)
-        ) { checked ->
-            prefs.edit().putBoolean(AutoClockMediaService.KEY_HIDE_COMPACT_TEXT, checked).apply()
-        })
-
-        root.addView(label(
-            "За големия плеър подаваме датата в пълните метаданни. " +
-                "Android Auto не съобщава надеждно дали плеърът е на пълен " +
-                "екран, затова автоматичното уголемяване само там не е възможно " +
-                "с използвания медиен интерфейс.",
-            13f, muted, dp(15)
-        ))
-
-        root.addView(label("Експерименти с пълноекранния изглед", 20f, light, dp(8)))
-        root.addView(label(
-            "Двете настройки са независими и изключени по подразбиране. " +
-                "Пробвай първо само Тест 1, после само Тест 2, " +
-                "за да разберем кое влияе на екрана.",
-            14f, muted, dp(8)
-        ))
-
-        val browseTestStatus = label(
-            "Тест 1: изключен",
-            13f, muted, dp(6)
-        )
-        val browseTestButton = Button(this).apply {
-            text = "Пробвай да отвориш почасовия списък"
+        root.addView(text("Тестове", 18f, dp(6)))
+        val probeResult = text("", 13f, dp(2))
+        val probeButton = Button(this).apply {
+            text = "Отвори почасовия списък"
             isAllCaps = false
             isEnabled = prefs.getBoolean(
                 AutoClockMediaService.KEY_TEST_DIRECT_BROWSE, false)
             setOnClickListener {
-                val result = AutoClockBrowseHostLaunch.tryOpen(this@MainActivity)
-                browseTestStatus.text = when (result) {
-                    AutoClockBrowseHostLaunch.Outcome.SENT ->
-                        "Тест 1: изпратена заявка. Провери дали хостът отвори списъка."
-                    AutoClockBrowseHostLaunch.Outcome.UNSUPPORTED ->
-                        "Тест 1: няма системен MEDIA_TEMPLATE_V2 хост на телефона. " +
-                            "Тази функция е документирана за Android Automotive OS."
-                    AutoClockBrowseHostLaunch.Outcome.FAILED ->
-                        "Тест 1: хостът отказа да отвори списъка."
+                probeResult.text = when (AutoClockBrowseHostLaunch.tryOpen(this@MainActivity)) {
+                    AutoClockBrowseHostLaunch.Outcome.SENT -> "Изпратено"
+                    AutoClockBrowseHostLaunch.Outcome.UNSUPPORTED -> "Не се поддържа"
+                    AutoClockBrowseHostLaunch.Outcome.FAILED -> "Неуспешно"
                 }
             }
         }
-        root.addView(checkOption(
-            "Тест 1 — директно отваряне на списъка (медиен хост)",
-            browseTestButton.isEnabled
+        root.addView(checkOption("Тест 1 — директно към списъка",
+            probeButton.isEnabled
         ) { enabled ->
             prefs.edit().putBoolean(
                 AutoClockMediaService.KEY_TEST_DIRECT_BROWSE, enabled).apply()
-            browseTestButton.isEnabled = enabled
-            browseTestStatus.text = if (enabled)
-                "Тест 1 е включен. Можеш да пробваш бутона отдолу. " +
-                    "Android Auto може да игнорира връзката на медийната сесия."
-            else "Тест 1 е изключен."
+            probeButton.isEnabled = enabled
+            probeResult.text = ""
         })
-        root.addView(browseTestButton)
-        root.addView(browseTestStatus)
-
-        root.addView(checkOption(
-            "Тест 2 — STATE_NONE вместо Play/Pause",
+        root.addView(probeButton)
+        root.addView(probeResult)
+        root.addView(checkOption("Тест 2 — STATE_NONE",
             prefs.getBoolean(AutoClockMediaService.KEY_TEST_STATE_NONE, false)
         ) { enabled ->
             prefs.edit().putBoolean(
                 AutoClockMediaService.KEY_TEST_STATE_NONE, enabled).apply()
         })
-        root.addView(label(
-            "Внимание: STATE_NONE може да скрие и часовника до картата " +
-                "и да блокира Play/Pause. За връщане изключи Тест 2 " +
-                "в телефона и свържи Android Auto отново.",
-            13f, muted, dp(17)
-        ))
 
-        root.addView(checkOption(
-            "Цветни иконки на времето (по-ясен дъжд)",
-            WeatherStore.coloredIcons(prefs)
-        ) { checked ->
-            prefs.edit().putBoolean(WeatherStore.KEY_COLORED_ICONS, checked).apply()
-            updatePreview()
-        })
-
-        root.addView(label("Източник за времето", 20f, light, dp(6)))
-        root.addView(label("Авто използва местоположение еднократно, при обновяване. " +
-            "Избира най-близката метеостанция с актуално измерване; " +
-            "ръчните градове използват Open-Meteo.", 14f, muted, dp(6)))
-        val cityGroup = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
-        val cityIds = mutableMapOf<Int, String>()
-        val auto = radio("Авто — най-близка метеостанция")
-        cityIds[auto.id] = WeatherStore.AUTO_ID
-        cityGroup.addView(auto)
-        if (WeatherStore.isAuto(this)) cityGroup.check(auto.id)
-        for (city in WeatherStore.City.entries) {
-            val button = radio(city.label)
-            cityIds[button.id] = city.id
-            cityGroup.addView(button)
-            if (!WeatherStore.isAuto(this) && city == WeatherStore.city(this)) cityGroup.check(button.id)
-        }
-        cityGroup.setOnCheckedChangeListener { _, id ->
-            cityIds[id]?.let {
-                WeatherStore.setCity(this, it)
-                updateWeatherStatus()
-                updatePreview()
-                if (it == WeatherStore.AUTO_ID && !WeatherLocation.permitted(this)) {
-                    askForLocation()
-                } else {
-                    requestWeatherForPreview()
-                }
-            }
-        }
-        root.addView(cityGroup)
-
-        weatherStatus = label("", 14f, muted, dp(10))
-        root.addView(weatherStatus)
-        val refresh = Button(this).apply {
-            text = "Обнови времето и прогнозата"
-            isAllCaps = false
-        }
-        refresh.setOnClickListener {
-            if (WeatherStore.isAuto(this) && !WeatherLocation.permitted(this)) {
-                askForLocation()
-            } else {
-                refresh.isEnabled = false
-                weatherStatus.text = "Зареждам данни за времето..."
-                WeatherStore.refreshIfDue(this, force = true) { success ->
-                    if (!isFinishing && !isDestroyed) {
-                        refresh.isEnabled = true
-                        updateWeatherStatus()
-                        updatePreview()
-                        if (!success) weatherStatus.text =
-                            "Няма достъпни данни. Провери връзката и разрешенията."
-                    }
-                }
-            }
-        }
-        root.addView(refresh)
-
-        root.addView(label(
-            "Шест почасови реда: час, температура, условия и шанс за валежи. " +
-                "Обновяване на почасовата прогноза до веднъж на 1 час; " +
-                "без минутно опресняване на списъците. " +
-                "Текущото време — през 15 минути.",
-            14f, muted, dp(8)
-        ))
-        root.addView(label("Източници: NOAA Aviation Weather (METAR измервания) " +
-            "и Open-Meteo (метеомодел).", 13f, Color.GRAY, dp(4)))
-
-        updateWeatherStatus()
-        updatePreview()
-        if (firstAutoSetup && !WeatherLocation.permitted(this)) {
-            // The phone may request coarse location once; Android Auto's
-            // media service never opens a runtime permission dialog.
-            askForLocation()
-        } else {
-            requestWeatherForPreview()
+        if (!WeatherLocation.permitted(this)) {
+            root.addView(Button(this).apply {
+                text = "Разреши местоположение"
+                isAllCaps = false
+                setOnClickListener { requestLocation() }
+            })
         }
     }
 
-    private fun currentPreset(): ClockPreset =
-        ClockSelectionStore.current(
-            getSharedPreferences(AutoClockMediaService.PREFERENCES, MODE_PRIVATE)
-        )
+    override fun onResume() {
+        super.onResume()
+        if (::analogImage.isInitialized) updatePreviewTiles()
+        // Every opening of settings starts a current observation refresh.
+        if (WeatherLocation.permitted(this)) {
+            WeatherStore.refreshIfDue(this, force = true) {
+                if (!isFinishing && !isDestroyed && ::analogImage.isInitialized)
+                    updatePreviewTiles()
+            }
+        } else if (!hasRequestedLocation) {
+            hasRequestedLocation = true
+            requestLocation()
+        }
+    }
 
-    /**
-     * The only radio group is for choosing the primary style. Additional
-     * features are two independent checkboxes. Clearing both always gives
-     * the pure selected style.
-     */
-    private fun updateVariantOptions(family: ClockFamily) {
-        optionsContainer.removeAllViews()
-        val prefs = getSharedPreferences(AutoClockMediaService.PREFERENCES, MODE_PRIVATE)
-        fun addOption(label: String, key: String, defaultChecked: Boolean = false) {
-            optionsContainer.addView(
-                checkOption(label, prefs.getBoolean(key, defaultChecked)) { checked ->
-                    prefs.edit().putBoolean(key, checked).apply()
-                    updatePreview()
-                    requestWeatherForPreview()
-                }
+    private var hasRequestedLocation = false
+
+    private fun settings() =
+        getSharedPreferences(AutoClockMediaService.PREFERENCES, Context.MODE_PRIVATE)
+
+    private data class Choice(
+        val container: LinearLayout, val image: ImageView, val title: TextView
+    )
+
+    private fun createChoiceCard(label: String, family: ClockFamily): Choice {
+        val image = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            contentDescription = "$label часовник"
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
             )
         }
+        val frame = SquareFrame(this).apply {
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+            addView(image)
+        }
+        val caption = text(label, 17f, 0).apply {
+            gravity = android.view.Gravity.CENTER
+            setPadding(0, dp(10), 0, dp(8))
+        }
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            isClickable = true
+            isFocusable = true
+            addView(frame, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ))
+            addView(caption)
+            setOnClickListener {
+                settings().edit().putString(ClockPreset.KEY_FAMILY, family.id).apply()
+                updateVariantOptions(family)
+                updatePreviewTiles()
+            }
+        }
+        return Choice(card, image, caption)
+    }
 
+    private fun updatePreviewTiles() {
+        if (!::analogImage.isInitialized || !::digitalImage.isInitialized) return
+        val prefs = settings()
+        val theme = ClockTheme.fromId(prefs.getString(ClockTheme.KEY, null))
+        val compact = prefs.getString(AutoClockMediaService.KEY_LAYOUT, "standard") == "compact"
+        val now = LocalDateTime.now()
+        val weather = WeatherStore.current(this)
+        fun make(family: ClockFamily): Bitmap {
+            val preset = ClockSelectionStore.forFamily(prefs, family)
+            return ClockRenderer.render(
+                preset.id, now, weather?.weatherCode, weather?.isDay ?: true,
+                weather?.formattedTemperature, compact,
+                outputSize = 256, condition = weather?.description,
+                theme = theme
+            )
+        }
+        val newAnalog = make(ClockFamily.ANALOG)
+        val newDigital = make(ClockFamily.DIGITAL)
+        analogImage.setImageBitmap(newAnalog)
+        digitalImage.setImageBitmap(newDigital)
+        analogBitmap?.recycle()
+        digitalBitmap?.recycle()
+        analogBitmap = newAnalog
+        digitalBitmap = newDigital
+
+        val selected = ClockSelectionStore.current(prefs).family
+        updateSelectionStyle(analogCard, analogLabel, selected == ClockFamily.ANALOG)
+        updateSelectionStyle(digitalCard, digitalLabel, selected == ClockFamily.DIGITAL)
+    }
+
+    private fun updateSelectionStyle(
+        card: LinearLayout, title: TextView, selected: Boolean
+    ) {
+        val square = card.getChildAt(0)
+        square.background = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(14).toFloat()
+            setColor(Color.rgb(18, 20, 27))
+            setStroke(dp(if (selected) 3 else 1), if (selected) accent else faint)
+        }
+        card.isSelected = selected
+        title.setTextColor(if (selected) accent else ink)
+    }
+
+    private fun updateVariantOptions(family: ClockFamily) {
+        optionsContainer.removeAllViews()
+        val prefs = settings()
+        fun add(text: String, key: String) {
+            optionsContainer.addView(checkOption(
+                text, prefs.getBoolean(key, false)
+            ) { checked ->
+                prefs.edit().putBoolean(key, checked).apply()
+                updatePreviewTiles()
+            })
+        }
         when (family) {
             ClockFamily.ANALOG -> {
-                addOption("Добави цифров час", ClockPreset.KEY_ANALOG_ADD_DIGITAL)
-                addOption("Добави времето", ClockPreset.KEY_ANALOG_ADD_WEATHER)
+                add("Добави цифров час", ClockPreset.KEY_ANALOG_ADD_DIGITAL)
+                add("Добави времето", ClockPreset.KEY_ANALOG_ADD_WEATHER)
             }
             ClockFamily.DIGITAL ->
-                addOption("Добави времето", ClockPreset.KEY_DIGITAL_ADD_WEATHER)
-            // Weather is Pause-only and is not selectable in the phone UI.
+                add("Добави времето", ClockPreset.KEY_DIGITAL_ADD_WEATHER)
             ClockFamily.WEATHER -> Unit
         }
     }
 
-    private fun askForLocation() {
-        if (!WeatherStore.isAuto(this)) return
-        if (WeatherLocation.permitted(this)) {
-            requestWeatherForPreview(force = true)
+    private fun requestLocation() {
+        if (!WeatherLocation.permitted(this)) {
+            ActivityCompat.requestPermissions(this,
+                arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION),
+                LOCATION_REQUEST)
         } else {
-            ActivityCompat.requestPermissions(
-                this, arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION), LOCATION_REQUEST
-            )
+            WeatherStore.refreshIfDue(this, force = true) {
+                if (!isFinishing && !isDestroyed) updatePreviewTiles()
+            }
         }
     }
 
-    @Deprecated("The ActivityResult API may replace this permission callback later")
+    @Deprecated("Android runtime location permission callback")
     override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray
+        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == LOCATION_REQUEST) {
-            updateWeatherStatus()
-            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
-                requestWeatherForPreview(force = true)
-            }
+        if (requestCode == LOCATION_REQUEST &&
+            grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+            requestLocation()
         }
     }
 
-    private fun requestWeatherForPreview(force: Boolean = false) {
-        // Fetch current weather when the phone requests it.
-        if (WeatherStore.isAuto(this) && !WeatherLocation.permitted(this)) {
-            updateWeatherStatus()
-            return
-        }
-        WeatherStore.refreshIfDue(this, force = force) { success ->
-            if (!isFinishing && !isDestroyed) {
-                updateWeatherStatus()
-                if (success) {
-                    updatePreview()
-                } else if (WeatherStore.isAuto(this) && WeatherLocation.permitted(this)) {
-                    weatherStatus.text =
-                        "Авто: няма нова локация или връзка. Провери местоположението " +
-                            "или избери град ръчно."
-                }
-            }
-        }
+    private fun checkOption(
+        title: String, checked: Boolean, onChange: (Boolean) -> Unit
+    ): CheckBox = CheckBox(this).apply {
+        text = title
+        textSize = 16f
+        setTextColor(ink)
+        isChecked = checked
+        setOnCheckedChangeListener { _, value -> onChange(value) }
     }
 
-    private fun updatePreview() {
-        if (!::preview.isInitialized) return
-        val prefs = getSharedPreferences(AutoClockMediaService.PREFERENCES, MODE_PRIVATE)
-        val preset = currentPreset()
-        val weather = if (preset.usesWeather) WeatherStore.current(this) else null
-        val compact = prefs.getString(AutoClockMediaService.KEY_LAYOUT, "standard") == "compact"
-        val image = ClockRenderer.render(
-            preset.id, LocalDateTime.now(),
-            weather?.weatherCode, weather?.isDay ?: true,
-            weather?.formattedTemperature, compact,
-            condition = weather?.description ?: "Няма данни",
-            theme = ClockTheme.fromId(prefs.getString(ClockTheme.KEY, null)),
-            coloredWeatherIcons = WeatherStore.coloredIcons(prefs)
-        )
-        preview.setImageBitmap(image)
-        previewBitmap?.recycle()
-        previewBitmap = image
+    private fun radio(title: String): RadioButton = RadioButton(this).apply {
+        id = View.generateViewId()
+        text = title
+        textSize = 15f
+        setTextColor(ink)
     }
 
-    private fun updateWeatherStatus() {
-        if (!::weatherStatus.isInitialized) return
-        weatherStatus.text = WeatherStore.sourceStatus(this)
-    }
-
-    private fun checkOption(title: String, checked: Boolean, onChange: (Boolean) -> Unit): CheckBox =
-        CheckBox(this).apply {
-            text = title
-            textSize = 16f
-            setTextColor(light)
-            isChecked = checked
-            setOnCheckedChangeListener { _, value -> onChange(value) }
-        }
-
-    private fun radio(title: String): RadioButton =
-        RadioButton(this).apply {
-            id = View.generateViewId()
-            text = title
-            textSize = 17f
-            setTextColor(light)
-            setPadding(0, dp(3), 0, dp(3))
-        }
-
-    private fun label(textValue: String, size: Float, color: Int, below: Int): TextView =
+    private fun text(text: String, size: Float, bottom: Int): TextView =
         TextView(this).apply {
-            text = textValue
+            this.text = text
             textSize = size
-            setTextColor(color)
-            setPadding(0, 0, 0, below)
+            setTextColor(ink)
+            setPadding(0, 0, 0, bottom)
         }
+
+    /** Native square measure: thumbnail borders frame the entire drawing. */
+    private class SquareFrame(context: Context) : FrameLayout(context) {
+        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+            super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(
+                MeasureSpec.getSize(widthMeasureSpec), MeasureSpec.EXACTLY))
+        }
+    }
 
     override fun onDestroy() {
-        preview.setImageDrawable(null)
-        previewBitmap?.recycle()
-        previewBitmap = null
+        if (::analogImage.isInitialized) analogImage.setImageDrawable(null)
+        if (::digitalImage.isInitialized) digitalImage.setImageDrawable(null)
+        analogBitmap?.recycle()
+        digitalBitmap?.recycle()
+        analogBitmap = null
+        digitalBitmap = null
         super.onDestroy()
     }
 
-    companion object { private const val LOCATION_REQUEST = 7401 }
+    private fun dp(value: Int): Int =
+        (value * resources.displayMetrics.density).toInt()
 
-    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+    companion object { private const val LOCATION_REQUEST = 7401 }
 }
