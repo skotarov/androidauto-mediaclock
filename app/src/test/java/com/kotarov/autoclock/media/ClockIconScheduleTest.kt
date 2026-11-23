@@ -7,14 +7,14 @@ import java.time.LocalDateTime
 
 class ClockIconScheduleTest {
     @Test fun sameIconWithinOneSevenMinuteWindow() {
-        val first = LocalDateTime.of(2026, 11, 23, 19, 35)
+        val first = LocalDateTime.of(2026, 11, 23, 19, 29)
         assertEquals(ClockIconSchedule.bucket(first), ClockIconSchedule.bucket(first.plusMinutes(6)))
         assertEquals(first, ClockIconSchedule.slotStart(first.plusMinutes(6)))
     }
 
     @Test fun iconChangesAtSevenMinuteBoundary() {
-        val a = LocalDateTime.of(2026, 11, 23, 19, 35)
-        val b = LocalDateTime.of(2026, 11, 23, 19, 42)
+        val a = LocalDateTime.of(2026, 11, 23, 19, 29)
+        val b = LocalDateTime.of(2026, 11, 23, 19, 36)
         assertNotEquals(ClockIconSchedule.bucket(a), ClockIconSchedule.bucket(b))
         assertEquals(a, ClockIconSchedule.slotStart(a))
         assertEquals(b, ClockIconSchedule.slotStart(b))
