@@ -50,11 +50,12 @@ class ClockArtworkProvider : ContentProvider() {
         val weatherRevision = uri.getQueryParameter("rev")?.toLongOrNull()?.coerceAtLeast(0L) ?: 0L
         val compact = uri.getQueryParameter("layout") == "compact"
         val theme = ClockTheme.fromId(uri.getQueryParameter("theme"))
+        val coloredWeatherIcons = uri.getQueryParameter("weather_color") != "false"
         // Include the layout and release design in the filename, so changing
         // phone settings invalidates both Android Auto and disk artwork caches.
         val layout = if (compact) "compact" else "standard"
         val destination = File(directory,
-            "v21-$layout-${theme.id}-$clockMode-$key-$weatherRevision.png")
+            "v23-$layout-${theme.id}-${if (coloredWeatherIcons) "color" else "mono"}-$clockMode-$key-$weatherRevision.png")
 
         synchronized(lock) {
             if (!destination.isFile || destination.length() == 0L) {
@@ -65,7 +66,8 @@ class ClockArtworkProvider : ContentProvider() {
                         WeatherStore.current(appContext) else null
                     ClockRenderer.renderMini(
                         mini, requestedMinute, weather?.weatherCode,
-                        weather?.isDay ?: true, weather?.formattedTemperature, theme
+                        weather?.isDay ?: true, weather?.formattedTemperature, theme,
+                        coloredWeatherIcons = coloredWeatherIcons
                     )
                 } else {
                     val weather = if (ClockPreset.fromId(clockMode).usesWeather) {
@@ -79,7 +81,8 @@ class ClockArtworkProvider : ContentProvider() {
                         compact,
                         condition = weather?.description,
                         sourceLabel = weather?.artworkSource,
-                        theme = theme
+                        theme = theme,
+                        coloredWeatherIcons = coloredWeatherIcons
                     )
                 }
                 try {
@@ -137,8 +140,10 @@ class ClockArtworkProvider : ContentProvider() {
         /** Dedicated media display/browse art, not the Android Auto app shortcut. */
         fun miniArtworkUri(
             family: ClockFamily, now: LocalDateTime,
-            weatherRevision: Long = 0L, theme: ClockTheme = ClockTheme.DARK
-        ): Uri = artworkUri("mini_${family.id}", now, weatherRevision, theme = theme)
+            weatherRevision: Long = 0L, theme: ClockTheme = ClockTheme.DARK,
+            coloredWeatherIcons: Boolean = true
+        ): Uri = artworkUri("mini_${family.id}", now, weatherRevision,
+            theme = theme, coloredWeatherIcons = coloredWeatherIcons)
 
         fun artworkUri(
             mode: String,
@@ -146,14 +151,16 @@ class ClockArtworkProvider : ContentProvider() {
             weatherRevision: Long = 0L,
             compact: Boolean = false,
             generation: Long = 0L,
-            theme: ClockTheme = ClockTheme.DARK
+            theme: ClockTheme = ClockTheme.DARK,
+            coloredWeatherIcons: Boolean = true
         ): Uri = Uri.Builder()
             .scheme("content")
             .authority(AUTHORITY)
             .appendPath(mode)
             .appendPath("clock_${now.format(KEY_FORMAT)}.png")
             .appendQueryParameter("rev", weatherRevision.coerceAtLeast(0L).toString())
-            .appendQueryParameter("style", "v21")
+            .appendQueryParameter("style", "v23")
+            .appendQueryParameter("weather_color", coloredWeatherIcons.toString())
             .appendQueryParameter("theme", theme.id)
             .appendQueryParameter("generation", generation.toString())
             .appendQueryParameter("layout", if (compact) "compact" else "standard")

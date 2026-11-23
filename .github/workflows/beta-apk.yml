@@ -36,17 +36,17 @@ jobs:
       - name: Copy APK with friendly filename
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk dist/AutoClock-2-v0.22-beta.apk
+          cp app/build/outputs/apk/debug/app-debug.apk dist/AutoClock-2-v0.23-beta.apk
 
       - name: Create or update public beta download
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if ! gh release view v0.22.0-beta >/dev/null 2>&1; then
-            gh release create v0.22.0-beta \
+          if ! gh release view v0.23.0-beta >/dev/null 2>&1; then
+            gh release create v0.23.0-beta \
               --target "$GITHUB_SHA" \
-              --title "Auto Clock 2 — beta 0.22.0" \
-              --notes "Auto weather now defaults to nearby METAR station with permission on first phone launch, while honoring explicitly chosen cities. Artwork shows only city, not (ICAO). Static dock icon hands softened. Other v0.21 features unchanged." \
+              --title "Auto Clock 2 — beta 0.23.0" \
+              --notes "Move only the standard analog clock down 12px; add colored weather icon setting (enabled by default) and make rain larger, brighter, and easier to see in Android Auto. Mini panel stays at same position." \
               --prerelease
           fi
-          gh release upload v0.22.0-beta dist/AutoClock-2-v0.22-beta.apk --clobber
+          gh release upload v0.23.0-beta dist/AutoClock-2-v0.23-beta.apk --clobber

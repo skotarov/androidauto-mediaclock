@@ -24,11 +24,11 @@ object ClockRenderer {
     const val SIZE = 512
     private const val CENTER_X = 256f
     // Different optical centres for compact and standard Android Auto tiles.
-    // Compact is raised slightly from v0.13; standard returns to its v0.12 centre.
-    // Clock digits and weather retain their positions relative to the dial.
+    // Compact stays unchanged; the standard large ANALOG face is 12px lower.
+    // Center digits, optional weather and source label move with that dial.
     private const val CONTENT_CENTER_Y = 190f
     private const val COMPACT_ANALOG_CENTER_Y = 208f
-    private const val STANDARD_ANALOG_CENTER_Y = 204f
+    private const val STANDARD_ANALOG_CENTER_Y = 216f
     private const val COMPACT_RADIUS = 96f
     private const val STANDARD_RADIUS = 122f
     // Keep the analog forecast at the same size and vertical position with
@@ -53,7 +53,8 @@ object ClockRenderer {
         outputSize: Int = SIZE,
         condition: String? = null,
         sourceLabel: String? = null,
-        theme: ClockTheme = ClockTheme.DARK
+        theme: ClockTheme = ClockTheme.DARK,
+        coloredWeatherIcons: Boolean = true
     ): Bitmap {
         require(outputSize in 192..SIZE) { "Unsupported artwork size" }
         val bitmap = Bitmap.createBitmap(outputSize, outputSize, Bitmap.Config.RGB_565)
@@ -82,7 +83,8 @@ object ClockRenderer {
                             clockY - 24f * unit, 46f * unit, white, unit)
                         drawWeatherRow(canvas, CENTER_X, clockY + analogWeatherOffset * unit,
                             weatherCode, isDay, temperature,
-                            ANALOG_WEATHER_TEXT_SIZE * unit, unit)
+                            ANALOG_WEATHER_TEXT_SIZE * unit, unit,
+                            coloredWeatherIcons = coloredWeatherIcons, theme = theme)
                     }
                     preset.hasDigitalTime ->
                         drawText(canvas, time.format(timeFormat), CENTER_X,
@@ -90,7 +92,8 @@ object ClockRenderer {
                     preset.usesWeather ->
                         drawWeatherRow(canvas, CENTER_X, clockY + analogWeatherOffset * unit,
                             weatherCode, isDay, temperature,
-                            ANALOG_WEATHER_TEXT_SIZE * unit, unit)
+                            ANALOG_WEATHER_TEXT_SIZE * unit, unit,
+                            coloredWeatherIcons = coloredWeatherIcons, theme = theme)
                     // No additions: genuinely clean analog face, with
                     // hour/minute hands and markings but no digits or weather.
                     else -> Unit
@@ -102,7 +105,8 @@ object ClockRenderer {
                         drawText(canvas, time.format(timeFormat), CENTER_X,
                             clockY - 24f * unit, 46f * unit, white, unit)
                         drawWeatherRow(canvas, CENTER_X, clockY + 47f * unit,
-                            weatherCode, isDay, temperature, 29f * unit, unit)
+                            weatherCode, isDay, temperature, 29f * unit, unit,
+                            coloredWeatherIcons = coloredWeatherIcons, theme = theme)
                     } else {
                         drawText(canvas, time.format(timeFormat), CENTER_X,
                             clockY, 46f * unit, white, unit)
@@ -111,7 +115,8 @@ object ClockRenderer {
                     drawText(canvas, time.format(timeFormat), CENTER_X,
                         clockY - 35f * unit, 88f * unit, white, unit)
                     drawWeatherRow(canvas, CENTER_X, clockY + 47f * unit,
-                        weatherCode, isDay, temperature, 36f * unit, unit, 330f)
+                        weatherCode, isDay, temperature, 36f * unit, unit, 330f,
+                        coloredWeatherIcons, theme)
                 } else {
                     // Pure digital: no dial, date or weather.
                     drawText(canvas, time.format(timeFormat), CENTER_X,
@@ -123,14 +128,16 @@ object ClockRenderer {
                 if (preset.hasDigitalTime) {
                     drawWeatherRow(canvas, CENTER_X, clockY - 30f * unit,
                         weatherCode, isDay, temperature, weatherSize, unit,
-                        if (preset.hasAnalog) radius * 2f - 14f else 345f)
+                        if (preset.hasAnalog) radius * 2f - 14f else 345f,
+                        coloredWeatherIcons, theme)
                     drawText(canvas, time.format(timeFormat), CENTER_X,
                         clockY + 45f * unit, 37f * unit, pale, unit)
                 } else {
                     drawWeatherRow(canvas, CENTER_X,
                         clockY + (if (preset.hasAnalog) 18f else -9f) * unit,
                         weatherCode, isDay, temperature, weatherSize, unit,
-                        if (preset.hasAnalog) radius * 2f - 14f else 345f)
+                        if (preset.hasAnalog) radius * 2f - 14f else 345f,
+                        coloredWeatherIcons, theme)
                     if (!preset.hasAnalog) {
                         drawText(canvas, condition ?: "Няма данни", CENTER_X,
                             clockY + 69f * unit, 27f * unit, pale, unit)
@@ -165,7 +172,8 @@ object ClockRenderer {
         isDay: Boolean = true,
         temperature: String? = null,
         theme: ClockTheme = ClockTheme.DARK,
-        outputSize: Int = 160
+        outputSize: Int = 160,
+        coloredWeatherIcons: Boolean = true
     ): Bitmap {
         require(outputSize in 64..256)
         val image = Bitmap.createBitmap(outputSize, outputSize, Bitmap.Config.RGB_565)
@@ -204,7 +212,8 @@ object ClockRenderer {
                 canvas.save()
                 canvas.translate(80f, 52f)
                 canvas.scale(0.55f, 0.55f)
-                drawWeatherIcon(canvas, weatherCode, isDay)
+                drawWeatherIcon(canvas, weatherCode, isDay,
+                    coloredWeatherIcons, theme, false)
                 canvas.restore()
                 drawMiniText(canvas, temperature ?: "--°C", 80f, 119f, 54f, ink, false)
             }
@@ -349,7 +358,9 @@ object ClockRenderer {
         temperature: String?,
         textSize: Float,
         unit: Float,
-        maxWidth: Float = 2f * STANDARD_RADIUS * unit - 8f
+        maxWidth: Float = 2f * STANDARD_RADIUS * unit - 8f,
+        coloredWeatherIcons: Boolean = true,
+        theme: ClockTheme = ClockTheme.DARK
     ) {
         val shown = temperature ?: "--°C"
         val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -360,7 +371,7 @@ object ClockRenderer {
         val geometry = if (code != null && code >= 0) iconGeometry(code, isDay) else null
         // Use actual artwork width and keep the icon about as tall as the text.
         val iconScale = if (geometry == null) 0f else
-            textSize * 0.86f / geometry.height
+            textSize * 1.12f / geometry.height
         val iconWidth = if (geometry == null) 0f else geometry.width * iconScale
         val gap = if (geometry == null) 0f else textSize * 0.065f
         val totalWidth = textWidth + iconWidth + gap
@@ -372,7 +383,8 @@ object ClockRenderer {
             canvas.save()
             canvas.translate(iconX, cy - geometry.visualCentreY * scaled)
             canvas.scale(scaled, scaled)
-            drawWeatherIcon(canvas, code, isDay)
+            drawWeatherIcon(canvas, code, isDay,
+                coloredWeatherIcons, theme, theme == ClockTheme.LIGHT)
             canvas.restore()
         }
         val textX = left + (iconWidth + gap + textWidth / 2f) * fit
@@ -416,46 +428,116 @@ object ClockRenderer {
         canvas.drawText(value, x, baseline, face)
     }
 
-    private fun drawWeatherIcon(canvas: Canvas, code: Int?, isDay: Boolean) {
-        // Coordinates are local to the translated/scaled weather line.
+    /**
+     * Icon color palette. The light main-card artwork is reversed as a whole
+     * after drawing; pre-inverting the intended light colors here preserves
+     * recognisable blue rain, yellow sun, etc. The mini panel is not inverted.
+     */
+    private data class WeatherPalette(
+        val sun: Int, val moon: Int, val moonCutout: Int,
+        val cloudFill: Int, val cloudOutline: Int,
+        val rain: Int, val rainHalo: Int, val fog: Int,
+        val snow: Int, val bolt: Int
+    )
+
+    private fun weatherPalette(
+        colored: Boolean,
+        theme: ClockTheme,
+        preInvertForMainLight: Boolean
+    ): WeatherPalette {
+        val light = theme == ClockTheme.LIGHT
+        fun result(dark: Int, lightColor: Int): Int {
+            val color = if (light) lightColor else dark
+            return if (light && preInvertForMainLight)
+                Color.rgb(255 - Color.red(color), 255 - Color.green(color),
+                    255 - Color.blue(color)) else color
+        }
+        val cloudFill = if (colored)
+            result(Color.rgb(22, 42, 65), Color.rgb(220, 234, 244))
+        else result(Color.rgb(13, 24, 35), Color.rgb(245, 245, 245))
+        val outline = if (colored)
+            result(Color.rgb(234, 244, 255), Color.rgb(37, 72, 107))
+        else result(Color.WHITE, Color.rgb(32, 32, 32))
+        val rain = if (colored)
+            result(Color.rgb(46, 220, 255), Color.rgb(0, 100, 220))
+        else result(Color.WHITE, Color.rgb(34, 42, 52))
+        val halo = if (colored)
+            result(Color.rgb(228, 251, 255), Color.rgb(236, 246, 255))
+        else result(Color.rgb(12, 29, 43), Color.WHITE)
+        val sun = if (colored)
+            result(Color.rgb(255, 217, 76), Color.rgb(234, 150, 13))
+        else result(Color.WHITE, Color.rgb(42, 42, 42))
+        val moon = if (colored)
+            result(Color.rgb(237, 246, 255), Color.rgb(65, 85, 125))
+        else result(Color.WHITE, Color.rgb(45, 45, 45))
+        return WeatherPalette(
+            sun = sun, moon = moon,
+            moonCutout = result(Color.rgb(8, 17, 27), Color.WHITE),
+            cloudFill = cloudFill, cloudOutline = outline,
+            rain = rain, rainHalo = halo,
+            fog = outline,
+            snow = if (colored)
+                result(Color.rgb(203, 245, 255), Color.rgb(30, 99, 155))
+            else outline,
+            bolt = if (colored)
+                result(Color.rgb(255, 214, 73), Color.rgb(203, 116, 0))
+            else outline
+        )
+    }
+
+    private fun drawWeatherIcon(
+        canvas: Canvas,
+        code: Int?,
+        isDay: Boolean,
+        colored: Boolean,
+        theme: ClockTheme,
+        preInvertForMainLight: Boolean
+    ) {
+        val palette = weatherPalette(colored, theme, preInvertForMainLight)
         val cx = 0f
         val cy = 0f
         when (code) {
-            0 -> if (isDay) drawSun(canvas, cx, cy) else drawMoon(canvas, cx, cy)
+            0 -> if (isDay) drawSun(canvas, cx, cy, palette)
+                else drawMoon(canvas, cx, cy, palette)
             1, 2 -> {
-                if (isDay) drawSun(canvas, cx - 21f, cy - 20f, 18f)
-                else drawMoon(canvas, cx - 21f, cy - 20f, 18f)
-                drawCloud(canvas, cx, cy + 12f)
+                if (isDay) drawSun(canvas, cx - 21f, cy - 20f, palette, 18f)
+                else drawMoon(canvas, cx - 21f, cy - 20f, palette, 18f)
+                drawCloud(canvas, cx, cy + 12f, palette)
             }
-            3, null, -1 -> drawCloud(canvas, cx, cy)
+            3, null, -1 -> drawCloud(canvas, cx, cy, palette)
             45, 48 -> {
-                drawCloud(canvas, cx, cy - 13f)
-                val fog = stroke(pale, 5f)
+                drawCloud(canvas, cx, cy - 13f, palette)
+                val fog = stroke(palette.fog, 6.5f)
                 repeat(3) { i ->
                     val y = cy + 26f + i * 10f
                     canvas.drawLine(cx - 37f + (i % 2) * 8f, y, cx + 37f, y, fog)
                 }
             }
             51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82 -> {
-                drawCloud(canvas, cx, cy - 9f)
-                val rain = stroke(cyan, 6f)
+                // Draw rain BELOW the cloud, with a bright wide halo and a
+                // saturated core. The old 6px/15px dashes disappeared after
+                // Android Auto scaled and dimmed the clock artwork.
+                drawCloud(canvas, cx, cy - 13f, palette)
+                val halo = stroke(palette.rainHalo, 14f)
+                val rain = stroke(palette.rain, 9.5f)
                 repeat(3) { i ->
-                    val x = cx - 24f + i * 24f
-                    canvas.drawLine(x + 7f, cy + 24f, x, cy + 39f, rain)
+                    val x = cx - 25f + i * 25f
+                    canvas.drawLine(x + 8f, cy + 27f, x - 1f, cy + 48f, halo)
+                    canvas.drawLine(x + 8f, cy + 27f, x - 1f, cy + 48f, rain)
                 }
             }
             71, 73, 75, 77, 85, 86 -> {
-                drawCloud(canvas, cx, cy - 13f)
-                val snow = stroke(white, 4f)
+                drawCloud(canvas, cx, cy - 14f, palette)
+                val snow = stroke(palette.snow, 6f)
                 repeat(3) { i ->
                     val x = cx - 24f + i * 24f
                     val y = cy + 32f + (i % 2) * 8f
-                    canvas.drawLine(x - 5f, y, x + 5f, y, snow)
-                    canvas.drawLine(x, y - 5f, x, y + 5f, snow)
+                    canvas.drawLine(x - 6f, y, x + 6f, y, snow)
+                    canvas.drawLine(x, y - 6f, x, y + 6f, snow)
                 }
             }
             95, 96, 99 -> {
-                drawCloud(canvas, cx, cy - 11f)
+                drawCloud(canvas, cx, cy - 13f, palette)
                 val bolt = Path().apply {
                     moveTo(cx + 5f, cy + 14f)
                     lineTo(cx - 10f, cy + 41f)
@@ -465,16 +547,18 @@ object ClockRenderer {
                     lineTo(cx + 8f, cy + 30f)
                     close()
                 }
-                canvas.drawPath(bolt, fill(Color.rgb(255, 209, 73)))
+                canvas.drawPath(bolt, fill(palette.bolt))
             }
-            else -> drawCloud(canvas, cx, cy)
+            else -> drawCloud(canvas, cx, cy, palette)
         }
     }
 
-    private fun drawSun(canvas: Canvas, cx: Float, cy: Float, radius: Float = 23f) {
-        val gold = Color.rgb(255, 219, 93)
-        canvas.drawCircle(cx, cy, radius, fill(gold))
-        val rays = stroke(gold, 5.5f)
+    private fun drawSun(
+        canvas: Canvas, cx: Float, cy: Float, palette: WeatherPalette,
+        radius: Float = 23f
+    ) {
+        canvas.drawCircle(cx, cy, radius, fill(palette.sun))
+        val rays = stroke(palette.sun, 6f)
         repeat(8) { i ->
             val angle = Math.toRadians(i * 45.0)
             val dx = cos(angle).toFloat()
@@ -486,18 +570,19 @@ object ClockRenderer {
         }
     }
 
-    private fun drawMoon(canvas: Canvas, cx: Float, cy: Float, radius: Float = 23f) {
-        // Dark outline follows the crescent; underlying clock hands do not
-        // shine through the white portion of the weather icon.
-        canvas.drawCircle(cx, cy, radius + 3f, fill(Color.rgb(3, 9, 17)))
-        canvas.drawCircle(cx, cy, radius, fill(pale))
-        canvas.drawCircle(cx + radius * 0.46f, cy - radius * 0.36f, radius, fill(Color.rgb(8, 17, 27)))
+    private fun drawMoon(
+        canvas: Canvas, cx: Float, cy: Float, palette: WeatherPalette,
+        radius: Float = 23f
+    ) {
+        canvas.drawCircle(cx, cy, radius + 3f, fill(palette.cloudFill))
+        canvas.drawCircle(cx, cy, radius, fill(palette.moon))
+        canvas.drawCircle(cx + radius * 0.46f, cy - radius * 0.36f,
+            radius, fill(palette.moonCutout))
     }
 
-    private fun drawCloud(canvas: Canvas, cx: Float, cy: Float) {
-        // Opaque dark underlay + bright outline are robust against media scrims.
-        val backing = fill(navy)
-        val outline = stroke(white, 6.5f)
+    private fun drawCloud(
+        canvas: Canvas, cx: Float, cy: Float, palette: WeatherPalette
+    ) {
         val shape = Path().apply {
             moveTo(cx - 34f, cy + 20f)
             cubicTo(cx - 47f, cy + 19f, cx - 49f, cy - 3f, cx - 34f, cy - 9f)
@@ -506,7 +591,8 @@ object ClockRenderer {
             cubicTo(cx + 53f, cy + 2f, cx + 49f, cy + 21f, cx + 31f, cy + 22f)
             close()
         }
-        canvas.drawPath(shape, backing)
-        canvas.drawPath(shape, outline)
+        canvas.drawPath(shape, fill(palette.cloudFill))
+        canvas.drawPath(shape, stroke(palette.cloudOutline, 7f))
     }
+
 }

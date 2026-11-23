@@ -50,6 +50,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             key == ClockPreset.KEY_WEATHER_ADD_DIGITAL ||
             key == KEY_MODE || key == KEY_HIDE_MEDIA_TEXT ||
             key == KEY_LAYOUT || key == ClockTheme.KEY ||
+            key == WeatherStore.KEY_COLORED_ICONS ||
             key == KEY_PROGRESS_ANIMATED ||
             key == WeatherStore.KEY_CITY || key == "weather_cached_city" ||
             key == "weather_cached_mode" || key == "weather_station_label" ||
@@ -160,7 +161,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                         family, now,
                         if (family == ClockFamily.WEATHER)
                             WeatherStore.current(this)?.observedAtMs ?: 0L else 0L,
-                        selectedTheme()
+                        selectedTheme(), coloredWeatherIcons()
                     )
                 ).build()
             MediaBrowserCompat.MediaItem(
@@ -205,6 +206,9 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     private fun selectedTheme(): ClockTheme =
         ClockTheme.fromId(prefs.getString(ClockTheme.KEY, null))
+
+    private fun coloredWeatherIcons(): Boolean =
+        WeatherStore.coloredIcons(prefs)
 
     private fun animateProgress(): Boolean =
         prefs.getBoolean(KEY_PROGRESS_ANIMATED, false)
@@ -268,15 +272,16 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             else -> preset.label
         }
         val theme = selectedTheme()
+        val colored = coloredWeatherIcons()
         val artwork = ClockArtworkProvider.artworkUri(
             preset.id, now, weather?.observedAtMs ?: 0L,
-            compactLayout(), artworkGeneration, theme
+            compactLayout(), artworkGeneration, theme, colored
         )
         val miniArtwork = ClockArtworkProvider.miniArtworkUri(
             preset.family, now,
             if (preset.family == ClockFamily.WEATHER)
                 weather?.observedAtMs ?: 0L else 0L,
-            theme
+            theme, colored
         )
         val blank = hideMediaText()
         val shownTitle = if (blank) INVISIBLE_TEXT else title
@@ -300,11 +305,13 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             preset.id, now, weather?.weatherCode, weather?.isDay ?: true,
             weather?.formattedTemperature, compactLayout(),
             outputSize = 320, condition = description,
-            sourceLabel = weather?.artworkSource, theme = theme
+            sourceLabel = weather?.artworkSource, theme = theme,
+            coloredWeatherIcons = colored
         )
         val miniBitmap = ClockRenderer.renderMini(
             preset.family, now, weather?.weatherCode,
-            weather?.isDay ?: true, weather?.formattedTemperature, theme
+            weather?.isDay ?: true, weather?.formattedTemperature, theme,
+            coloredWeatherIcons = colored
         )
         val metadata = MediaMetadataCompat.Builder()
             .putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, miniBitmap)

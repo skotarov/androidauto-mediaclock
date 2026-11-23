@@ -1,4 +1,4 @@
-# Auto Clock 2 — beta 0.22
+# Auto Clock 2 — beta 0.23
 
 An experimental battery-conscious clock for Android Auto's media card next to
 navigation. Android Auto officially reserves the media template for audio apps;
@@ -31,6 +31,22 @@ When enabled, progress is a virtual 60-second track anchored to the actual
 second; no second-by-second bitmap or background job is created. When disabled,
 metadata omits duration and reports an unknown position with speed zero. The
 Android Auto host may still draw an empty/static line.
+
+## v0.23: standard analog placement and legible colored weather
+
+The standard/normal-size **analog** clock dial and its attached optional text,
+weather row, and source label move down **12 px in 512px design coordinates**.
+The compact layout, pure digital/weather main layout positions and mini
+quick-control panel stay where they were.
+
+A **Цветни иконки на времето** checkbox on the phone (enabled by default)
+changes weather symbols between colored and monochrome. Rain now has
+larger symbols and thicker high-contrast blue droplets with a bright halo,
+designed to survive Android Auto's darkening overlay. Sun, cloud, snow, and
+storm symbols also use theme-aware colors. The light/reversed theme preserves
+the intended colors by preparing the icon palette before inversion. The
+choice updates both main and mini weather art without an extra timer or
+weather-network request.
 
 ## v0.22 weather and static icon defaults
 
@@ -154,7 +170,7 @@ tested on the target phone and Android Auto head unit.
 
 ## Download and install
 
-[AutoClock-2-v0.22-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.22.0-beta)
+[AutoClock-2-v0.23-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.23.0-beta)
 
 1. Open the beta release under **Releases**, then tap the APK under **Assets**.
 2. Install it on the Android phone connected to the car.
@@ -165,7 +181,15 @@ tested on the target phone and Android Auto head unit.
 5. Open Auto Clock 2 in the Android Auto media launcher and press Play, then
    switch to navigation's split-screen view.
 
-## Testing checklist (v0.22)
+## Testing checklist (v0.23)
+
+- [ ] Standard analog dial is slightly lower than v0.22
+- [ ] Compact and mini panel keep their former positions
+- [ ] Color weather icons enabled by default; rain streaks remain visible
+- [ ] Unchecking the option switches weather icons to monochrome
+- [ ] Changing the option updates both main and mini weather artwork
+- [ ] Color weather symbols remain recognizable in the Light/reversed theme
+
 
 - [ ] Fresh install defaults to Auto weather; prompts for approximate location on phone
 - [ ] Previously selected manual city persists after an update

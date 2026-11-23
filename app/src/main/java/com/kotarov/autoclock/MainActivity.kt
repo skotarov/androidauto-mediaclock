@@ -169,6 +169,14 @@ class MainActivity : AppCompatActivity() {
             13f, muted, dp(15)
         ))
 
+        root.addView(checkOption(
+            "Цветни иконки на времето (по-ясен дъжд)",
+            WeatherStore.coloredIcons(prefs)
+        ) { checked ->
+            prefs.edit().putBoolean(WeatherStore.KEY_COLORED_ICONS, checked).apply()
+            updatePreview()
+        })
+
         root.addView(label("Източник за времето", 20f, light, dp(6)))
         root.addView(label("Авто използва местоположение еднократно, при обновяване. " +
             "Избира най-близката метеостанция с актуално измерване; " +
@@ -336,7 +344,8 @@ class MainActivity : AppCompatActivity() {
             weather?.weatherCode, weather?.isDay ?: true,
             weather?.formattedTemperature, compact,
             condition = weather?.description ?: "Няма данни",
-            theme = ClockTheme.fromId(prefs.getString(ClockTheme.KEY, null))
+            theme = ClockTheme.fromId(prefs.getString(ClockTheme.KEY, null)),
+            coloredWeatherIcons = WeatherStore.coloredIcons(prefs)
         )
         preview.setImageBitmap(image)
         previewBitmap?.recycle()

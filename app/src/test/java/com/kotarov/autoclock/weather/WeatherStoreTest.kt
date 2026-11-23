@@ -5,6 +5,19 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WeatherStoreTest {
+    @Test fun coloredWeatherIconPreferenceDefaultsToEnabled() {
+        val prefs = java.lang.reflect.Proxy.newProxyInstance(
+            android.content.SharedPreferences::class.java.classLoader,
+            arrayOf(android.content.SharedPreferences::class.java)
+        ) { _, method, args ->
+            when (method.name) {
+                "getBoolean" -> args!![1] as Boolean
+                else -> throw UnsupportedOperationException(method.name)
+            }
+        } as android.content.SharedPreferences
+        assertTrue(WeatherStore.coloredIcons(prefs))
+    }
+
     @Test fun weatherCodesAreMappedToShortBulgarianLabels() {
         assertEquals("Ясно", WeatherStore.describe(0))
         assertEquals("Мъгла", WeatherStore.describe(45))
