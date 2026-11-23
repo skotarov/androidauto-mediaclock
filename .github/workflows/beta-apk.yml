@@ -36,17 +36,17 @@ jobs:
       - name: Copy APK with friendly filename
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk dist/AutoClock-2-v0.17-beta.apk
+          cp app/build/outputs/apk/debug/app-debug.apk dist/AutoClock-2-v0.18-beta.apk
 
       - name: Create or update public beta download
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if ! gh release view v0.17.0-beta >/dev/null 2>&1; then
-            gh release create v0.17.0-beta \
+          if ! gh release view v0.18.0-beta >/dev/null 2>&1; then
+            gh release create v0.18.0-beta \
               --target "$GITHUB_SHA" \
-              --title "Auto Clock 2 — beta 0.17.0" \
-              --notes "Experimental seven-minute dynamic media-browse clock thumbnails. Manifest-based bottom dock icon remains system-controlled; no extra timers or second-by-second refresh." \
+              --title "Auto Clock 2 — beta 0.18.0" \
+              --notes "Fullscreen map quick-controls now get a separate almost edge-to-edge analog dial as DISPLAY_ICON metadata; full album art remains unchanged. The media session updates while Play is active; the dock app icon stays Android Auto controlled." \
               --prerelease
           fi
-          gh release upload v0.17.0-beta dist/AutoClock-2-v0.17-beta.apk --clobber
+          gh release upload v0.18.0-beta dist/AutoClock-2-v0.18-beta.apk --clobber
