@@ -1,5 +1,6 @@
 package com.kotarov.autoclock.media
 
+import android.app.PendingIntent
 import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Bundle
@@ -33,10 +34,12 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private var preset = ClockPreset.ANALOG_PURE
     private var artworkGeneration = 0L
     private var forecastListDirty = false
+    private var lastBrowseTestEnabled: Boolean? = null
 
     private val settingsRefresh = Runnable {
         preset = selectedPreset()
         artworkGeneration += 1L
+        updateSessionBrowseLink()
         if (forecastListDirty) {
             forecastListDirty = false
             notifyChildrenChanged(ROOT_ID)
@@ -53,6 +56,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             key == ClockPreset.KEY_DIGITAL_ADD_ANALOG ||
             key == ClockPreset.KEY_DIGITAL_ADD_WEATHER ||
             key == KEY_MODE || key == KEY_HIDE_COMPACT_TEXT ||
+            key == KEY_TEST_DIRECT_BROWSE || key == KEY_TEST_STATE_NONE ||
             key == KEY_LAYOUT || key == ClockTheme.KEY ||
             key == WeatherStore.KEY_COLORED_ICONS ||
             key == WeatherStore.KEY_CITY || key == "weather_cached_city" ||
@@ -104,7 +108,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         prefs = getSharedPreferences(PREFERENCES, MODE_PRIVATE)
         ClockSelectionStore.migrateSimplifiedIfNeeded(prefs)
         preset = selectedPreset()
-        session = MediaSessionCompat(this, "AutoClockSixHoursV036").apply {
+        session = MediaSessionCompat(this, "AutoClockMediaTestsV037").apply {
             setFlags(MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS)
             setCallback(object : MediaSessionCompat.Callback() {
                 override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
@@ -132,6 +136,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         // visible only to ordinary media browsers, not suggestion callers.
         session.setQueue(emptyList())
         session.setQueueTitle(null)
+        updateSessionBrowseLink()
         sessionToken = session.sessionToken
         prefs.registerOnSharedPreferenceChangeListener(prefsListener)
         // Initially stopped: the weather is visible until Play.
@@ -201,6 +206,26 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         session.isActive = false
         session.release()
         super.onDestroy()
+    }
+
+    /**
+     * Test 1: offer a session-activity deep link ONLY if the user opted in.
+     * The host may ignore it. Never launch an Activity from this background
+     * service; only a user/host invocation can follow the PendingIntent.
+     */
+    private fun updateSessionBrowseLink() {
+        val enabled = prefs.getBoolean(KEY_TEST_DIRECT_BROWSE, false)
+        if (lastBrowseTestEnabled == enabled) return
+        lastBrowseTestEnabled = enabled
+        val activity = if (enabled) {
+            PendingIntent.getActivity(
+                this,
+                37,
+                Intent(this, AutoClockBrowseTrampolineActivity::class.java),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        } else null
+        session.setSessionActivity(activity)
     }
 
     private fun selectedPreset(): ClockPreset = ClockSelectionStore.current(prefs)
@@ -332,8 +357,10 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         session.setPlaybackState(
             PlaybackStateCompat.Builder()
                 .setState(
-                    if (running) PlaybackStateCompat.STATE_PLAYING
-                    else PlaybackStateCompat.STATE_PAUSED,
+                    AutoClockScreenExperiments.playbackState(
+                        running,
+                        prefs.getBoolean(KEY_TEST_STATE_NONE, false)
+                    ),
                     PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN,
                     0f
                 )
@@ -350,7 +377,9 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         const val KEY_HIDE_COMPACT_TEXT = "hide_compact_media_text_v30"
         const val KEY_LAYOUT = "clock_layout"
         const val KEY_PROGRESS_ANIMATED = "progress_animated"
+        const val KEY_TEST_DIRECT_BROWSE = "try_media_host_browse_link_v37"
+        const val KEY_TEST_STATE_NONE = "try_playback_state_none_v37"
         private const val INVISIBLE_TEXT = ClockMediaLabels.EMPTY
-        private const val ROOT_ID = "auto_clock_root"
+        const val ROOT_ID = "auto_clock_root"
     }
 }
