@@ -41,6 +41,8 @@ enum class ClockPreset(
 
     companion object {
         const val KEY_FAMILY = "display_family"
+        // One weather toggle for both selectable clock faces.
+        const val KEY_ADD_WEATHER = "add_weather_both_clocks"
         const val KEY_ANALOG_ADD_DIGITAL = "analog_add_digital"
         const val KEY_ANALOG_ADD_WEATHER = "analog_add_weather"
         const val KEY_DIGITAL_ADD_ANALOG = "digital_add_analog"
