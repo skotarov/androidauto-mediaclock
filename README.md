@@ -15,7 +15,10 @@ The three primary radio styles have optional checkboxes:
 | Цифров часовник | Large HH:mm | Also add weather |
 | Времето | Large weather icon, temperature and description | Also add smaller digital HH:mm |
 
-The old multi-add-on combinations are migrated into these simpler options.\nThe analog style now starts with **Добави цифров час** unchecked. On upgrade\nfrom v0.13–v0.19 the previous forced-on setting is cleared **once**; after\nthat, any manual change is remembered. Other style and weather preferences stay unchanged.
+The old multi-add-on combinations are migrated into these simpler options.
+The analog style now starts with **Добави цифров час** unchecked. On upgrade
+from v0.13–v0.19 the previous forced-on setting is cleared **once**; after
+that, any manual change is remembered. Other style and weather preferences stay unchanged.
 Each main style remembers its checkbox(es) independently. Analogue has two
 independent switches, allowing four distinct looks (pure dial, digital time,
 weather, or both). Digital and Weather each have one optional switch.

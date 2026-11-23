@@ -102,6 +102,42 @@ class ClockPresetTest {
             ClockSelectionStore.forFamily(prefs, ClockFamily.ANALOG))
     }
 
+    @Test fun legacyForcedOnDigitalIsTurnedOffOnceAndLaterChoiceIsPreserved() {
+        val values = mutableMapOf<String, Any>(
+            ClockPreset.KEY_SCHEMA_V11 to true,
+            "display_simplified_v13" to true,
+            ClockPreset.KEY_ANALOG_ADD_DIGITAL to true
+        )
+        val editor = Proxy.newProxyInstance(
+            SharedPreferences.Editor::class.java.classLoader,
+            arrayOf(SharedPreferences.Editor::class.java)
+        ) { proxy, method, args ->
+            when (method.name) {
+                "putBoolean" -> {
+                    values[args!![0] as String] = args[1] as Boolean
+                    proxy
+                }
+                "apply" -> null
+                else -> throw UnsupportedOperationException(method.name)
+            }
+        } as SharedPreferences.Editor
+        val prefs = Proxy.newProxyInstance(
+            SharedPreferences::class.java.classLoader,
+            arrayOf(SharedPreferences::class.java)
+        ) { _, method, args ->
+            when (method.name) {
+                "getBoolean" -> values[args!![0] as String] as? Boolean ?: args[1] as Boolean
+                "edit" -> editor
+                else -> throw UnsupportedOperationException(method.name)
+            }
+        } as SharedPreferences
+        ClockSelectionStore.migrateSimplifiedIfNeeded(prefs)
+        assertFalse(values[ClockPreset.KEY_ANALOG_ADD_DIGITAL] as Boolean)
+        values[ClockPreset.KEY_ANALOG_ADD_DIGITAL] = true
+        ClockSelectionStore.migrateSimplifiedIfNeeded(prefs)
+        assertTrue(values[ClockPreset.KEY_ANALOG_ADD_DIGITAL] as Boolean)
+    }
+
     @Test fun allTwelveCombinationsHaveStableUniqueIds() {
         assertEquals(12, ClockPreset.entries.size)
         assertEquals(12, ClockPreset.entries.map { it.id }.toSet().size)
