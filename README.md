@@ -1,4 +1,4 @@
-# Auto Clock 2 — beta 0.16
+# Auto Clock 2 — beta 0.17
 
 An experimental battery-conscious clock for Android Auto's media card next to
 navigation. Android Auto officially reserves the media template for audio apps;
@@ -97,6 +97,29 @@ hands. Saved choices from 0.15 remain intact (digital time stays checked
 until the user explicitly unchecks it). The compact/standard positions
 and the observation-source label improvements from v0.15 are unchanged.
 
+## Seven-minute media icon experiment (v0.17)
+
+The bottom Android Auto app shortcut in the user's screenshot is the
+manifest-based application icon (a fixed resource). In radio apps, it is
+typically album artwork that changes when a song changes, not the actual
+application icon. There is no supported MediaBrowserService API that forces
+Android Auto to redraw its bottom taskbar application icon at a custom cadence.
+
+This beta experiments with a **separate tiny analog-clock browse thumbnail**
+(`content://.../mini/clock_yyyyMMdd_HHmm.png`) which contains hands plus
+the most recent HH:mm sampled at the beginning of a seven-minute interval.
+The service calls `notifyChildrenChanged(ROOT_ID)` when that interval changes,
+so a host that reloads browse icons can show the updated clock. We use the
+existing minute tick, without introducing a seven-minute alarm or additional
+CPU wakeup. The thumbnail is only created on demand and its PNG is included
+in the same bounded artwork cache.
+
+**Important:** It cannot guarantee that the small clock shortcut in the
+bottom Android Auto dock changes. That icon is controlled and cached by the
+host. The main media card's clock still updates every minute. Test the new
+media browse icon when you reopen the clock's media list and check whether
+your particular Android Auto version also updates the shortcut.
+
 ## Resource and compatibility design
 
 - Minute-aligned clock artwork and media metadata only while the clock is active
@@ -112,7 +135,7 @@ tested on the target phone and Android Auto head unit.
 
 ## Download and install
 
-[AutoClock-2-v0.16-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.16.0-beta)
+[AutoClock-2-v0.17-beta.apk](https://github.com/skotarov/androidauto-mediaclock/releases/tag/v0.17.0-beta)
 
 1. Open the beta release under **Releases**, then tap the APK under **Assets**.
 2. Install it on the Android phone connected to the car.
@@ -124,6 +147,12 @@ tested on the target phone and Android Auto head unit.
    switch to navigation's split-screen view.
 
 ## Testing checklist
+
+- [ ] The analog clock in the media browsing list shows the current seven-minute window
+- [ ] The thumbnail changes on or after a 7-minute boundary while clock is active
+- [ ] No additional wakeup/second ticking is introduced
+- [ ] Confirm separately whether the *bottom dock app shortcut* changes on this head unit
+
 
 - [ ] New install: moving seconds/progress checkbox is **unchecked**
 - [ ] Analogue with both boxes off shows only hands and tick marks (no digits)
