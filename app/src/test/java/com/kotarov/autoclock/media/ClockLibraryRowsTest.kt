@@ -25,6 +25,9 @@ class ClockLibraryRowsTest {
         assertEquals(listOf(today.plusDays(1), today.plusDays(2), today.plusDays(3)),
             rows.map { it.date })
         assertEquals(3, rows.map { it.id }.toSet().size)
+        assertFalse(rows[0].title.contains("☀"))
+        assertFalse(rows[0].title.contains("☁"))
+        assertFalse(rows[0].title.contains("🌧"))
         assertTrue(rows[0].title.contains("↑12°"))
         assertTrue(rows[0].title.contains("↓4°"))
         assertTrue(rows[0].subtitle.contains("Валежи до 21%"))

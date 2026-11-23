@@ -29,12 +29,11 @@ object ClockLibraryRows {
                 Row("$FORECAST_ID_PREFIX$index", "$label · Няма прогноза",
                     "Данните още не са заредени", date, null)
             } else {
-                val icon = WeatherStore.symbol(day.code, true)
                 val text = WeatherStore.describe(day.code)
                 val rain = day.precipitationPercent?.let { " · Валежи до $it%" } ?: ""
                 Row(
                     "$FORECAST_ID_PREFIX$index",
-                    "$label  $icon  ↑${day.maxText} ↓${day.minText}",
+                    "$label  ↑${day.maxText} ↓${day.minText}",
                     "$text$rain", date, day
                 )
             }

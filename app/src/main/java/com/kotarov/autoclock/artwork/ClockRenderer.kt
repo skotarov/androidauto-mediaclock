@@ -28,9 +28,12 @@ object ClockRenderer {
     // Center digits, optional weather and source label move with that dial.
     private const val CONTENT_CENTER_Y = 190f
     private const val COMPACT_ANALOG_CENTER_Y = 208f
-    private const val STANDARD_ANALOG_CENTER_Y = 216f
+    // The head unit crops the large dial near its upper edge. A slightly
+    // smaller dial shifted right protects the rim and avoids the Play button.
+    private const val STANDARD_ANALOG_CENTER_Y = 236f
     private const val COMPACT_RADIUS = 96f
-    private const val STANDARD_RADIUS = 122f
+    private const val STANDARD_RADIUS = 104f
+    private const val STANDARD_ANALOG_RIGHT_SHIFT = 38f
     // Keep the analog forecast at the same size and vertical position with
     // or without the optional digital HH:mm. Compact / standard use slightly
     // different offsets to match the size of the dial in Android Auto.
@@ -70,6 +73,14 @@ object ClockRenderer {
         } else CONTENT_CENTER_Y
         val analogWeatherOffset = if (compact)
             COMPACT_ANALOG_WEATHER_Y_OFFSET else STANDARD_ANALOG_WEATHER_Y_OFFSET
+
+        // Keep the compact dial unchanged. In the standard car card the host
+        // crops the album art; the right shift avoids the floating Play button.
+        val shiftDial = preset.hasAnalog && !compact
+        if (shiftDial) {
+            canvas.save()
+            canvas.translate(STANDARD_ANALOG_RIGHT_SHIFT, 0f)
+        }
 
         // The primary style establishes the visual hierarchy. Add-ons are
         // independent: no checkboxes means no secondary information at all.
@@ -160,9 +171,9 @@ object ClockRenderer {
 
             drawSourceLabel(canvas, sourceLabel, CENTER_X, sourceY, unit, maxWidth)
         }
+        if (shiftDial) canvas.restore()
         return applyTheme(bitmap, theme)
     }
-
 
     /** Distinct low-cost miniature for pressure and station terrain elevation. */
     fun renderMiniMetrics(
@@ -187,6 +198,33 @@ object ClockRenderer {
             lineTo(138f, 139f)
         }
         canvas.drawPath(mountains, stroke(accent, 6f))
+        return image
+    }
+
+    /** One icon and NO temperature or lettering, for 3-day forecast rows. */
+    fun renderForecastSymbol(
+        weatherCode: Int?,
+        theme: ClockTheme = ClockTheme.DARK,
+        coloredWeatherIcons: Boolean = true,
+        outputSize: Int = 160
+    ): Bitmap {
+        require(outputSize in 64..256)
+        val image = Bitmap.createBitmap(outputSize, outputSize, Bitmap.Config.RGB_565)
+        val canvas = Canvas(image)
+        canvas.scale(outputSize / 160f, outputSize / 160f)
+        canvas.drawColor(if (theme == ClockTheme.DARK)
+            Color.rgb(2, 5, 11) else Color.WHITE)
+        canvas.save()
+        canvas.translate(80f, 78f)
+        canvas.scale(1.15f, 1.15f)
+        if (weatherCode == null || weatherCode == -1) {
+            // Missing data must not be falsely displayed as cloudy weather.
+            drawMiniText(canvas, "?", 0f, 0f, 70f,
+                if (theme == ClockTheme.DARK) Color.WHITE else Color.BLACK, false)
+        } else {
+            drawWeatherIcon(canvas, weatherCode, true, coloredWeatherIcons, theme, false)
+        }
+        canvas.restore()
         return image
     }
 

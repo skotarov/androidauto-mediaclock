@@ -55,19 +55,18 @@ class ClockArtworkProvider : ContentProvider() {
         // phone settings invalidates both Android Auto and disk artwork caches.
         val layout = if (compact) "compact" else "standard"
         val destination = File(directory,
-            "v30-$layout-${theme.id}-${if (coloredWeatherIcons) "color" else "mono"}-$clockMode-$key-$weatherRevision.png")
+            "v31-$layout-${theme.id}-${if (coloredWeatherIcons) "color" else "mono"}-$clockMode-$key-$weatherRevision.png")
 
         synchronized(lock) {
             if (!destination.isFile || destination.length() == 0L) {
                 val temp = File(directory, "inflight-${System.nanoTime()}.tmp")
                 val mini = miniFamily(clockMode)
                 val bitmap = if (clockMode == "mini_forecast") {
-                    ClockRenderer.renderMini(
-                        ClockFamily.WEATHER, requestedMinute,
+                    // Forecast library icons are weather symbols ONLY.
+                    // Temperatures live in the text, never baked into artwork.
+                    ClockRenderer.renderForecastSymbol(
                         uri.getQueryParameter("code")?.toIntOrNull(),
-                        true,
-                        uri.getQueryParameter("temp") ?: "--°C",
-                        theme,
+                        theme = theme,
                         coloredWeatherIcons = coloredWeatherIcons
                     )
                 } else if (clockMode == "mini_metrics") {
@@ -171,7 +170,6 @@ class ClockArtworkProvider : ContentProvider() {
             theme = theme, coloredWeatherIcons = coloredWeatherIcons
         ).buildUpon()
             .appendQueryParameter("code", (forecast?.code ?: -1).toString())
-            .appendQueryParameter("temp", forecast?.iconTemperature ?: "--°C")
             .build()
 
         fun metricsArtworkUri(
@@ -195,7 +193,7 @@ class ClockArtworkProvider : ContentProvider() {
             .appendPath(mode)
             .appendPath("clock_${now.format(KEY_FORMAT)}.png")
             .appendQueryParameter("rev", weatherRevision.coerceAtLeast(0L).toString())
-            .appendQueryParameter("style", "v30")
+            .appendQueryParameter("style", "v31")
             .appendQueryParameter("weather_color", coloredWeatherIcons.toString())
             .appendQueryParameter("theme", theme.id)
             .appendQueryParameter("generation", generation.toString())

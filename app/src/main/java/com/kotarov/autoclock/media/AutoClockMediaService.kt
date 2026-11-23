@@ -19,8 +19,8 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 
 /**
- * v0.30 Play is clock and Pause/Stop is current weather. Browser returns
- * tomorrow's forecast and the next two days. Weather API requests are
+ * v0.31 Play is clock and Pause/Stop is current weather. Browser returns
+ * three coming days with icon-only thumbnails and numeric temperatures. Weather API requests are
  * throttled; no foreground activity, audio, wake locks or seconds ticker.
  */
 class AutoClockMediaService : MediaBrowserServiceCompat() {
@@ -30,11 +30,15 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private var running = false
     private var preset = ClockPreset.ANALOG_PURE
     private var artworkGeneration = 0L
+    private var forecastListDirty = false
 
     private val settingsRefresh = Runnable {
         preset = selectedPreset()
         artworkGeneration += 1L
-        notifyChildrenChanged(ROOT_ID)
+        if (forecastListDirty) {
+            forecastListDirty = false
+            notifyChildrenChanged(ROOT_ID)
+        }
         publishClock()
         publishPlaybackState()
         requestWeatherIfNecessary()
@@ -58,6 +62,12 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             key == ForecastStore.KEY_SAVED_AT ||
             key == ForecastStore.KEY_MODE
         ) {
+            // Observation values update the clock but not the browse forecast.
+            // A new forecast or source/theme change refreshes the three rows.
+            if (key == ForecastStore.KEY_SAVED_AT || key == ForecastStore.KEY_MODE ||
+                key == WeatherStore.KEY_CITY || key == ClockTheme.KEY ||
+                key == WeatherStore.KEY_COLORED_ICONS
+            ) forecastListDirty = true
             handler.removeCallbacks(settingsRefresh)
             handler.postDelayed(settingsRefresh, 120L)
         }
