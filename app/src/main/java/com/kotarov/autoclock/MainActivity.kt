@@ -357,7 +357,7 @@ class MainActivity : AppCompatActivity() {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
-                marginBottom = dp(16)
+                bottomMargin = dp(16)
             }
             setOnClickListener { toggle.isChecked = !toggle.isChecked }
         }
