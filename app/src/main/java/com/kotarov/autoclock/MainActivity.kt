@@ -119,7 +119,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         root.addView(checkOption(
-            "Показвай времето вместо часовника (тест без Play/Pause)",
+            "Показвай времето вместо часовника",
             prefs.getBoolean(AutoClockMediaService.KEY_SHOW_WEATHER_WITHOUT_BUTTONS, false)
         ) { checked ->
             prefs.edit().putBoolean(
@@ -171,7 +171,8 @@ class MainActivity : AppCompatActivity() {
         root.addView(themes)
 
         root.addView(label(
-            "В тази версия няма лента за прогрес и транспортни бутони.",
+            "Няма прогрес бар и Next/Previous. Play/Pause са необходими " +
+                "за активиране на единствения медиен елемент.",
             14f, muted, dp(8)
         ))
 
