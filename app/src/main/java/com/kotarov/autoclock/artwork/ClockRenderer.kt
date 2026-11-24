@@ -14,6 +14,7 @@ import java.time.LocalDateTime
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.roundToInt
@@ -95,7 +96,7 @@ object ClockRenderer {
                 drawDigitalForecast(canvas, time, clockY, unit, forecast, theme)
         }
         if (preset.usesWeather && !sourceLabel.isNullOrBlank()) {
-            val sourceY = if (preset.hasAnalog) clockY + radius * 1.28f + 50f * unit
+            val sourceY = if (preset.hasAnalog) clockY + radius * 1.28f + 85f * unit
                 else clockY + (DIGITAL_FORECAST_TIME_OFFSET + 148f) * digitalForecastScale(unit)
             val maxWidth = if (preset.hasAnalog) radius * 2f + 40f * unit else 390f
             drawSourceLabel(canvas, sourceLabel, CENTER_X, sourceY, unit, maxWidth, theme)
@@ -164,17 +165,18 @@ object ClockRenderer {
     }
 
     /** Reverse only the light main artwork; dark incurs no additional work. */
-    /** Eleven slots at their actual clock positions. The past slot fades
-     * to 40%; current is opaque; the last two use 65% and 30%. Missing slots stay blank.
-     * Draw each glyph into a small alpha layer so its overlapping strokes
-     * fade together; no persistent bitmap or per-second work is added.
-     */
+    /** Eleven hourly positions with change-only future glyphs. Keep each
+     * glyph and temperature outside the dial's outer stroke, accounting for
+     * the vertical glyph lift and the different shapes around the circle.
+     * Fade each complete slot in a small alpha layer. */
     private fun drawForecastRing(
         canvas: Canvas, now: LocalDateTime, radius: Float, centreY: Float,
         forecast: List<ForecastStore.Hour>, theme: ClockTheme
     ) {
         val unit = radius / STANDARD_RADIUS
-        val ring = radius * 1.28f
+        val minimumRing = radius * 1.28f + 4f * unit
+        // Outer stroke is 4.8 * unit wide. Reserve an additional visible gap.
+        val clearance = radius + 12f * unit
         val zone = ZoneId.systemDefault()
         val currentSlot = now.atZone(zone)
             .withMinute(0).withSecond(0).withNano(0).toEpochSecond()
@@ -185,31 +187,47 @@ object ClockRenderer {
             val offset = ((hour.epochSeconds - currentSlot) / 3600L).toInt()
             if (offset !in -1..ForecastStore.RING_FUTURE_HOURS || hour.code < 0) continue
             val index = local.hour % 12
-            val x = CENTER_X + forecastX[index] * ring
-            val y = centreY + forecastY[index] * ring
-            val alpha = ForecastStore.ringAlpha(offset)
-            val bounds = 60f * unit
-            val save = if (alpha < 255)
-                canvas.saveLayerAlpha(x - bounds, y - bounds, x + bounds, y + bounds, alpha)
-                else canvas.save()
-            if (hour.epochSeconds in iconEpochs) {
-                val geometry = iconGeometry(hour.code, hour.isDay)
-                val iconSize = if (offset == 0) 58f else 45f
-                val scale = iconSize * unit / maxOf(geometry.width, geometry.height)
-                val lift = if (offset == 0) 24f else 16f
-                canvas.save()
-                canvas.translate(x, y - lift * unit - geometry.visualCentreY * scale)
-                canvas.scale(scale, scale)
-                drawWeatherIcon(canvas, hour.code, hour.isDay, theme)
-                canvas.restore()
-            }
+            val dx = forecastX[index]
+            val dy = forecastY[index]
+            val hasIcon = hour.epochSeconds in iconEpochs
+            val geometry = iconGeometry(hour.code, hour.isDay)
+            val iconSize = if (offset == 0) 58f else 45f
+            val scale = iconSize * unit / maxOf(geometry.width, geometry.height)
+            val lift = (if (offset == 0) 24f else 16f) * unit
+            val temperature = "${hour.temperatureC.roundToInt()}°"
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = themed(pale, theme)
                 textAlign = Paint.Align.CENTER
                 textSize = (if (offset == 0) 18f else 15f) * unit
                 typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
             }
-            canvas.drawText("${hour.temperatureC.roundToInt()}°", x, y + 21f * unit, paint)
+            // Project the glyph and text bounding boxes onto the outward
+            // radial direction. Move only as far as necessary for clearance.
+            val baseline = 21f * unit
+            val fm = paint.fontMetrics
+            val textInner = dy * baseline + minOf(dy * fm.ascent, dy * fm.descent) -
+                abs(dx) * paint.measureText(temperature) / 2f
+            var ring = maxOf(minimumRing, clearance - textInner)
+            if (hasIcon) {
+                val iconInner = -dy * lift - scale *
+                    (abs(dx) * geometry.width + abs(dy) * geometry.height) / 2f
+                ring = maxOf(ring, clearance - iconInner)
+            }
+            val x = CENTER_X + dx * ring
+            val y = centreY + dy * ring
+            val alpha = ForecastStore.ringAlpha(offset)
+            val bounds = 60f * unit
+            val save = if (alpha < 255)
+                canvas.saveLayerAlpha(x - bounds, y - bounds, x + bounds, y + bounds, alpha)
+                else canvas.save()
+            if (hasIcon) {
+                canvas.save()
+                canvas.translate(x, y - lift - geometry.visualCentreY * scale)
+                canvas.scale(scale, scale)
+                drawWeatherIcon(canvas, hour.code, hour.isDay, theme)
+                canvas.restore()
+            }
+            canvas.drawText(temperature, x, y + baseline, paint)
             canvas.restoreToCount(save)
         }
     }
