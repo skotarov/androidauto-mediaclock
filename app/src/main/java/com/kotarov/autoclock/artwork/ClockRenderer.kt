@@ -273,6 +273,14 @@ object ClockRenderer {
                     x + halfWidth + gap, y - lift + halfHeight + gap, Path.Direction.CW)
             }
             val alpha = ForecastStore.ringAlpha(offset)
+            // A temperature-only slot has no overlapping drawing primitives.
+            // Direct paint alpha avoids allocating an offscreen layer.
+            if (!hasIcon) {
+                paint.alpha = alpha
+                canvas.drawText(temperature, x, y + baseline, paint)
+                paint.alpha = 255
+                continue
+            }
             val bounds = 60f * unit
             val save = if (alpha < 255)
                 canvas.saveLayerAlpha(x - bounds, y - bounds, x + bounds, y + bounds, alpha)

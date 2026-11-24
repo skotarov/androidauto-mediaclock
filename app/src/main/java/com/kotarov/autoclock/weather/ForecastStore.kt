@@ -14,7 +14,7 @@ import kotlin.math.roundToInt
 /**
  * Six NEXT whole hours from an Open-Meteo modeled forecast, separate from
  * current METAR weather. The existing weather worker reuses its coordinates:
- * no extra GPS fix or service; normal HTTP reads cap at 5 minutes.
+ * no extra GPS fix or service; HTTP connect and read timeouts are five seconds.
  */
 object ForecastStore {
     // Fresh cache keys: never read the older v0.35 daily forecast as hourly.
@@ -24,13 +24,17 @@ object ForecastStore {
     private const val KEY_LAT = "forecast_hourly_lat_v47"
     private const val KEY_LON = "forecast_hourly_lon_v47"
     private const val MAX_CACHE_AGE_MS = 4L * 60L * 60L * 1000L
-    private data class Parsed(val payload: String, val hours: List<Hour>)
+    private data class Parsed(val payload: String, val hours: List<Hour>, val current: ModelCurrent?)
     @Volatile private var parsed: Parsed? = null
 
-    @Synchronized private fun parsedHours(payload: String): List<Hour> {
-        parsed?.takeIf { it.payload == payload }?.let { return it.hours }
-        return parse(payload).also { parsed = Parsed(payload, it) }
+    @Synchronized private fun parsedPayload(payload: String): Parsed {
+        parsed?.takeIf { it.payload == payload }?.let { return it }
+        val root = try { JSONObject(payload) } catch (_: Exception) { null }
+        return Parsed(payload, root?.let { parseHours(it) } ?: emptyList(),
+            root?.let { parseCurrent(it) }).also { parsed = it }
     }
+
+    private fun parsedHours(payload: String): List<Hour> = parsedPayload(payload).hours
 
     data class Hour(
         val epochSeconds: Long,
@@ -192,7 +196,7 @@ object ForecastStore {
             .take(6)
             .toList()
 
-    /** The weather worker already throttles requests to 5 minutes.
+    /** The weather worker already throttles requests.
      * Return the data without publishing it, so weather and location can be
      * committed together in one SharedPreferences transaction. */
     fun fetchOnWorker(latitude: Double, longitude: Double): String? {
@@ -224,8 +228,9 @@ object ForecastStore {
         return body
     }
 
-    fun currentModel(body: String?): ModelCurrent? {
-        val root = try { JSONObject(body ?: return null) } catch (_: Exception) { return null }
+    fun currentModel(body: String?): ModelCurrent? = body?.let { parsedPayload(it).current }
+
+    private fun parseCurrent(root: JSONObject): ModelCurrent? {
         val current = root.optJSONObject("current") ?: return null
         val temperature = current.optDouble("temperature_2m", Double.NaN)
         if (!temperature.isFinite() || temperature !in -100.0..70.0) return null
@@ -259,9 +264,9 @@ object ForecastStore {
             .putLong(KEY_SAVED_AT, 0L)
     }
 
-    fun parse(json: String): List<Hour> {
-        if (json.isBlank()) return emptyList()
-        val root = try { JSONObject(json) } catch (_: Exception) { return emptyList() }
+    fun parse(json: String): List<Hour> = parsedHours(json)
+
+    private fun parseHours(root: JSONObject): List<Hour> {
         val hourly = root.optJSONObject("hourly") ?: return emptyList()
         val timestamps = hourly.optJSONArray("time") ?: return emptyList()
         val codes = hourly.optJSONArray("weather_code") ?: return emptyList()

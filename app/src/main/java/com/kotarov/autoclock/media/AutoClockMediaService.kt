@@ -40,6 +40,9 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private var miniKey: String? = null
     private var lastPublished: MediaPublicationKey? = null
     private var lastPlayback: Boolean? = null
+    private data class WeatherArtwork(val locality: String?, val forecast: List<ForecastStore.Hour>)
+    private var lastWeatherArtwork: WeatherArtwork? = null
+    private var weatherArtworkRevision = 0L
     private data class RenderedArt(val main: Bitmap, val mini: Bitmap, val ownsMini: Boolean) {
         fun discard() {
             main.recycle()
@@ -106,8 +109,14 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         prefs = getSharedPreferences(PREFERENCES, MODE_PRIVATE)
         // Force automatic local weather even when Android Auto starts the
         // service before the phone settings activity is opened.
-        prefs.edit().remove(KEY_TEST_DIRECT_BROWSE).remove(KEY_TEST_STATE_NONE)
-            .remove(KEY_TEST_STATE_STOPPED).remove("debug_media_labels_v54").apply()
+        val legacyTests = listOf(KEY_TEST_DIRECT_BROWSE, KEY_TEST_STATE_NONE,
+            KEY_TEST_STATE_STOPPED, "debug_media_labels_v54")
+        val obsolete = legacyTests.filter { prefs.contains(it) }
+        if (obsolete.isNotEmpty()) {
+            val edit = prefs.edit()
+            obsolete.forEach { edit.remove(it) }
+            edit.apply()
+        }
         ClockSelectionStore.migrateSimplifiedIfNeeded(prefs)
         session = MediaSessionCompat(this, "AutoClockMediaTestsV037").apply {
             setFlags(MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS)
@@ -211,6 +220,9 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         miniKey = null
         lastPublished = null
         lastPlayback = null
+        lastWeatherArtwork = null
+        weatherArtworkRevision = 0L
+        lastSoundNotice = null
         PublishedArtwork.clear()
         session.setMetadata(null)
     }
@@ -281,9 +293,21 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val weather = if (visible.usesWeather) WeatherStore.current(this) else null
         val theme = selectedTheme()
         val showClockForecast = visible.usesWeather
-        val revision = if (showClockForecast) prefs.getLong(ForecastStore.KEY_SAVED_AT, 0L) +
-            (weather?.observedAtMs ?: 0L) + prefs.getLong("weather_locality_revision_v68", 0L)
-            else weather?.observedAtMs ?: 0L
+        // Freshness timestamps alone do not change artwork. Reuse the
+        // existing revision when the actual six forecast slots and label
+        // are unchanged, while still processing all warnings separately.
+        val locality = WeatherStore.locality(this)
+        val forecast = if (showClockForecast) ForecastStore.currentRing(this,
+            now.atZone(java.time.ZoneId.systemDefault()).toEpochSecond(), weather) else emptyList()
+        val label = if (showClockForecast) locality ?: weather?.artworkSource else null
+        val nextWeatherArtwork = if (showClockForecast) WeatherArtwork(label, forecast) else null
+        if (nextWeatherArtwork != lastWeatherArtwork) {
+            lastWeatherArtwork = nextWeatherArtwork
+            weatherArtworkRevision = if (nextWeatherArtwork == null) 0L else
+                prefs.getLong(ForecastStore.KEY_SAVED_AT, 0L) +
+                (weather?.observedAtMs ?: 0L) + prefs.getLong("weather_locality_revision_v68", 0L)
+        }
+        val revision = weatherArtworkRevision
         val artwork = ClockArtworkProvider.artworkUri(
             visible.id, now, revision,
             compactLayout(), 0L, theme
@@ -295,7 +319,6 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         )
         val tick = SystemClock.elapsedRealtime()
         // Observe locality even when the clock's weather option is off.
-        val locality = WeatherStore.locality(this)
         if (cityAnnouncement.update(locality, tick)) scheduleCityTitleHide()
         val warningRevision = prefs.getLong(WeatherStore.KEY_WARNING_REV, 0L)
         if (warningRevision != lastWarningRevision) {
@@ -322,10 +345,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 // Snapshot every render input on the owner thread. Never read
                 // mutable service state or touch MediaSession in the worker.
                 val compact = compactLayout()
-                val forecast = if (showClockForecast) ForecastStore.currentRing(this,
-                    now.atZone(java.time.ZoneId.systemDefault()).toEpochSecond(), weather) else emptyList()
-                val label = if (showClockForecast) locality ?: weather?.artworkSource else null
-                val miniUri = miniArtwork.toString()
+                 val miniUri = miniArtwork.toString()
                 val artUri = artwork.toString()
                 val previousMini = if (miniKey == miniUri)
                     baseMetadata?.getBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON) else null

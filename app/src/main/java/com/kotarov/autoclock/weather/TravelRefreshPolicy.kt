@@ -28,6 +28,11 @@ object TravelRefreshPolicy {
         (WEATHER_MIN_ATTEMPT_MS * (1L shl (failures - 1).coerceIn(0, 6)))
             .coerceAtMost(60 * 60_000L)
 
+    /** Coordinates are a restart checkpoint, not a record of every movement.
+     * Live geocoding still uses the half-kilometre in-memory threshold. */
+    fun localityCheckpointDue(nameChanged: Boolean, distanceKm: Double): Boolean =
+        nameChanged || distanceKm >= WEATHER_DISTANCE_KM
+
     fun localityDue(now: Long, lastAttempt: Long?, distanceKm: Double,
                     hasName: Boolean, lastFailed: Boolean): Boolean {
         if (lastAttempt != null && now - lastAttempt <

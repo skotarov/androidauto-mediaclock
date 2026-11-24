@@ -61,7 +61,7 @@ class MainActivity : Activity() {
     private data class PreviewKey(
         val minute: LocalDateTime, val theme: ClockTheme, val compact: Boolean,
         val analogPreset: String, val digitalPreset: String,
-        val weather: WeatherStore.Snapshot?, val locality: String?,
+        val locality: String?,
         val forecast: List<ForecastStore.Hour>
     )
     private var previewKey: PreviewKey? = null
@@ -351,7 +351,7 @@ class MainActivity : Activity() {
         val locality = if (hasWeather) WeatherStore.locality(this) ?: weather?.artworkSource else null
         val forecast = if (hasWeather) ForecastStore.currentRing(this,
             now.atZone(java.time.ZoneId.systemDefault()).toEpochSecond(), weather) else emptyList()
-        val next = PreviewKey(now, theme, compact, analog.id, digital.id, weather, locality, forecast)
+        val next = PreviewKey(now, theme, compact, analog.id, digital.id, locality, forecast)
         if (previewKey != next || analogBitmap == null || digitalBitmap == null) {
             if (requestedPreview != next) {
                 requestedPreview = next

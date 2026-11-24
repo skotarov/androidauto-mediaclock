@@ -249,13 +249,20 @@ object WeatherStore {
                         if (name != null) {
                             lastLocalityPoint = point
                             val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                            val edit = prefs.edit().putLong(KEY_LAT, point.lat.toBits())
-                                .putLong(KEY_LON, point.lon.toBits())
-                            if (name != prefs.getString(KEY_LOCALITY, null)) {
-                                edit.putString(KEY_LOCALITY, name)
-                                    .putLong("weather_locality_revision_v68", System.currentTimeMillis())
+                            val changed = name != prefs.getString(KEY_LOCALITY, null)
+                            val savedLat = Double.fromBits(prefs.getLong(KEY_LAT, Double.NaN.toBits()))
+                            val savedLon = Double.fromBits(prefs.getLong(KEY_LON, Double.NaN.toBits()))
+                            val savedPoint = if (savedLat.isFinite() && savedLon.isFinite())
+                                TravelRefreshPolicy.Point(savedLat, savedLon) else null
+                            if (TravelRefreshPolicy.localityCheckpointDue(changed, point.distanceFrom(savedPoint))) {
+                                val edit = prefs.edit().putLong(KEY_LAT, point.lat.toBits())
+                                    .putLong(KEY_LON, point.lon.toBits())
+                                if (changed) {
+                                    edit.putString(KEY_LOCALITY, name)
+                                        .putLong("weather_locality_revision_v68", System.currentTimeMillis())
+                                }
+                                edit.apply()
                             }
-                            edit.apply()
                         }
                     }
                 }
@@ -288,6 +295,7 @@ object WeatherStore {
                 // Fetch the local model first, and never query Bulgarian
                 // stations from an unrelated country/region.
                 forecast = ForecastStore.fetchOnWorker(point.lat, point.lon)
+                val model = ForecastStore.currentModel(forecast)
                 if (canUseStation && !Thread.currentThread().isInterrupted) {
                     if (reports == null) {
                         reports = runCatching { fetchText(
@@ -296,11 +304,9 @@ object WeatherStore {
                         fetchedReports = reports != null
                     }
                     val observed = runCatching { reports?.let { fetchNearestStation(location, it) } }.getOrNull()
-                    val model = ForecastStore.currentModel(forecast)
                     reading = observed?.copy(isDay = model?.isDay ?: observed.isDay,
                         code = if (observed.code >= 0) observed.code else model?.code ?: -1)
                 }
-                val model = ForecastStore.currentModel(forecast)
                 if (reading == null && model != null) reading = Reading(model.temperature,
                     model.code, model.isDay, "Current location",
                     "Open-Meteo · model", System.currentTimeMillis())

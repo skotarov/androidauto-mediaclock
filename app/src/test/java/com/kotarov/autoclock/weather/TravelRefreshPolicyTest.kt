@@ -29,6 +29,14 @@ class TravelRefreshPolicyTest {
         assertFalse(TravelRefreshPolicy.localityDue(59_999L, 0, 1.0, true, false))
         assertTrue(TravelRefreshPolicy.localityDue(120_000L, 0, 0.0, true, true))
     }
+    @Test fun localityCheckpointDoesNotWriteEveryHalfKilometre() {
+        assertFalse(TravelRefreshPolicy.localityCheckpointDue(false, 0.5))
+        assertFalse(TravelRefreshPolicy.localityCheckpointDue(false, 4.99))
+        assertTrue(TravelRefreshPolicy.localityCheckpointDue(false, 5.0))
+        assertTrue(TravelRefreshPolicy.localityCheckpointDue(true, 0.0))
+        assertTrue(TravelRefreshPolicy.localityCheckpointDue(false, Double.POSITIVE_INFINITY))
+    }
+
     @Test fun unknownLocationAndFirstForecastAreDue() {
         assertTrue(TravelRefreshPolicy.localityDue(0, null, Double.POSITIVE_INFINITY, false, false))
         assertTrue(TravelRefreshPolicy.weatherDue(0, null, Double.POSITIVE_INFINITY, null, 0))

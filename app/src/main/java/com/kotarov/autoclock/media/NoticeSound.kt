@@ -2,6 +2,7 @@ package com.kotarov.autoclock.media
 
 import kotlin.math.PI
 import kotlin.math.exp
+import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
@@ -40,18 +41,39 @@ enum class NoticeSound(val id: String, val label: String, val durationMs: Int) {
         for (tone in tones) {
             val start = tone.start * SAMPLE_RATE / 1000
             val count = tone.duration * SAMPLE_RATE / 1000
+            val step = 2.0 * PI * tone.hz / SAMPLE_RATE
+            val fundamental = Oscillator(step)
+            val harmonic = Oscillator(step * if (tone.bell) 2.01 else 2.0)
+            val bell = if (tone.bell) Oscillator(step * 3.98) else null
+            val decayStep = exp(-tone.decay / SAMPLE_RATE)
+            var decay = 1.0
             for (i in 0 until count) {
                 val t = i.toDouble() / SAMPLE_RATE
                 val envelope = minOf(1.0, t / 0.009) *
-                    minOf(1.0, (tone.duration / 1000.0 - t) / 0.025) * exp(-tone.decay * t)
-                val a = 2.0 * PI * tone.hz * t
-                val wave = sin(a) + tone.harmonic * sin(a * (if (tone.bell) 2.01 else 2.0)) +
-                    (if (tone.bell) 0.09 * sin(a * 3.98) else 0.0)
+                    minOf(1.0, (tone.duration / 1000.0 - t) / 0.025) * decay
+                val wave = fundamental.next() + tone.harmonic * harmonic.next() +
+                    (bell?.next()?.times(0.09) ?: 0.0)
+                decay *= decayStep
                 samples[start + i] = (32767 * tone.amp * envelope * wave)
                     .roundToInt().coerceIn(-32768, 32767).toShort()
             }
         }
         return samples
+    }
+
+    // Advance sin/cos by a fixed phase; no per-sample transcendental calls.
+    private class Oscillator(step: Double) {
+        private val sinStep = sin(step)
+        private val cosStep = cos(step)
+        private var sine = 0.0
+        private var cosine = 1.0
+
+        fun next(): Double {
+            val value = sine
+            sine = sine * cosStep + cosine * sinStep
+            cosine = cosine * cosStep - value * sinStep
+            return value
+        }
     }
 
     companion object {
