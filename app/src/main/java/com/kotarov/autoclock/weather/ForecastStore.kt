@@ -94,10 +94,15 @@ object ForecastStore {
         else -> 11
     }
 
-    /** Keep current and past icons; future icons mark changes only.
-     * Missing data breaks continuity. Temperatures are independent. */
-    fun ringIconEpochs(hours: List<Hour>, currentSlot: Long): Set<Long> {
+    data class RingChanges(val iconEpochs: Set<Long>, val temperatureEpochs: Set<Long>)
+
+    /** The past and current slots establish a baseline. For every future
+     * hour, compare icon and displayed whole degrees independently with
+     * the immediately preceding hour, including hours with no visible glyph.
+     * Missing data restarts the baseline. */
+    fun ringChanges(hours: List<Hour>, currentSlot: Long): RingChanges {
         val icons = mutableSetOf<Long>()
+        val temperatures = mutableSetOf<Long>()
         var previous: Hour? = null
         for (hour in hours.sortedBy { it.epochSeconds }) {
             if (hour.epochSeconds < currentSlot - 3600L ||
@@ -108,14 +113,21 @@ object ForecastStore {
             }
             val prior = previous
             if (hour.epochSeconds <= currentSlot || prior == null ||
-                hour.epochSeconds - prior.epochSeconds != 3600L ||
-                ringGlyph(hour) != ringGlyph(prior)) {
+                hour.epochSeconds - prior.epochSeconds != 3600L) {
                 icons.add(hour.epochSeconds)
+                temperatures.add(hour.epochSeconds)
+            } else {
+                if (ringGlyph(hour) != ringGlyph(prior)) icons.add(hour.epochSeconds)
+                if (hour.temperatureC.roundToInt() != prior.temperatureC.roundToInt())
+                    temperatures.add(hour.epochSeconds)
             }
             previous = hour
         }
-        return icons
+        return RingChanges(icons, temperatures)
     }
+
+    fun ringIconEpochs(hours: List<Hour>, currentSlot: Long): Set<Long> =
+        ringChanges(hours, currentSlot).iconEpochs
 
     /** Previous hourly model slot, current observation and nine future slots. */
     fun currentRing(
