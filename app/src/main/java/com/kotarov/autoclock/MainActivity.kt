@@ -228,6 +228,34 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { topMargin = dp(16) })
+
+        // Weather attribution stays at the bottom of the phone settings.
+        root.addView(View(this), LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+        ))
+        val credit = "Weather data: NOAA / Open-Meteo (CC BY 4.0)\nAdapted for Auto Clock"
+        val attribution = android.text.SpannableString(credit).apply {
+            fun link(label: String, url: String) {
+                val start = credit.indexOf(label)
+                setSpan(android.text.style.URLSpan(url), start, start + label.length,
+                    android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+            link("NOAA", "https://aviationweather.gov/")
+            link("Open-Meteo", "https://open-meteo.com/")
+            link("CC BY 4.0", "https://creativecommons.org/licenses/by/4.0/")
+        }
+        root.addView(TextView(this).apply {
+            text = attribution
+            textSize = 12f
+            setTextColor(Color.rgb(160, 166, 178))
+            setLinkTextColor(Color.rgb(160, 166, 178))
+            gravity = android.view.Gravity.CENTER
+            movementMethod = android.text.method.LinkMovementMethod.getInstance()
+            setPadding(0, dp(28), 0, 0)
+        }, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ))
     }
 
     override fun onStart() {
