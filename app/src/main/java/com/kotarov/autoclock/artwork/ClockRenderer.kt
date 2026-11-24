@@ -32,6 +32,12 @@ object ClockRenderer {
     private const val CONTENT_CENTER_Y = 190f
     // Slightly lower the pure digital face; analog and weather-only remain.
     private const val DIGITAL_CENTER_DOWN = 10f
+    private const val DIGITAL_TIME_SIZE = 96f
+    private const val DIGITAL_FORECAST_REFERENCE_TIME_SIZE = 132f
+    private const val DIGITAL_FORECAST_TIME_OFFSET = 61f
+
+    private fun digitalForecastScale(unit: Float): Float =
+        unit * DIGITAL_TIME_SIZE / DIGITAL_FORECAST_REFERENCE_TIME_SIZE
     private const val COMPACT_ANALOG_CENTER_Y = 208f
     // Original standard Y=216 with radius 122. Restore original near-top
     // placement, adding only 6px clearance: Y=222, top=100 instead of 94.
@@ -80,15 +86,17 @@ object ClockRenderer {
             drawDial(canvas, time, radius, clockY, theme)
             if (preset.usesWeather) drawForecastRing(canvas, time, radius, clockY,
                 forecast, theme)
-        } else if (preset.usesWeather) {
-            drawDigitalForecast(canvas, time, clockY, compact, forecast, theme)
         } else {
+            // One identical clock face in both digital modes: same font,
+            // position, outlines and user-selected size.
             drawText(canvas, time.format(timeFormat), CENTER_X, clockY,
-                96f * unit, white, unit, theme)
+                DIGITAL_TIME_SIZE * unit, white, unit, theme)
+            if (preset.usesWeather)
+                drawDigitalForecast(canvas, time, clockY, unit, forecast, theme)
         }
         if (preset.usesWeather && !sourceLabel.isNullOrBlank()) {
             val sourceY = if (preset.hasAnalog) clockY + radius * 1.28f + 50f * unit
-                else clockY + 148f * (if (compact) 0.82f else 1f)
+                else clockY + (DIGITAL_FORECAST_TIME_OFFSET + 148f) * digitalForecastScale(unit)
             val maxWidth = if (preset.hasAnalog) radius * 2f + 40f * unit else 390f
             drawSourceLabel(canvas, sourceLabel, CENTER_X, sourceY, unit, maxWidth, theme)
         }
@@ -206,28 +214,16 @@ object ClockRenderer {
         }
     }
 
-    /** Digital weather layout: prominent HH:mm, then six evenly spaced
-     * hourly columns. The first column is larger and fully opaque. */
+    /** Six hourly columns below the shared digital clock face.
+     * Scale the entire forecast strip in proportion to the plain HH:mm. */
     private fun drawDigitalForecast(
-        canvas: Canvas, now: LocalDateTime, centreY: Float, compact: Boolean,
+        canvas: Canvas, now: LocalDateTime, centreY: Float, unit: Float,
         forecast: List<ForecastStore.Hour>, theme: ClockTheme
     ) {
-        val scale = if (compact) 0.82f else 1f
+        val scale = digitalForecastScale(unit)
         canvas.save()
-        canvas.translate(CENTER_X, centreY)
+        canvas.translate(CENTER_X, centreY + DIGITAL_FORECAST_TIME_OFFSET * scale)
         canvas.scale(scale, scale)
-
-        val timePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = themed(white, theme)
-            textAlign = Paint.Align.CENTER
-            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-            textSize = 132f
-        }
-        val shownTime = now.format(timeFormat)
-        val width = timePaint.measureText(shownTime)
-        if (width > 448f) timePaint.textSize *= 448f / width
-        val timeBaseline = -61f - (timePaint.fontMetrics.ascent + timePaint.fontMetrics.descent) / 2f
-        canvas.drawText(shownTime, 0f, timeBaseline, timePaint)
 
         val slots = ForecastStore.digitalSlots(forecast, now)
         val label = Paint(Paint.ANTI_ALIAS_FLAG).apply {
