@@ -1,11 +1,12 @@
 package com.kotarov.autoclock.media
 
-/** A real locality change temporarily replaces the hidden media title.
- * Use monotonic elapsed time, not wall-clock time. No repeated alerts. */
+/** Temporary two-line media messages. Use monotonic elapsed time;
+ * ordinary locality updates do not repeat. */
 class CityAnnouncement {
     private var lastCity: String? = null
     private var until = 0L
-    private var message: String? = null
+    data class Notice(val heading: String, val body: String)
+    private var message: Notice? = null
 
     fun update(city: String?, now: Long): Boolean {
         val next = city?.trim()?.takeIf { it.isNotBlank() } ?: return false
@@ -19,11 +20,19 @@ class CityAnnouncement {
 
     /** Manual request repeats the current city, without changing playback. */
     fun show(city: String?, now: Long) {
-        message = city?.trim()?.takeIf { it.isNotBlank() } ?: "Няма данни за локацията"
+        message = Notice("Информация",
+            city?.trim()?.takeIf { it.isNotBlank() } ?: "Няма данни за локацията")
         until = now + DURATION_MS
     }
 
-    fun title(now: Long): String? = if (now < until) message else null
+    fun showWarning(warning: String, now: Long) {
+        message = Notice("Внимание", warning)
+        until = now + DURATION_MS
+    }
+
+    fun notice(now: Long): Notice? = if (now < until) message else null
+
+    fun title(now: Long): String? = notice(now)?.body
 
     companion object {
         const val DURATION_MS = 8000L
