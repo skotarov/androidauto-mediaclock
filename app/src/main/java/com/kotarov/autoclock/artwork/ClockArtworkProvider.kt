@@ -52,13 +52,12 @@ class ClockArtworkProvider : ContentProvider() {
         val weatherRevision = uri.getQueryParameter("rev")?.toLongOrNull()?.coerceAtLeast(0L) ?: 0L
         val compact = uri.getQueryParameter("layout") == "compact"
         val theme = ClockTheme.fromId(uri.getQueryParameter("theme"))
-        val coloredWeatherIcons = uri.getQueryParameter("weather_color") != "false"
         // Include the layout and release design in the filename, so changing
         // phone settings invalidates both Android Auto and disk artwork caches.
         val layout = if (compact) "compact" else "standard"
         val generation = uri.getQueryParameter("generation")?.toLongOrNull() ?: 0L
         val destination = File(directory,
-            "v52-$layout-${theme.id}-${if (coloredWeatherIcons) "color" else "mono"}-$clockMode-$key-$weatherRevision-$generation.png")
+            "v52-$layout-${theme.id}-$clockMode-$key-$weatherRevision-$generation.png")
 
         synchronized(lock) {
             if (!destination.isFile || destination.length() == 0L) {
@@ -66,8 +65,7 @@ class ClockArtworkProvider : ContentProvider() {
                 val mini = miniFamily(clockMode)
                 val bitmap = if (mini != null) {
                     ClockRenderer.renderMini(
-                        mini, requestedMinute, theme = theme,
-                        coloredWeatherIcons = coloredWeatherIcons
+                        mini, requestedMinute, theme = theme
                     )
                 } else {
                     val weather = if (ClockPreset.fromId(clockMode).usesWeather) {
@@ -75,14 +73,9 @@ class ClockArtworkProvider : ContentProvider() {
                     } else null
                     ClockRenderer.render(
                         clockMode, requestedMinute,
-                        weather?.weatherCode,
-                        weather?.isDay ?: true,
-                        weather?.formattedTemperature,
                         compact,
-                        condition = weather?.description,
                         sourceLabel = weather?.artworkSource,
                         theme = theme,
-                        coloredWeatherIcons = coloredWeatherIcons,
                         forecast = if (ClockPreset.fromId(clockMode).usesWeather)
                             ForecastStore.currentRing(appContext,
                                 requestedMinute.atZone(ZoneId.systemDefault()).toEpochSecond(), weather)
@@ -142,10 +135,9 @@ class ClockArtworkProvider : ContentProvider() {
         /** Dedicated media display/browse art, not the Android Auto app shortcut. */
         fun miniArtworkUri(
             family: ClockFamily, now: LocalDateTime,
-            weatherRevision: Long = 0L, theme: ClockTheme = ClockTheme.DARK,
-            coloredWeatherIcons: Boolean = true
+            weatherRevision: Long = 0L, theme: ClockTheme = ClockTheme.DARK
         ): Uri = artworkUri("mini_${family.id}", now, weatherRevision,
-            theme = theme, coloredWeatherIcons = coloredWeatherIcons)
+            theme = theme)
 
         fun artworkUri(
             mode: String,
@@ -153,8 +145,7 @@ class ClockArtworkProvider : ContentProvider() {
             weatherRevision: Long = 0L,
             compact: Boolean = false,
             generation: Long = 0L,
-            theme: ClockTheme = ClockTheme.DARK,
-            coloredWeatherIcons: Boolean = true
+            theme: ClockTheme = ClockTheme.DARK
         ): Uri = Uri.Builder()
             .scheme("content")
             .authority(AUTHORITY)
@@ -162,7 +153,6 @@ class ClockArtworkProvider : ContentProvider() {
             .appendPath("clock_${now.format(KEY_FORMAT)}.png")
             .appendQueryParameter("rev", weatherRevision.coerceAtLeast(0L).toString())
             .appendQueryParameter("style", "v52")
-            .appendQueryParameter("weather_color", coloredWeatherIcons.toString())
             .appendQueryParameter("theme", theme.id)
             .appendQueryParameter("generation", generation.toString())
             .appendQueryParameter("layout", if (compact) "compact" else "standard")

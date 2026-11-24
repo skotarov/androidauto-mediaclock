@@ -49,6 +49,7 @@ class MainActivity : Activity() {
     private var syncingWeatherToggle = false
     private val weatherPreferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == ClockPreset.KEY_ADD_WEATHER) syncWeatherToggle()
+        else if (key == "weather_fetched_at") updatePreviewTiles()
     }
     private var analogBitmap: Bitmap? = null
     private var digitalBitmap: Bitmap? = null
@@ -67,9 +68,6 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         val prefs = settings()
         // This is now an auto-location-only product, including old installs.
-        if (prefs.getString(WeatherStore.KEY_CITY, null) != WeatherStore.AUTO_ID) {
-            WeatherStore.setCity(this, WeatherStore.AUTO_ID)
-        }
         ClockSelectionStore.migrateSimplifiedIfNeeded(prefs)
 
         val root = LinearLayout(this).apply {
@@ -278,9 +276,8 @@ class MainActivity : Activity() {
         fun make(family: ClockFamily): Bitmap {
             val preset = ClockSelectionStore.forFamily(prefs, family)
             return ClockRenderer.render(
-                preset.id, now, weather?.weatherCode, weather?.isDay ?: true,
-                weather?.formattedTemperature, compact,
-                outputSize = 256, condition = weather?.description,
+                preset.id, now, compact,
+                outputSize = 256,
                 sourceLabel = weather?.artworkSource,
                 theme = theme,
                 forecast = if (preset.usesWeather)

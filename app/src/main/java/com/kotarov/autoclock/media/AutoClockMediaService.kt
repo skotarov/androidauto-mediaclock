@@ -26,7 +26,6 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private lateinit var prefs: SharedPreferences
     private val running: Boolean
         get() = ClockSelectionStore.weatherEnabled(prefs)
-    private var artworkGeneration = 0L
     private val cityAnnouncement = CityAnnouncement()
     private var clientActive = false
     private var lastWarningRevision = 0L
@@ -62,15 +61,12 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             publishClock()
         } else if (key == ClockPreset.KEY_FAMILY ||
             key == ClockPreset.KEY_ADD_WEATHER ||
-            key == KEY_MODE ||
             key == KEY_LAYOUT || key == ClockTheme.KEY ||
-            key == WeatherStore.KEY_CITY || key == "weather_cached_city" ||
             key == "weather_cached_mode" || key == "weather_station_label" ||
             key == WeatherStore.KEY_LOCALITY || key == WeatherStore.KEY_WARNING_REV ||
             key == "weather_source_name" || key == "weather_fetched_at" ||
             key == "weather_code" || key == "weather_temperature_bits" ||
-            key == "weather_is_day" || key == "weather_pressure_bits" ||
-            key == "weather_elevation_bits" ||
+            key == "weather_is_day" ||
             key == ForecastStore.KEY_SAVED_AT ||
             key == ForecastStore.KEY_MODE
         ) {
@@ -94,9 +90,6 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         prefs = getSharedPreferences(PREFERENCES, MODE_PRIVATE)
         // Force automatic local weather even when Android Auto starts the
         // service before the phone settings activity is opened.
-        if (prefs.getString(WeatherStore.KEY_CITY, null) != WeatherStore.AUTO_ID) {
-            WeatherStore.setCity(this, WeatherStore.AUTO_ID)
-        }
         prefs.edit().remove(KEY_TEST_DIRECT_BROWSE).remove(KEY_TEST_STATE_NONE)
             .remove(KEY_TEST_STATE_STOPPED).apply()
         ClockSelectionStore.migrateSimplifiedIfNeeded(prefs)
@@ -209,7 +202,6 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     override fun onDestroy() {
         suspendClientWork()
         // Service shutdown must not change the saved weather preference.
-        artworkGeneration += 1L
         handler.removeCallbacks(minuteTick)
         handler.removeCallbacks(settingsRefresh)
         handler.removeCallbacks(hideCityTitle)
@@ -229,7 +221,6 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     // The built-in Canvas glyphs remain; no external icon library or
     // colorful-icon resource package is used. No color preference exists.
-    private fun coloredWeatherIcons(): Boolean = true
 
     private fun scheduleCityTitleHide() {
         handler.removeCallbacks(hideCityTitle)
@@ -260,30 +251,28 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private fun visiblePreset(): ClockPreset =
         PlaybackDisplay.visiblePreset(selectedPreset(), running)
 
-    private fun requestWeatherIfNecessary(force: Boolean = false) {
+    private fun requestWeatherIfNecessary() {
         // Keep locality announcements available even with forecast hidden.
         // The shared worker retains its normal 5-minute throttle.
-        WeatherStore.refreshIfDue(this, force = force)
+        WeatherStore.refreshIfDue(this)
     }
 
     private fun publishClock() {
         val now = LocalDateTime.now()
         val visible = visiblePreset()
         val weather = if (visible.usesWeather) WeatherStore.current(this) else null
-        val description = weather?.description ?: "Няма данни"
         val theme = selectedTheme()
-        val colored = coloredWeatherIcons()
         val showClockForecast = visible.usesWeather
         val revision = if (showClockForecast) prefs.getLong(ForecastStore.KEY_SAVED_AT, 0L) +
             (weather?.observedAtMs ?: 0L) else weather?.observedAtMs ?: 0L
         val artwork = ClockArtworkProvider.artworkUri(
             visible.id, now, revision,
-            compactLayout(), artworkGeneration, theme, colored
+            compactLayout(), 0L, theme
         )
         val miniArtwork = ClockArtworkProvider.miniArtworkUri(
             visible.family, now,
             0L,
-            theme, colored
+            theme
         )
         val tick = SystemClock.elapsedRealtime()
         // Observe locality even when the clock's weather option is off.
@@ -312,16 +301,12 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val forecast = if (showClockForecast) ForecastStore.currentRing(this,
             now.atZone(java.time.ZoneId.systemDefault()).toEpochSecond(), weather) else emptyList()
         val art = ClockRenderer.render(
-            visible.id, now, weather?.weatherCode, weather?.isDay ?: true,
-            weather?.formattedTemperature, compactLayout(),
-            outputSize = 320, condition = description,
-            sourceLabel = weather?.artworkSource, theme = theme,
-            coloredWeatherIcons = colored, forecast = forecast
+            visible.id, now, compactLayout(),
+            outputSize = 320, sourceLabel = weather?.artworkSource,
+            theme = theme, forecast = forecast
         )
         val miniBitmap = ClockRenderer.renderMini(
-            visible.family, now, weather?.weatherCode,
-            weather?.isDay ?: true, weather?.formattedTemperature, theme,
-            coloredWeatherIcons = colored
+            visible.family, now, theme
         )
         baseMetadata = MediaMetadataCompat.Builder()
             .putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, miniBitmap)
@@ -362,9 +347,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     companion object {
         const val PREFERENCES = "clock_settings"
-        const val KEY_MODE = "display_mode"
         const val KEY_LAYOUT = "clock_layout"
-        const val KEY_PROGRESS_ANIMATED = "progress_animated"
         const val KEY_SHOW_LOCATION = "show_location_message_v48"
         private const val KEY_TEST_DIRECT_BROWSE = "try_media_host_browse_link_v37"
         private const val KEY_TEST_STATE_NONE = "try_playback_state_none_v37"

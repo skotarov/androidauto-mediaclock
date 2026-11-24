@@ -15,18 +15,16 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 /**
- * Manual cities: Open-Meteo modeled current conditions.
- * Auto: one approximate location fix, then latest *actual observation* from
+ * One approximate location fix, then latest *actual observation* from
  * the nearest reporting aerodrome METAR station (NOAA Aviation Weather).
  * If no recent station is available, fall back to an explicitly labeled
  * Open-Meteo model at the approximate device location.
  *
- * No continuous GPS listener, wakelock, ongoing background work or per-minute
+ * No continuous GPS listener, wakelock or per-minute
  * weather requests. Requests are capped to once per 5 minutes in weather display.
  */
 object WeatherStore {
     const val PREFS = "clock_settings"
-    const val KEY_CITY = "weather_city"
     const val KEY_LOCALITY = "weather_locality_v47"
     const val KEY_WARNING = "weather_warning_v52"
     const val KEY_WARNING_REV = "weather_warning_revision_v52"
@@ -39,21 +37,6 @@ object WeatherStore {
     private const val MAX_AGE_MS = 3L * 60L * 60L * 1000L
     private const val MAX_OBSERVATION_AGE_MS = 3L * 60L * 60L * 1000L
 
-    enum class City(val id: String, val label: String, val lat: Double, val lon: Double) {
-        SOFIA("sofia", "София", 42.6977, 23.3219),
-        STARA_ZAGORA("stara_zagora", "Стара Загора", 42.4258, 25.6345),
-        PLOVDIV("plovdiv", "Пловдив", 42.1354, 24.7453),
-        VARNA("varna", "Варна", 43.2141, 27.9147),
-        BURGAS("burgas", "Бургас", 42.5048, 27.4626),
-        RUSE("ruse", "Русе", 43.8356, 25.9657),
-        PLEVEN("pleven", "Плевен", 43.4080, 24.6203),
-        VELIKO_TARNOVO("veliko_tarnovo", "Велико Търново", 43.0757, 25.6172);
-
-        companion object {
-            fun byId(id: String?): City = entries.firstOrNull { it.id == id } ?: SOFIA
-        }
-    }
-
     data class Snapshot(
         val temperatureC: Double,
         val weatherCode: Int,
@@ -64,20 +47,10 @@ object WeatherStore {
         val sourceLabel: String,
         val reportTimeMs: Long,
         val autoSelected: Boolean,
-        /** Pressure reported by METAR altimeter setting, or modeled surface pressure. */
-        val pressureHpa: Double? = null,
-        /** Elevation of the reporting station/model grid, NOT the car's GPS altitude. */
-        val elevationMeters: Double? = null,
         val localityLabel: String? = null
     ) {
         val formattedTemperature: String get() = "${temperatureC.roundToInt()}°C"
         val description: String get() = describe(weatherCode)
-        val pressureText: String get() =
-            pressureHpa?.takeIf { it.isFinite() && it in 500.0..1100.0 }
-                ?.let { "${it.roundToInt()} hPa" } ?: "няма данни"
-        val elevationText: String get() =
-            elevationMeters?.takeIf { it.isFinite() && it in -500.0..9000.0 }
-                ?.let { "${it.roundToInt()} м" } ?: "няма данни"
         // Station/ICAO and observation provenance stay in phone settings.
         // Only the city/place is shown below the clock face.
         val artworkSource: String? get() =
@@ -91,8 +64,6 @@ object WeatherStore {
             .substringBefore(" (")
             .trim()
 
-    /** Automatic weather is the default unless the user chose a source. */
-    fun selectedMode(saved: String?): String = saved ?: AUTO_ID
 
     private data class Reading(
         val temperature: Double,
@@ -100,53 +71,15 @@ object WeatherStore {
         val isDay: Boolean,
         val place: String,
         val source: String,
-        val reportTimeMs: Long,
-        val pressureHpa: Double? = null,
-        val elevationMeters: Double? = null
+        val reportTimeMs: Long
     )
-
-    fun isAuto(context: Context): Boolean =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_CITY, null).let { selectedMode(it) } == AUTO_ID
-
-    fun city(context: Context): City =
-        City.byId(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_CITY, null))
-
-    fun setCity(context: Context, id: String) {
-        val chosen = if (id == AUTO_ID) AUTO_ID else City.byId(id).id
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit()
-            .putString(KEY_CITY, chosen)
-            // Switching station/city should trigger a fresh reading immediately.
-            .putLong("weather_attempt_at", 0L)
-            .apply()
-    }
-
-    fun sourceStatus(context: Context): String {
-        val snapshot = current(context)
-        if (snapshot != null) {
-            val whenRead = java.text.SimpleDateFormat(
-                "HH:mm", Locale("bg", "BG")
-            ).format(java.util.Date(snapshot.reportTimeMs))
-            return "${snapshot.originLabel} — ${snapshot.sourceLabel} ($whenRead)"
-        }
-        return if (isAuto(context)) {
-            if (WeatherLocation.permitted(context))
-                "Авто: търся най-близка станция с актуално измерване"
-            else "Авто: разреши приблизително местоположение"
-        } else {
-            "${city(context).label}: няма актуални данни"
-        }
-    }
 
     /** Cache is tied to the manual city or auto mode; never show old-city data. */
     fun current(context: Context): Snapshot? {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val selected = selectedMode(prefs.getString(KEY_CITY, null))
         val cachedMode = prefs.getString("weather_cached_mode",
             prefs.getString("weather_cached_city", null))
-        if (cachedMode != selected) return null
+        if (cachedMode != AUTO_ID) return null
         val fetchedAt = prefs.getLong("weather_fetched_at", 0L)
         if (fetchedAt <= 0 || System.currentTimeMillis() - fetchedAt !in 0..MAX_AGE_MS) return null
         val temp = java.lang.Double.longBitsToDouble(
@@ -155,11 +88,11 @@ object WeatherStore {
         )
         if (!temp.isFinite()) return null
         val source = prefs.getString("weather_source_name", null)
-            ?: if (selected == AUTO_ID) "Няма източник" else "Open-Meteo · модел"
+            ?: "Няма източник"
         val label = prefs.getString("weather_station_label", null)
-            ?: if (selected == AUTO_ID) "Авто" else city(context).label
+            ?: "Авто"
         val reportTime = prefs.getLong("weather_observation_time", fetchedAt)
-        if (selected == AUTO_ID && source.contains("METAR") &&
+        if (source.contains("METAR") &&
             System.currentTimeMillis() - reportTime !in 0..MAX_OBSERVATION_AGE_MS
         ) return null
         return Snapshot(
@@ -170,19 +103,9 @@ object WeatherStore {
             label,
             source,
             reportTime,
-            selected == AUTO_ID,
-            pressureHpa = storedDouble(prefs, "weather_pressure_bits", 500.0..1100.0),
-            elevationMeters = storedDouble(prefs, "weather_elevation_bits", -500.0..9000.0),
+            true,
             localityLabel = prefs.getString(KEY_LOCALITY, null)
         )
-    }
-
-    private fun storedDouble(
-        prefs: android.content.SharedPreferences, key: String, range: ClosedFloatingPointRange<Double>
-    ): Double? {
-        val bits = prefs.getLong(key, java.lang.Double.doubleToRawLongBits(Double.NaN))
-        val value = java.lang.Double.longBitsToDouble(bits)
-        return value.takeIf { it.isFinite() && it in range }
     }
 
     /**
@@ -191,7 +114,6 @@ object WeatherStore {
      */
     fun refreshIfDue(
         context: Context,
-        force: Boolean = false,
         callback: (Boolean) -> Unit = {}
     ) {
         val app = context.applicationContext
@@ -199,47 +121,29 @@ object WeatherStore {
         val selected = selectedMode(prefs.getString(KEY_CITY, null))
         val now = System.currentTimeMillis()
         val lastAttempt = prefs.getLong("weather_attempt_at", 0L)
-        if (inFlight || (!force && prefs.getString("weather_attempt_city", null) == selected &&
-            now >= lastAttempt && now - lastAttempt < MIN_RETRY_MS
-        )) {
+        if (inFlight || (now >= lastAttempt && now - lastAttempt < MIN_RETRY_MS)) {
             callback(false)
             return
         }
         inFlight = true
 
         prefs.edit().putLong("weather_attempt_at", now)
-            .putString("weather_attempt_city", selected).apply()
+            .apply()
 
-        if (selected == AUTO_ID) {
-            // Do not prompt from the media service. The phone Activity handles
-            // the Android runtime permission request when Auto is selected.
-            WeatherLocation.requestOnce(app) { location ->
-                if (location == null) {
-                    inFlight = false
-                    callback(false)
-                } else {
-                    fetchOnThread(
-                        app, selected, callback, location.latitude, location.longitude,
-                        now
-                    ) {
-                        fetchNearestStation(location)
-                    }
+        WeatherLocation.requestOnce(app) { location ->
+            if (location == null) {
+                inFlight = false
+                callback(false)
+            } else {
+                fetchOnThread(app, callback, location.latitude, location.longitude, now) {
+                    fetchNearestStation(location)
                 }
-            }
-        } else {
-            val manual = City.byId(selected)
-            fetchOnThread(app, selected, callback, manual.lat, manual.lon, now) {
-                fetchModel(
-                    manual.lat, manual.lon,
-                    manual.label, "Open-Meteo · модел"
-                )
             }
         }
     }
 
     private fun fetchOnThread(
         app: Context,
-        selectionAtStart: String,
         callback: (Boolean) -> Unit,
         latitude: Double,
         longitude: Double,
@@ -260,24 +164,19 @@ object WeatherStore {
             val near = oldLat.isFinite() && oldLon.isFinite() &&
                 WeatherStations.kilometers(oldLat, oldLon, latitude, longitude) <= 0.3
             val known = prefs.getString(KEY_LOCALITY, null)
-            val locality = if (selectionAtStart != AUTO_ID) City.byId(selectionAtStart).label
-                else if (near && known != null) known
-                else resolveLocality(app, latitude, longitude)
+            val reuseLocality = near && known != null
+            val locality = if (reuseLocality) known else resolveLocality(app, latitude, longitude)
             val warning = ForecastStore.warning(forecast, System.currentTimeMillis() / 1000L,
                 result?.code)
             var saved = false
             if (result != null &&
-                selectedMode(prefs.getString(KEY_CITY, null)) == selectionAtStart &&
                 prefs.getLong("weather_attempt_at", 0L) == requestAt
             ) {
                 val editor = prefs.edit()
                     .putString(KEY_LOCALITY, locality)
                     .putString(KEY_WARNING, warning)
                     .putLong(KEY_WARNING_REV, requestAt)
-                    .putLong(KEY_LAT, latitude.toBits())
-                    .putLong(KEY_LON, longitude.toBits())
-                    .putString("weather_cached_mode", selectionAtStart)
-                    .putString("weather_cached_city", selectionAtStart)
+                    .putString("weather_cached_mode", AUTO_ID)
                     .putLong("weather_fetched_at", System.currentTimeMillis())
                     .putLong("weather_observation_time", result.reportTimeMs)
                     .putString("weather_station_label", result.place)
@@ -286,17 +185,11 @@ object WeatherStore {
                         java.lang.Double.doubleToRawLongBits(result.temperature))
                     .putInt("weather_code", result.code)
                     .putBoolean("weather_is_day", result.isDay)
-                    // Store NaN for missing values so stale station metrics
-                    // cannot survive switching source or location.
-                    .putLong("weather_pressure_bits",
-                        java.lang.Double.doubleToRawLongBits(
-                            result.pressureHpa ?: Double.NaN))
-                    .putLong("weather_elevation_bits",
-                        java.lang.Double.doubleToRawLongBits(
-                            result.elevationMeters ?: Double.NaN))
+                if (!reuseLocality) editor.putLong(KEY_LAT, latitude.toBits())
+                    .putLong(KEY_LON, longitude.toBits())
                 if (forecast != null)
-                    ForecastStore.putForecast(editor, selectionAtStart, latitude, longitude, forecast)
-                else if (!ForecastStore.matchesLocation(prefs, selectionAtStart, latitude, longitude))
+                    ForecastStore.putForecast(editor, AUTO_ID, latitude, longitude, forecast)
+                else if (!ForecastStore.matchesLocation(prefs, AUTO_ID, latitude, longitude))
                     ForecastStore.clearForecast(editor)
                 editor.apply()
                 saved = true
@@ -363,12 +256,7 @@ object WeatherStore {
             isDay = estimatedDaylightBulgaria(),
             place = "Станция ${nearest.label}",
             source = "NOAA · измерване METAR",
-            reportTimeMs = timeMs,
-            // NOAA METAR JSON altim is in hPa, elev in meters MSL.
-            pressureHpa = report.optDouble("altim", Double.NaN)
-                .takeIf { it.isFinite() && it in 500.0..1100.0 },
-            elevationMeters = report.optDouble("elev", Double.NaN)
-                .takeIf { it.isFinite() && it in -500.0..9000.0 }
+            reportTimeMs = timeMs
         )
     }
 
@@ -405,32 +293,6 @@ object WeatherStore {
             3, 9, 10 -> hour in 7..18
             else -> hour in 8..16
         }
-    }
-
-    private fun fetchModel(
-        lat: Double, lon: Double, label: String, source: String
-    ): Reading? {
-        val url = "https://api.open-meteo.com/v1/forecast?" +
-            "latitude=${String.format(Locale.US, "%.4f", lat)}&" +
-            "longitude=${String.format(Locale.US, "%.4f", lon)}&" +
-            "current=temperature_2m,weather_code,is_day,surface_pressure&timezone=auto&forecast_days=1"
-        val body = fetchText(url, "AutoClock2/0.13 (Android personal weather display)")
-            ?: return null
-        val current = JSONObject(body).optJSONObject("current") ?: return null
-        val temperature = current.optDouble("temperature_2m", Double.NaN)
-        if (!temperature.isFinite() || temperature !in -100.0..70.0) return null
-        return Reading(
-            temperature,
-            current.optInt("weather_code", -1),
-            current.optInt("is_day", 1) == 1,
-            label,
-            source,
-            System.currentTimeMillis(),
-            pressureHpa = current.optDouble("surface_pressure", Double.NaN)
-                .takeIf { it.isFinite() && it in 500.0..1100.0 },
-            elevationMeters = JSONObject(body).optDouble("elevation", Double.NaN)
-                .takeIf { it.isFinite() && it in -500.0..9000.0 }
-        )
     }
 
     private fun fetchText(url: String, agent: String): String? {

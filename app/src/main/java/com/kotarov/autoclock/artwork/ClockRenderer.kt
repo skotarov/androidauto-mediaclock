@@ -41,9 +41,6 @@ object ClockRenderer {
     // Keep the analog forecast at the same size and vertical position with
     // or without the optional digital HH:mm. Compact / standard use slightly
     // different offsets to match the size of the dial in Android Auto.
-    private const val COMPACT_ANALOG_WEATHER_Y_OFFSET = 30f
-    private const val STANDARD_ANALOG_WEATHER_Y_OFFSET = 34f
-    private const val ANALOG_WEATHER_TEXT_SIZE = 29f
     private val tickX = FloatArray(60) { cos(Math.toRadians(it * 6.0 - 90)).toFloat() }
     private val tickY = FloatArray(60) { sin(Math.toRadians(it * 6.0 - 90)).toFloat() }
     private fun themed(color: Int, theme: ClockTheme): Int =
@@ -52,20 +49,14 @@ object ClockRenderer {
     private val white = Color.rgb(255, 255, 255)
     private val pale = Color.rgb(224, 239, 247)
     private val cyan = Color.rgb(108, 218, 255)
-    private val navy = Color.rgb(12, 23, 35)
 
     fun render(
         presetId: String,
         time: LocalDateTime,
-        weatherCode: Int? = null,
-        isDay: Boolean = true,
-        temperature: String? = null,
         compact: Boolean = false,
         outputSize: Int = SIZE,
-        condition: String? = null,
         sourceLabel: String? = null,
         theme: ClockTheme = ClockTheme.DARK,
-        coloredWeatherIcons: Boolean = true,
         forecast: List<ForecastStore.Hour> = emptyList()
     ): Bitmap {
         require(outputSize in 192..SIZE) { "Unsupported artwork size" }
@@ -84,9 +75,9 @@ object ClockRenderer {
         if (preset.hasAnalog) {
             drawDial(canvas, time, radius, clockY, theme)
             if (preset.usesWeather) drawForecastRing(canvas, time, radius, clockY,
-                forecast, coloredWeatherIcons, theme)
+                forecast, theme)
         } else if (preset.usesWeather) {
-            drawDigitalForecast(canvas, time, clockY, compact, forecast, coloredWeatherIcons, theme)
+            drawDigitalForecast(canvas, time, clockY, compact, forecast, theme)
         } else {
             drawText(canvas, time.format(timeFormat), CENTER_X, clockY,
                 96f * unit, white, unit, theme)
@@ -104,12 +95,8 @@ object ClockRenderer {
     fun renderMini(
         family: ClockFamily,
         time: LocalDateTime,
-        weatherCode: Int? = null,
-        isDay: Boolean = true,
-        temperature: String? = null,
         theme: ClockTheme = ClockTheme.DARK,
-        outputSize: Int = 160,
-        coloredWeatherIcons: Boolean = true
+        outputSize: Int = 160
     ): Bitmap {
         require(outputSize in 64..256)
         val image = Bitmap.createBitmap(outputSize, outputSize, Bitmap.Config.RGB_565)
@@ -172,7 +159,7 @@ object ClockRenderer {
      */
     private fun drawForecastRing(
         canvas: Canvas, now: LocalDateTime, radius: Float, centreY: Float,
-        forecast: List<ForecastStore.Hour>, colored: Boolean, theme: ClockTheme
+        forecast: List<ForecastStore.Hour>, theme: ClockTheme
     ) {
         val unit = radius / STANDARD_RADIUS
         val ring = radius * 1.28f
@@ -197,8 +184,7 @@ object ClockRenderer {
             canvas.save()
             canvas.translate(x, y - 8f * unit - geometry.visualCentreY * scale)
             canvas.scale(scale, scale)
-            drawWeatherIcon(canvas, hour.code, hour.isDay, colored, theme,
-                false)
+            drawWeatherIcon(canvas, hour.code, hour.isDay, theme)
             canvas.restore()
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = themed(pale, theme)
@@ -215,7 +201,7 @@ object ClockRenderer {
      * hourly columns. The first column is larger and fully opaque. */
     private fun drawDigitalForecast(
         canvas: Canvas, now: LocalDateTime, centreY: Float, compact: Boolean,
-        forecast: List<ForecastStore.Hour>, colored: Boolean, theme: ClockTheme
+        forecast: List<ForecastStore.Hour>, theme: ClockTheme
     ) {
         val scale = if (compact) 0.82f else 1f
         canvas.save()
@@ -256,8 +242,7 @@ object ClockRenderer {
                 canvas.save()
                 canvas.translate(x, 59f - geometry.visualCentreY * iconScale)
                 canvas.scale(iconScale, iconScale)
-                drawWeatherIcon(canvas, hour.code, hour.isDay, colored, theme,
-                    false)
+                drawWeatherIcon(canvas, hour.code, hour.isDay, theme)
                 canvas.restore()
             }
             temp.textSize = if (index == 0) 32f else 25f
@@ -411,48 +396,23 @@ object ClockRenderer {
         val snow: Int, val bolt: Int
     )
 
-    private fun weatherPalette(
-        colored: Boolean,
-        theme: ClockTheme,
-        preInvertForMainLight: Boolean
-    ): WeatherPalette {
-        val light = theme == ClockTheme.LIGHT
-        fun result(dark: Int, lightColor: Int): Int {
-            val color = if (light) lightColor else dark
-            return if (light && preInvertForMainLight)
-                Color.rgb(255 - Color.red(color), 255 - Color.green(color),
-                    255 - Color.blue(color)) else color
-        }
-        val cloudFill = if (colored)
-            result(Color.rgb(22, 42, 65), Color.rgb(220, 234, 244))
-        else result(Color.rgb(13, 24, 35), Color.rgb(245, 245, 245))
-        val outline = if (colored)
-            result(Color.rgb(234, 244, 255), Color.rgb(37, 72, 107))
-        else result(Color.WHITE, Color.rgb(32, 32, 32))
-        val rain = if (colored)
-            result(Color.rgb(46, 220, 255), Color.rgb(0, 100, 220))
-        else result(Color.WHITE, Color.rgb(34, 42, 52))
-        val halo = if (colored)
-            result(Color.rgb(228, 251, 255), Color.rgb(236, 246, 255))
-        else result(Color.rgb(12, 29, 43), Color.WHITE)
-        val sun = if (colored)
-            result(Color.rgb(255, 217, 76), Color.rgb(234, 150, 13))
-        else result(Color.WHITE, Color.rgb(42, 42, 42))
-        val moon = if (colored)
-            result(Color.rgb(237, 246, 255), Color.rgb(65, 85, 125))
-        else result(Color.WHITE, Color.rgb(45, 45, 45))
+    private val darkWeather = makeWeatherPalette(false)
+    private val lightWeather = makeWeatherPalette(true)
+
+    private fun makeWeatherPalette(light: Boolean): WeatherPalette {
+        fun color(dark: Int, bright: Int) = if (light) bright else dark
+        val outline = color(Color.rgb(234, 244, 255), Color.rgb(37, 72, 107))
         return WeatherPalette(
-            sun = sun, moon = moon,
-            moonCutout = result(Color.rgb(8, 17, 27), Color.WHITE),
-            cloudFill = cloudFill, cloudOutline = outline,
-            rain = rain, rainHalo = halo,
+            sun = color(Color.rgb(255, 217, 76), Color.rgb(234, 150, 13)),
+            moon = color(Color.rgb(237, 246, 255), Color.rgb(65, 85, 125)),
+            moonCutout = color(Color.rgb(8, 17, 27), Color.WHITE),
+            cloudFill = color(Color.rgb(22, 42, 65), Color.rgb(220, 234, 244)),
+            cloudOutline = outline,
+            rain = color(Color.rgb(46, 220, 255), Color.rgb(0, 100, 220)),
+            rainHalo = color(Color.rgb(228, 251, 255), Color.rgb(236, 246, 255)),
             fog = outline,
-            snow = if (colored)
-                result(Color.rgb(203, 245, 255), Color.rgb(30, 99, 155))
-            else outline,
-            bolt = if (colored)
-                result(Color.rgb(255, 214, 73), Color.rgb(203, 116, 0))
-            else outline
+            snow = color(Color.rgb(203, 245, 255), Color.rgb(30, 99, 155)),
+            bolt = color(Color.rgb(255, 214, 73), Color.rgb(203, 116, 0))
         )
     }
 
@@ -460,11 +420,9 @@ object ClockRenderer {
         canvas: Canvas,
         code: Int?,
         isDay: Boolean,
-        colored: Boolean,
-        theme: ClockTheme,
-        preInvertForMainLight: Boolean
+        theme: ClockTheme
     ) {
-        val palette = weatherPalette(colored, theme, preInvertForMainLight)
+        val palette = if (theme == ClockTheme.DARK) darkWeather else lightWeather
         val cx = 0f
         val cy = 0f
         when (code) {

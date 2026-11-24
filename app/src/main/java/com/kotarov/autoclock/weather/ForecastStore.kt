@@ -123,7 +123,7 @@ object ForecastStore {
 
     private fun cached(context: Context): List<Hour> {
         val prefs = context.getSharedPreferences(WeatherStore.PREFS, Context.MODE_PRIVATE)
-        val mode = WeatherStore.selectedMode(prefs.getString(WeatherStore.KEY_CITY, null))
+        val mode = WeatherStore.AUTO_ID
         if (prefs.getString(KEY_MODE, null) != mode) return emptyList()
         val saved = prefs.getLong(KEY_SAVED_AT, 0L)
         if (saved <= 0 || System.currentTimeMillis() - saved !in 0..MAX_CACHE_AGE_MS)
@@ -152,7 +152,7 @@ object ForecastStore {
             "latitude=${String.format(Locale.US, "%.4f", latitude)}&" +
             "longitude=${String.format(Locale.US, "%.4f", longitude)}&" +
             "hourly=temperature_2m,weather_code,precipitation_probability,is_day&" +
-            "current=temperature_2m,weather_code,is_day&timezone=auto&timeformat=unixtime&past_hours=1&forecast_hours=10"
+            "current=temperature_2m,weather_code,is_day&timezone=auto&timeformat=unixtime&past_hours=1&forecast_hours=11"
         val connection = try {
             (URL(url).openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
