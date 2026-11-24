@@ -51,14 +51,14 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         if (clientActive) {
             publishClock()
             publishPlaybackState()
-            requestWeatherIfNecessary()
+
         }
     }
 
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (!clientActive) return@OnSharedPreferenceChangeListener
         if (key == KEY_SHOW_LOCATION) {
-            val city = WeatherStore.current(this)?.localityLabel
+            val city = WeatherStore.locality(this)
             cityAnnouncement.show(city, SystemClock.elapsedRealtime())
             scheduleCityTitleHide()
             publishClock()
@@ -83,7 +83,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         override fun run() {
             if (!clientActive) return
             publishClock()
-            requestWeatherIfNecessary()
+
             scheduleNextMinute()
         }
     }
@@ -176,14 +176,16 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         if (clientActive) return
         clientActive = true
         lastWarningRevision = prefs.getLong(WeatherStore.KEY_WARNING_REV, 0L)
+        WeatherStore.start(this, WeatherStore.Client.CAR)
         publishClock()
         publishPlaybackState()
-        requestWeatherIfNecessary()
+
         scheduleNextMinute()
     }
 
     private fun suspendClientWork() {
         clientActive = false
+        WeatherStore.stop(WeatherStore.Client.CAR)
         handler.removeCallbacks(minuteTick)
         handler.removeCallbacks(settingsRefresh)
         handler.removeCallbacks(hideCityTitle)
@@ -237,7 +239,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         if (clientActive) {
             publishClock()
             publishPlaybackState()
-            requestWeatherIfNecessary()
+
         }
     }
 
@@ -253,12 +255,6 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private fun visiblePreset(): ClockPreset =
         PlaybackDisplay.visiblePreset(selectedPreset(), running)
 
-    private fun requestWeatherIfNecessary() {
-        // Keep locality announcements available even with forecast hidden.
-        // The shared worker retains its normal 5-minute throttle.
-        WeatherStore.refreshIfDue(this)
-    }
-
     private fun publishClock() {
         val now = LocalDateTime.now()
         val visible = visiblePreset()
@@ -266,7 +262,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val theme = selectedTheme()
         val showClockForecast = visible.usesWeather
         val revision = if (showClockForecast) prefs.getLong(ForecastStore.KEY_SAVED_AT, 0L) +
-            (weather?.observedAtMs ?: 0L) else weather?.observedAtMs ?: 0L
+            (weather?.observedAtMs ?: 0L) + prefs.getLong("weather_locality_revision_v68", 0L)
+            else weather?.observedAtMs ?: 0L
         val artwork = ClockArtworkProvider.artworkUri(
             visible.id, now, revision,
             compactLayout(), 0L, theme
@@ -278,7 +275,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         )
         val tick = SystemClock.elapsedRealtime()
         // Observe locality even when the clock's weather option is off.
-        val locality = (weather ?: WeatherStore.current(this))?.localityLabel
+        val locality = WeatherStore.locality(this)
         if (cityAnnouncement.update(locality, tick)) scheduleCityTitleHide()
         val warningRevision = prefs.getLong(WeatherStore.KEY_WARNING_REV, 0L)
         if (warningRevision != lastWarningRevision) {
@@ -307,7 +304,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val art = ClockRenderer.render(
             visible.id, now, compactLayout(),
             outputSize = if (showClockForecast && !visible.hasAnalog) ClockRenderer.SIZE
-                else ClockRenderer.MEDIA_BITMAP_SIZE, sourceLabel = weather?.artworkSource,
+                else ClockRenderer.MEDIA_BITMAP_SIZE, sourceLabel = if (showClockForecast) WeatherStore.locality(this) ?: weather?.artworkSource else null,
             theme = theme, forecast = forecast
         )
         val currentMiniKey = miniArtwork.toString()

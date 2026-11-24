@@ -57,7 +57,7 @@ class ClockArtworkProvider : ContentProvider() {
         val layout = if (compact) "compact" else "standard"
         val generation = uri.getQueryParameter("generation")?.toLongOrNull() ?: 0L
         val destination = File(directory,
-            "v67-$layout-${theme.id}-$clockMode-$key-$weatherRevision-$generation.png")
+            "v68-$layout-${theme.id}-$clockMode-$key-$weatherRevision-$generation.png")
 
         synchronized(lock) {
             if (!destination.isFile || destination.length() == 0L) {
@@ -77,7 +77,8 @@ class ClockArtworkProvider : ContentProvider() {
                         outputSize = if (ClockPreset.fromId(clockMode).hasAnalog ||
                             ClockPreset.fromId(clockMode).usesWeather)
                             ClockRenderer.SIZE else ClockRenderer.MEDIA_BITMAP_SIZE,
-                        sourceLabel = weather?.artworkSource,
+                        sourceLabel = if (ClockPreset.fromId(clockMode).usesWeather)
+                            WeatherStore.locality(appContext) ?: weather?.artworkSource else null,
                         theme = theme,
                         forecast = if (ClockPreset.fromId(clockMode).usesWeather)
                             ForecastStore.currentRing(appContext,
@@ -155,7 +156,7 @@ class ClockArtworkProvider : ContentProvider() {
             .appendPath(mode)
             .appendPath("clock_${now.format(KEY_FORMAT)}.png")
             .appendQueryParameter("rev", weatherRevision.coerceAtLeast(0L).toString())
-            .appendQueryParameter("style", "v67")
+            .appendQueryParameter("style", "v68")
             .appendQueryParameter("theme", theme.id)
             .appendQueryParameter("generation", generation.toString())
             .appendQueryParameter("layout", if (compact) "compact" else "standard")

@@ -53,7 +53,7 @@ class MainActivity : Activity() {
     private val soundPreview by lazy { NoticeSoundPlayer() }
     private val weatherPreferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == ClockPreset.KEY_ADD_WEATHER) syncWeatherToggle()
-        else if (key == "weather_fetched_at") updatePreviewTiles()
+        else if (key == "weather_fetched_at" || key == WeatherStore.KEY_LOCALITY) updatePreviewTiles()
     }
     private var analogBitmap: Bitmap? = null
     private var digitalBitmap: Bitmap? = null
@@ -171,7 +171,7 @@ class MainActivity : Activity() {
             text = "Виж локация"
             isAllCaps = false
             setOnClickListener {
-                val city = WeatherStore.current(this@MainActivity)?.localityLabel
+                val city = WeatherStore.locality(this@MainActivity)
                 locationMessage.text = city ?: "Няма данни за локацията"
                 locationMessage.visibility = View.VISIBLE
                 messageHandler.removeCallbacks(hideLocationMessage)
@@ -224,6 +224,7 @@ class MainActivity : Activity() {
     }
 
     override fun onStop() {
+        WeatherStore.stop(WeatherStore.Client.PHONE)
         settings().unregisterOnSharedPreferenceChangeListener(weatherPreferenceListener)
         soundPreview.stop()
         super.onStop()
@@ -245,7 +246,7 @@ class MainActivity : Activity() {
         if (::analogImage.isInitialized) updatePreviewTiles()
         // Every opening of settings starts a current observation refresh.
         if (WeatherLocation.permitted(this)) {
-            WeatherStore.refreshIfDue(this)
+            WeatherStore.start(this, WeatherStore.Client.PHONE)
         } else if (!hasRequestedLocation) {
             hasRequestedLocation = true
             requestLocation()
@@ -307,7 +308,7 @@ class MainActivity : Activity() {
             return ClockRenderer.render(
                 preset.id, now, compact,
                 outputSize = 256,
-                sourceLabel = weather?.artworkSource,
+                sourceLabel = if (preset.usesWeather) WeatherStore.locality(this) ?: weather?.artworkSource else null,
                 theme = theme,
                 forecast = if (preset.usesWeather)
                     ForecastStore.currentRing(this,
@@ -348,7 +349,7 @@ class MainActivity : Activity() {
                 arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION),
                 LOCATION_REQUEST)
         } else {
-            WeatherStore.refreshIfDue(this)
+            WeatherStore.start(this, WeatherStore.Client.PHONE)
         }
     }
 

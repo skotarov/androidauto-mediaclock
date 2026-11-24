@@ -5,8 +5,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WeatherStoreTest {
-    @Test fun refreshIntervalIsFiveMinutes() {
-        assertEquals(5L * 60L * 1000L, WeatherStore.REFRESH_INTERVAL_MS)
+    @Test fun refreshIntervalIsFifteenMinutes() {
+        assertEquals(15L * 60L * 1000L, WeatherStore.REFRESH_INTERVAL_MS)
     }
 
     @Test fun weatherCodesAreMappedToShortBulgarianLabels() {

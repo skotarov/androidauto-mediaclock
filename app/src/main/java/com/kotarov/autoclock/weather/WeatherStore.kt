@@ -5,6 +5,7 @@ import android.location.Location
 import android.location.Geocoder
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -14,28 +15,50 @@ import java.time.ZoneId
 import java.util.Locale
 import kotlin.math.roundToInt
 
-/**
- * One approximate location fix, then latest *actual observation* from
- * the nearest reporting aerodrome METAR station (NOAA Aviation Weather).
- * If no recent station is available, fall back to an explicitly labeled
- * Open-Meteo model at the approximate device location.
- *
- * No continuous GPS listener, wakelock or per-minute
- * weather requests. Requests are capped to once per 5 minutes in weather display.
- */
+/** Location, reverse geocoding and weather have independent schedules.
+ * Main-thread coordinator shared by the car and the visible phone settings.
+ * Workers deliver only to the current active generation. */
 object WeatherStore {
     const val PREFS = "clock_settings"
     const val KEY_LOCALITY = "weather_locality_v47"
     const val KEY_WARNING = "weather_warning_v52"
     const val KEY_WARNING_REV = "weather_warning_revision_v52"
-    private var inFlight = false
     private const val KEY_LAT = "weather_locality_lat_v47"
     private const val KEY_LON = "weather_locality_lon_v47"
     const val AUTO_ID = "auto"
-    const val REFRESH_INTERVAL_MS = 5L * 60L * 1000L
-    private const val MIN_RETRY_MS = REFRESH_INTERVAL_MS
+    const val REFRESH_INTERVAL_MS = TravelRefreshPolicy.WEATHER_INTERVAL_MS
     private const val MAX_AGE_MS = 3L * 60L * 60L * 1000L
     private const val MAX_OBSERVATION_AGE_MS = 3L * 60L * 60L * 1000L
+
+    enum class Client { CAR, PHONE }
+    private val clients = mutableSetOf<Client>()
+    private val handler by lazy { Handler(Looper.getMainLooper()) }
+    private var app: Context? = null
+    private var generation = 0L
+    private var passiveCancel: (() -> Unit)? = null
+    private var fallbackCancel: (() -> Unit)? = null
+    private var fixInFlight = false
+    private var latest: Location? = null
+    private var lastFallback: Long? = null
+    private var weatherThread: Thread? = null
+    private var localityThread: Thread? = null
+    private var lastWeatherAttempt: Long? = null
+    private var lastWeatherSuccess: Long? = null
+    private var lastWeatherPoint: TravelRefreshPolicy.Point? = null
+    private var failures = 0
+    private var lastLocalityAttempt: Long? = null
+    private var lastLocalityPoint: TravelRefreshPolicy.Point? = null
+    private var localityFailed = false
+    private var stationReportsAt: Long? = null
+    private var stationReports: String? = null
+
+    private val tick = object : Runnable {
+        override fun run() {
+            if (clients.isEmpty()) return
+            checkLocation()
+            handler.postDelayed(this, TravelRefreshPolicy.LOCATION_TICK_MS)
+        }
+    }
 
     data class Snapshot(
         val temperatureC: Double,
@@ -108,109 +131,212 @@ object WeatherStore {
         )
     }
 
-    /**
-     * Works from the main thread, returning through callback on that thread.
-     * Auto location is requested only if new weather data is due.
-     */
-    fun refreshIfDue(
-        context: Context,
-        callback: (Boolean) -> Unit = {}
-    ) {
-        val app = context.applicationContext
-        val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        if (!WeatherLocation.permitted(app)) {
-            callback(false)
+    fun locality(context: Context): String? =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_LOCALITY, null)
+
+    /** Called on the main thread. No extra permission is requested here. */
+    fun start(context: Context, client: Client) {
+        app = context.applicationContext
+        val first = clients.isEmpty()
+        clients.add(client)
+        if (first) {
+            generation++
+            latest = null
+            lastFallback = null
+            val prefs = app!!.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val lat = Double.fromBits(prefs.getLong(KEY_LAT, Double.NaN.toBits()))
+            val lon = Double.fromBits(prefs.getLong(KEY_LON, Double.NaN.toBits()))
+            lastLocalityPoint = if (lat.isFinite() && lon.isFinite())
+                TravelRefreshPolicy.Point(lat, lon) else null
+            handler.removeCallbacks(tick)
+            tick.run()
+        } else checkLocation()
+    }
+
+    fun stop(client: Client) {
+        clients.remove(client)
+        if (clients.isNotEmpty()) return
+        generation++
+        handler.removeCallbacks(tick)
+        passiveCancel?.invoke()
+        passiveCancel = null
+        fallbackCancel?.invoke()
+        fallbackCancel = null
+        fixInFlight = false
+        latest = null
+        weatherThread?.interrupt()
+        localityThread?.interrupt()
+        // Threads are not replaced until their completion callbacks arrive.
+        // Bounded HTTP timeouts remain in force if interruption cannot abort I/O.
+        app = null
+    }
+
+    private fun checkLocation() {
+        val context = app ?: return
+        if (!WeatherLocation.permitted(context)) {
+            passiveCancel?.invoke()
+            passiveCancel = null
+            fallbackCancel?.invoke()
+            fallbackCancel = null
+            fixInFlight = false
+            latest = null
             return
         }
-        val now = System.currentTimeMillis()
-        val lastAttempt = prefs.getLong("weather_attempt_at", 0L)
-        if (inFlight || (now >= lastAttempt && now - lastAttempt < MIN_RETRY_MS)) {
-            callback(false)
-            return
+        if (passiveCancel == null) {
+            val token = generation
+            passiveCancel = WeatherLocation.passive(context) {
+                if (token == generation && clients.isNotEmpty()) acceptFix(it)
+            }
         }
-        inFlight = true
-
-        prefs.edit().putLong("weather_attempt_at", now)
-            .apply()
-
-        WeatherLocation.requestOnce(app) { location ->
-            if (location == null) {
-                inFlight = false
-                callback(false)
-            } else {
-                fetchOnThread(app, callback, location.latitude, location.longitude, now) {
-                    fetchNearestStation(location)
+        val now = SystemClock.elapsedRealtime()
+        if (WeatherLocation.fresh(latest)) {
+            processFix(latest!!)
+        } else if (!fixInFlight &&
+            (lastFallback == null || now - lastFallback!! >= TravelRefreshPolicy.FALLBACK_INTERVAL_MS)) {
+            lastFallback = now
+            fixInFlight = true
+            val token = generation
+            val cancel = WeatherLocation.requestOnce(context) {
+                if (token == generation) {
+                    fixInFlight = false
+                    fallbackCancel = null
+                    if (it != null) acceptFix(it)
                 }
             }
+            if (fixInFlight) fallbackCancel = cancel
         }
     }
 
-    private fun fetchOnThread(
-        app: Context,
-        callback: (Boolean) -> Unit,
-        latitude: Double,
-        longitude: Double,
-        requestAt: Long,
-        request: () -> Reading?
-    ) {
-        Thread({
-            var saved = false
+    private fun acceptFix(location: Location) {
+        val context = app ?: return
+        if (!WeatherLocation.permitted(context) || !WeatherLocation.fresh(location)) return
+        val prior = latest
+        if (prior != null && location.elapsedRealtimeNanos < prior.elapsedRealtimeNanos) return
+        latest = Location(location)
+        processFix(location)
+    }
+
+    private fun processFix(location: Location) {
+        val context = app ?: return
+        if (!WeatherLocation.permitted(context)) return
+        val point = TravelRefreshPolicy.Point(location.latitude, location.longitude)
+        val now = SystemClock.elapsedRealtime()
+        if (localityThread == null && TravelRefreshPolicy.localityDue(now,
+                lastLocalityAttempt, point.distanceFrom(lastLocalityPoint),
+                locality(context) != null, localityFailed)) {
+            lastLocalityAttempt = now
+            val token = generation
+            localityThread = Thread({
+                val name = resolveLocality(context, point.lat, point.lon)
+                handler.post {
+                    localityThread = null
+                    if (token == generation && clients.isNotEmpty() &&
+                        WeatherLocation.permitted(context)) {
+                        localityFailed = name == null
+                        if (name != null) {
+                            lastLocalityPoint = point
+                            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                                .putString(KEY_LOCALITY, name)
+                                .putLong("weather_locality_revision_v68", System.currentTimeMillis())
+                                .putLong(KEY_LAT, point.lat.toBits())
+                                .putLong(KEY_LON, point.lon.toBits()).apply()
+                        }
+                    }
+                }
+            }, "AutoClockLocality").apply { isDaemon = true; start() }
+        }
+        if (weatherThread == null && TravelRefreshPolicy.weatherDue(now,
+                lastWeatherSuccess, point.distanceFrom(lastWeatherPoint),
+                lastWeatherAttempt, failures)) {
+            lastWeatherAttempt = now
+            fetchWeather(context, Location(location), point, generation)
+        }
+    }
+
+    private fun fetchWeather(context: Context, location: Location,
+                             point: TravelRefreshPolicy.Point, token: Long) {
+        val now = SystemClock.elapsedRealtime()
+        val canUseStation = WeatherStations.stations.any {
+            point.distanceFrom(TravelRefreshPolicy.Point(it.lat, it.lon)) <= 180.0
+        }
+        val cachedReports = stationReports.takeIf {
+            stationReportsAt?.let { at -> now - at < REFRESH_INTERVAL_MS } == true
+        }
+        weatherThread = Thread({
+            var reports = cachedReports
+            var fetchedReports = false
+            var forecast: String? = null
+            var reading: Reading? = null
+            var warning: String? = null
             try {
-            val observed = try { request() } catch (_: Exception) { null }
-            val forecast = try { ForecastStore.fetchOnWorker(latitude, longitude) }
-                catch (_: Exception) { null }
-            val model = ForecastStore.currentModel(forecast)
-            // Use the forecast's location-specific daylight flag instead of a
-            // fixed seasonal hour estimate whenever it is available.
-            val result = observed?.let {
-                it.copy(isDay = model?.isDay ?: it.isDay,
-                    code = if (it.code >= 0) it.code else model?.code ?: -1)
-            } ?: model?.let {
-                Reading(it.temperature, it.code, it.isDay, "Текущо местоположение",
+                // Fetch the local model first, and never query Bulgarian
+                // stations from an unrelated country/region.
+                forecast = ForecastStore.fetchOnWorker(point.lat, point.lon)
+                if (canUseStation && !Thread.currentThread().isInterrupted) {
+                    if (reports == null) {
+                        reports = runCatching { fetchText(
+                            "https://aviationweather.gov/api/data/metar?ids=$STATION_IDS&format=json",
+                            "AutoClock2/0.68 (Android weather display)") }.getOrNull()
+                        fetchedReports = reports != null
+                    }
+                    val observed = runCatching { reports?.let { fetchNearestStation(location, it) } }.getOrNull()
+                    val model = ForecastStore.currentModel(forecast)
+                    reading = observed?.copy(isDay = model?.isDay ?: observed.isDay,
+                        code = if (observed.code >= 0) observed.code else model?.code ?: -1)
+                }
+                val model = ForecastStore.currentModel(forecast)
+                if (reading == null && model != null) reading = Reading(model.temperature,
+                    model.code, model.isDay, "Текущо местоположение",
                     "Open-Meteo · модел", System.currentTimeMillis())
-            }
-            val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            val oldLat = Double.fromBits(prefs.getLong(KEY_LAT, Double.NaN.toBits()))
-            val oldLon = Double.fromBits(prefs.getLong(KEY_LON, Double.NaN.toBits()))
-            val near = oldLat.isFinite() && oldLon.isFinite() &&
-                WeatherStations.kilometers(oldLat, oldLon, latitude, longitude) <= 0.3
-            val known = prefs.getString(KEY_LOCALITY, null)
-            val reuseLocality = near && known != null
-            val locality = if (reuseLocality) known else resolveLocality(app, latitude, longitude)
-            val warning = ForecastStore.warning(forecast, System.currentTimeMillis() / 1000L,
-                model?.code ?: result?.code)
-            if (result != null &&
-                prefs.getLong("weather_attempt_at", 0L) == requestAt
-            ) {
-                val editor = prefs.edit()
-                    .putString(KEY_LOCALITY, locality)
-                    .putString(KEY_WARNING, warning)
-                    .putLong(KEY_WARNING_REV, requestAt)
-                    .putString("weather_cached_mode", AUTO_ID)
-                    .putLong("weather_fetched_at", System.currentTimeMillis())
-                    .putLong("weather_observation_time", result.reportTimeMs)
-                    .putString("weather_station_label", result.place)
-                    .putString("weather_source_name", result.source)
-                    .putLong("weather_temperature_bits",
-                        java.lang.Double.doubleToRawLongBits(result.temperature))
-                    .putInt("weather_code", result.code)
-                    .putBoolean("weather_is_day", result.isDay)
-                if (!reuseLocality) editor.putLong(KEY_LAT, latitude.toBits())
-                    .putLong(KEY_LON, longitude.toBits())
-                if (forecast != null)
-                    ForecastStore.putForecast(editor, AUTO_ID, latitude, longitude, forecast)
-                else if (!ForecastStore.matchesLocation(prefs, AUTO_ID, latitude, longitude))
-                    ForecastStore.clearForecast(editor)
-                editor.apply()
-                saved = true
-            }
+                warning = ForecastStore.warning(forecast, System.currentTimeMillis() / 1000L,
+                    model?.code ?: reading?.code)
+            } catch (_: Exception) {
+                // A failed provider must not stop the coordinator.
             } finally {
-                Handler(Looper.getMainLooper()).post {
-                    inFlight = false
-                    callback(saved)
+                handler.post {
+                    weatherThread = null
+                    if (token == generation && clients.isNotEmpty() &&
+                        WeatherLocation.permitted(context)) {
+                        if (fetchedReports) {
+                            stationReports = reports
+                            stationReportsAt = SystemClock.elapsedRealtime()
+                        }
+                        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                        val result = reading
+                        val body = forecast
+                        val editor = prefs.edit()
+                        if (result != null) {
+                            val savedAt = System.currentTimeMillis()
+                            editor.putString(KEY_WARNING, warning)
+                                .putLong(KEY_WARNING_REV, savedAt)
+                                .putString("weather_cached_mode", AUTO_ID)
+                                .putLong("weather_fetched_at", savedAt)
+                                .putLong("weather_observation_time", result.reportTimeMs)
+                                .putString("weather_station_label", result.place)
+                                .putString("weather_source_name", result.source)
+                                .putLong("weather_temperature_bits", result.temperature.toBits())
+                                .putInt("weather_code", result.code)
+                                .putBoolean("weather_is_day", result.isDay)
+                        }
+                        if (body != null && result != null) {
+                            ForecastStore.putForecast(editor, AUTO_ID, point.lat, point.lon, body)
+                            lastWeatherPoint = point
+                            lastWeatherSuccess = SystemClock.elapsedRealtime()
+                            failures = 0
+                        } else {
+                            failures = (failures + 1).coerceAtMost(7)
+                            // A distant cached forecast must not masquerade as local.
+                            if (!ForecastStore.matchesLocation(prefs, AUTO_ID, point.lat, point.lon)) {
+                                ForecastStore.clearForecast(editor)
+                                if (result == null) editor.remove("weather_cached_mode")
+                                    .remove("weather_cached_city").putLong("weather_fetched_at", 0L)
+                            }
+                        }
+                        editor.apply()
+                    }
                 }
             }
-        }, "AutoClockWeather").apply { isDaemon = true }.start()
+        }, "AutoClockWeather").apply { isDaemon = true; start() }
     }
 
     /** Android reverse geocoding on the existing worker, not a GPS listener. */
@@ -227,13 +353,8 @@ object WeatherStore {
     private val STATION_ID_SET = WeatherStations.stations.map { it.icao }.toSet()
     private val STATION_IDS = STATION_ID_SET.joinToString(",")
 
-    /** Exactly one API call lists the latest reports for all eight stations. */
-    private fun fetchNearestStation(location: Location): Reading? {
-        val ids = STATION_IDS
-        val json = fetchText(
-            "https://aviationweather.gov/api/data/metar?ids=$ids&format=json",
-            "AutoClock2/0.13 (Android personal weather display)"
-        ) ?: return null
+    /** Select a station from the shared, periodically refreshed report set. */
+    private fun fetchNearestStation(location: Location, json: String): Reading? {
         val results = JSONArray(json)
         val now = System.currentTimeMillis()
         val byStation = mutableMapOf<String, JSONObject>()
