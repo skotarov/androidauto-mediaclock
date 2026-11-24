@@ -38,7 +38,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             val next = queuedWarning
             queuedWarning = null
             if (next != null) {
-                cityAnnouncement.show(next, SystemClock.elapsedRealtime())
+                cityAnnouncement.showWarning(next, SystemClock.elapsedRealtime())
                 scheduleCityTitleHide()
             }
             publishClock()
@@ -62,7 +62,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             publishClock()
         } else if (key == ClockPreset.KEY_FAMILY ||
             key == ClockPreset.KEY_ADD_WEATHER ||
-            key == KEY_LAYOUT || key == ClockTheme.KEY || key == KEY_DEBUG_MEDIA_LABELS ||
+            key == KEY_LAYOUT || key == ClockTheme.KEY ||
             key == "weather_cached_mode" || key == "weather_station_label" ||
             key == WeatherStore.KEY_LOCALITY || key == WeatherStore.KEY_WARNING_REV ||
             key == "weather_source_name" || key == "weather_fetched_at" ||
@@ -92,7 +92,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         // Force automatic local weather even when Android Auto starts the
         // service before the phone settings activity is opened.
         prefs.edit().remove(KEY_TEST_DIRECT_BROWSE).remove(KEY_TEST_STATE_NONE)
-            .remove(KEY_TEST_STATE_STOPPED).apply()
+            .remove(KEY_TEST_STATE_STOPPED).remove("debug_media_labels_v54").apply()
         ClockSelectionStore.migrateSimplifiedIfNeeded(prefs)
         session = MediaSessionCompat(this, "AutoClockMediaTestsV037").apply {
             setFlags(MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS)
@@ -285,12 +285,14 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             if (warning != null) {
                 if (cityAnnouncement.title(tick) != null) queuedWarning = warning
                 else {
-                    cityAnnouncement.show(warning, tick)
+                    cityAnnouncement.showWarning(warning, tick)
                     scheduleCityTitleHide()
                 }
             }
         }
-        val temporaryTitle = cityAnnouncement.title(tick) ?: INVISIBLE_TEXT
+        val notice = cityAnnouncement.notice(tick)
+        val temporaryTitle = notice?.heading ?: INVISIBLE_TEXT
+        val temporarySubtitle = notice?.body ?: INVISIBLE_TEXT
         val activeId = CLOCK_ID
 
         // Keep both a direct reduced-size bitmap and an artwork URI to cope
@@ -324,13 +326,12 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         artKey = key
         }
         // A title change does not allocate or redraw any artwork.
-        val debug = prefs.getBoolean(KEY_DEBUG_MEDIA_LABELS, false)
         session.setMetadata(MediaMetadataCompat.Builder(baseMetadata!!)
-            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, if (debug) "TITLE" else temporaryTitle)
-            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, if (debug) "ARTIST" else INVISIBLE_TEXT)
-            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, if (debug) "ALBUM" else INVISIBLE_TEXT)
-            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, if (debug) "DISPLAY_TITLE" else temporaryTitle)
-            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, if (debug) "DISPLAY_SUBTITLE" else INVISIBLE_TEXT)
+            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, temporaryTitle)
+            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, temporarySubtitle)
+            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, INVISIBLE_TEXT)
+            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, temporaryTitle)
+            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, temporarySubtitle)
             .build())
     }
 
@@ -355,7 +356,6 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         const val PREFERENCES = "clock_settings"
         const val KEY_LAYOUT = "clock_layout"
         const val KEY_SHOW_LOCATION = "show_location_message_v48"
-        const val KEY_DEBUG_MEDIA_LABELS = "debug_media_labels_v54"
         private const val KEY_TEST_DIRECT_BROWSE = "try_media_host_browse_link_v37"
         private const val KEY_TEST_STATE_NONE = "try_playback_state_none_v37"
         private const val KEY_TEST_STATE_STOPPED = "try_playback_state_stopped_v39"
