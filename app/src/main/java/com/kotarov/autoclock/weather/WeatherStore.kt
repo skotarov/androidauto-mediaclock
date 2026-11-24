@@ -234,17 +234,6 @@ object WeatherStore {
     ) {
         Thread({
             val result = try { request() } catch (_: Exception) { null }
-            // Forecast uses the same approximate coordinates; no extra GPS.
-            // Auto 15m ticks are throttled; an explicit Pause/settings open
-            // requests a fresh forecast as well as current observations.
-            try {
-                ForecastStore.refreshIfDueOnWorker(
-                    app, selectionAtStart, latitude, longitude,
-                    force = forceForecast
-                )
-            } catch (_: Exception) {
-                // An unavailable forecast must not break the current weather.
-            }
             var saved = false
             if (result != null &&
                 selectedMode(app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -272,6 +261,17 @@ object WeatherStore {
                             result.elevationMeters ?: Double.NaN))
                     .apply()
                 saved = true
+            }
+            // Forecast uses the same approximate coordinates; no extra GPS.
+            // Auto 15m ticks are throttled; an explicit Pause/settings open
+            // requests a fresh forecast as well as current observations.
+            try {
+                ForecastStore.refreshIfDueOnWorker(
+                    app, selectionAtStart, latitude, longitude,
+                    force = forceForecast
+                )
+            } catch (_: Exception) {
+                // An unavailable forecast must not break the current weather.
             }
             Handler(Looper.getMainLooper()).post { callback(saved) }
         }, "AutoClockWeather").apply { isDaemon = true }.start()

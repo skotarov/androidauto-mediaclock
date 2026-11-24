@@ -56,8 +56,9 @@ class ClockArtworkProvider : ContentProvider() {
         // Include the layout and release design in the filename, so changing
         // phone settings invalidates both Android Auto and disk artwork caches.
         val layout = if (compact) "compact" else "standard"
+        val generation = uri.getQueryParameter("generation")?.toLongOrNull() ?: 0L
         val destination = File(directory,
-            "v43-$layout-${theme.id}-${if (coloredWeatherIcons) "color" else "mono"}-$clockMode-$key-$weatherRevision.png")
+            "v44-$layout-${theme.id}-${if (coloredWeatherIcons) "color" else "mono"}-$clockMode-$key-$weatherRevision-$generation.png")
 
         synchronized(lock) {
             if (!destination.isFile || destination.length() == 0L) {
@@ -97,7 +98,8 @@ class ClockArtworkProvider : ContentProvider() {
                         coloredWeatherIcons = coloredWeatherIcons,
                         forecast = if (ClockPreset.fromId(clockMode).family == ClockFamily.ANALOG &&
                             ClockPreset.fromId(clockMode).usesWeather)
-                            ForecastStore.currentRing(appContext, requestedMinute.atZone(ZoneId.systemDefault()).toEpochSecond())
+                            ForecastStore.currentRing(appContext,
+                                requestedMinute.atZone(ZoneId.systemDefault()).toEpochSecond(), weather)
                             else emptyList()
                     )
                 }
@@ -203,7 +205,7 @@ class ClockArtworkProvider : ContentProvider() {
             .appendPath(mode)
             .appendPath("clock_${now.format(KEY_FORMAT)}.png")
             .appendQueryParameter("rev", weatherRevision.coerceAtLeast(0L).toString())
-            .appendQueryParameter("style", "v43")
+            .appendQueryParameter("style", "v44")
             .appendQueryParameter("weather_color", coloredWeatherIcons.toString())
             .appendQueryParameter("theme", theme.id)
             .appendQueryParameter("generation", generation.toString())

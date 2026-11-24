@@ -201,6 +201,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     override fun onDestroy() {
         running = false
+        artworkGeneration += 1L
         handler.removeCallbacks(minuteTick)
         handler.removeCallbacks(stoppedWeatherTick)
         handler.removeCallbacks(settingsRefresh)
@@ -249,6 +250,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private fun startClock() {
         preset = selectedPreset()
         running = true
+        artworkGeneration += 1L
         handler.removeCallbacks(stoppedWeatherTick)
         publishClock()
         publishPlaybackState()
@@ -301,7 +303,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val theme = selectedTheme()
         val colored = coloredWeatherIcons()
         val showRing = visible.family == ClockFamily.ANALOG && visible.usesWeather
-        val forecast = if (showRing) ForecastStore.currentRing(this) else emptyList()
+        val forecast = if (showRing) ForecastStore.currentRing(this,
+            now.atZone(java.time.ZoneId.systemDefault()).toEpochSecond(), weather) else emptyList()
         val revision = if (showRing) prefs.getLong(ForecastStore.KEY_SAVED_AT, 0L) +
             (weather?.observedAtMs ?: 0L) else weather?.observedAtMs ?: 0L
         val artwork = ClockArtworkProvider.artworkUri(

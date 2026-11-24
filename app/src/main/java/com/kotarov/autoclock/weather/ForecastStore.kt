@@ -47,8 +47,11 @@ object ForecastStore {
     const val RING_HOURS = 10
 
     /** Current observation plus nine future slots; the Pause list is unchanged. */
-    fun currentRing(context: Context, nowEpochSeconds: Long = System.currentTimeMillis() / 1000L): List<Hour> =
-        ringWithObservation(cached(context), nowEpochSeconds, WeatherStore.current(context))
+    fun currentRing(
+        context: Context,
+        nowEpochSeconds: Long = System.currentTimeMillis() / 1000L,
+        observation: WeatherStore.Snapshot? = WeatherStore.current(context)
+    ): List<Hour> = ringWithObservation(cached(context), nowEpochSeconds, observation)
 
     fun ringHours(all: List<Hour>, nowEpochSeconds: Long): List<Hour> {
         val start = all.filter { it.epochSeconds <= nowEpochSeconds }
@@ -73,12 +76,17 @@ object ForecastStore {
         if (observation == null || observation.weatherCode < 0) return hours
         val slot = Instant.ofEpochSecond(nowEpochSeconds).atZone(zone)
             .withMinute(0).withSecond(0).withNano(0)
-        val epoch = hours.firstOrNull { it.epochSeconds <= nowEpochSeconds }?.epochSeconds
-            ?: slot.toEpochSecond()
-        val current = Hour(epoch, LocalDateTime.ofInstant(Instant.ofEpochSecond(epoch), zone),
+        val epoch = slot.toEpochSecond()
+        val current = Hour(epoch, slot.toLocalDateTime(),
             observation.weatherCode, observation.temperatureC, null, observation.isDay)
-        return (listOf(current) + hours.filter { it.epochSeconds > nowEpochSeconds })
-            .sortedBy { it.epochSeconds }.take(RING_HOURS)
+        // Never allow a modeled point at the same dial hour to overpaint
+        // the measured current conditions, including offset time zones.
+        val future = hours.filter {
+            it.epochSeconds > nowEpochSeconds &&
+                it.epochSeconds < epoch + RING_HOURS * 3600L &&
+                Instant.ofEpochSecond(it.epochSeconds).atZone(zone).hour != slot.hour
+        }
+        return (listOf(current) + future).sortedBy { it.epochSeconds }.take(RING_HOURS)
     }
 
     private fun cached(context: Context): List<Hour> {

@@ -47,6 +47,16 @@ class ForecastRingTest {
         assertEquals(10.0, ring[1].temperatureC, 0.0)
     }
 
+    @Test fun observedSunReplacesCloudAtCurrentHourEvenAfterHourChange() {
+        val ring = ForecastStore.ringWithObservation(hours, start + 3600 + 60, observation, zone)
+        assertEquals(9, ring.first().localDateTime.hour)
+        assertEquals(0, ring.first().code)
+        assertEquals(0.0, ring.first().temperatureC, 0.0)
+        assertEquals(1, ring.count { it.localDateTime.hour == 9 })
+        assertEquals(10, ring[1].localDateTime.hour)
+        assertEquals(2, ring[1].code)
+    }
+
     @Test fun observationWorksEvenWithoutForecast() {
         val ring = ForecastStore.ringWithObservation(emptyList(), start + 60, observation, zone)
         assertEquals(1, ring.size)

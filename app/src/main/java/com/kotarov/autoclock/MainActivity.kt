@@ -263,7 +263,8 @@ class MainActivity : AppCompatActivity() {
                 outputSize = 256, condition = weather?.description,
                 theme = theme,
                 forecast = if (family == ClockFamily.ANALOG && preset.usesWeather)
-                    ForecastStore.currentRing(this) else emptyList()
+                    ForecastStore.currentRing(this,
+                        now.atZone(java.time.ZoneId.systemDefault()).toEpochSecond(), weather) else emptyList()
             )
         }
         val newAnalog = make(ClockFamily.ANALOG)
