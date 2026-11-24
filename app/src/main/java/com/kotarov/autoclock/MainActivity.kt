@@ -184,6 +184,13 @@ class MainActivity : Activity() {
         }
         root.addView(locationMessage)
 
+        root.addView(checkOption(
+            "Тест на надписите",
+            prefs.getBoolean(AutoClockMediaService.KEY_DEBUG_MEDIA_LABELS, false)
+        ) { checked ->
+            prefs.edit().putBoolean(AutoClockMediaService.KEY_DEBUG_MEDIA_LABELS, checked).apply()
+        })
+
     }
 
     override fun onStart() {

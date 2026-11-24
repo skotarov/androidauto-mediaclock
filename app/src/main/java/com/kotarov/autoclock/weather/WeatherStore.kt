@@ -160,7 +160,12 @@ object WeatherStore {
             val forecast = try { ForecastStore.fetchOnWorker(latitude, longitude) }
                 catch (_: Exception) { null }
             val model = ForecastStore.currentModel(forecast)
-            val result = observed ?: model?.let {
+            // Use the forecast's location-specific daylight flag instead of a
+            // fixed seasonal hour estimate whenever it is available.
+            val result = observed?.let {
+                it.copy(isDay = model?.isDay ?: it.isDay,
+                    code = if (it.code >= 0) it.code else model?.code ?: -1)
+            } ?: model?.let {
                 Reading(it.temperature, it.code, it.isDay, "Текущо местоположение",
                     "Open-Meteo · модел", System.currentTimeMillis())
             }
@@ -277,7 +282,8 @@ object WeatherStore {
         if ("DZ" in w) return 51
         if ("FG" in w || "BR" in w || "HZ" in w) return 45
         val clouds = report.optJSONArray("clouds")
-        var highestCoverage = 0
+        // Missing cloud observations are not proof of a clear sky.
+        var highestCoverage = -1
         if (clouds != null) {
             for (i in 0 until clouds.length()) {
                 val coverage = clouds.optJSONObject(i)?.optString("cover", "") ?: ""
@@ -285,10 +291,13 @@ object WeatherStore {
                     "OVC", "BKN" -> 3
                     "SCT" -> 2
                     "FEW" -> 1
-                    else -> 0
+                    "CLR", "SKC", "NSC", "NCD" -> 0
+                    "VV" -> 3
+                    else -> -1
                 })
             }
         }
+        if (highestCoverage < 0 && report.optString("rawOb", "").contains("CAVOK")) return 0
         return highestCoverage
     }
 

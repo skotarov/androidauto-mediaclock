@@ -64,20 +64,22 @@ object ForecastStore {
         return (0 until DIGITAL_HOURS).map { offset ->
             val slot = start.plusHours(offset.toLong())
             DigitalSlot(slot.toLocalDateTime(), byEpoch[slot.toEpochSecond()],
-                when (offset) { DIGITAL_HOURS - 2 -> 166; DIGITAL_HOURS - 1 -> 77; else -> 255 })
+                forecastAlpha(offset, DIGITAL_HOURS - 1))
         }
     }
 
     const val RING_HOURS = 11
     const val RING_FUTURE_HOURS = 9
 
-    /** Fade only the past hour and the last two future hours. */
-    fun ringAlpha(offset: Int): Int = when (offset) {
-        -1 -> 102
-        RING_FUTURE_HOURS - 1 -> 166
-        RING_FUTURE_HOURS -> 77
-        else -> 255
+    /** Current and next three hours are fully opaque; the rest are 45%,
+     * except the final future hour (20%). The past slot is also 45%. */
+    fun forecastAlpha(offset: Int, lastOffset: Int): Int = when {
+        offset == lastOffset -> 51
+        offset in 0..3 -> 255
+        else -> 115
     }
+
+    fun ringAlpha(offset: Int): Int = forecastAlpha(offset, RING_FUTURE_HOURS)
 
     /** Previous hourly model slot, current observation and nine future slots. */
     fun currentRing(

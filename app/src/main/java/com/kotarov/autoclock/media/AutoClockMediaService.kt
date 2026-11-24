@@ -62,7 +62,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             publishClock()
         } else if (key == ClockPreset.KEY_FAMILY ||
             key == ClockPreset.KEY_ADD_WEATHER ||
-            key == KEY_LAYOUT || key == ClockTheme.KEY ||
+            key == KEY_LAYOUT || key == ClockTheme.KEY || key == KEY_DEBUG_MEDIA_LABELS ||
             key == "weather_cached_mode" || key == "weather_station_label" ||
             key == WeatherStore.KEY_LOCALITY || key == WeatherStore.KEY_WARNING_REV ||
             key == "weather_source_name" || key == "weather_fetched_at" ||
@@ -324,9 +324,13 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         artKey = key
         }
         // A title change does not allocate or redraw any artwork.
+        val debug = prefs.getBoolean(KEY_DEBUG_MEDIA_LABELS, false)
         session.setMetadata(MediaMetadataCompat.Builder(baseMetadata!!)
-            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, temporaryTitle)
-            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, temporaryTitle)
+            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, if (debug) "TITLE" else temporaryTitle)
+            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, if (debug) "ARTIST" else INVISIBLE_TEXT)
+            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, if (debug) "ALBUM" else INVISIBLE_TEXT)
+            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, if (debug) "DISPLAY_TITLE" else temporaryTitle)
+            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, if (debug) "DISPLAY_SUBTITLE" else INVISIBLE_TEXT)
             .build())
     }
 
@@ -351,6 +355,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         const val PREFERENCES = "clock_settings"
         const val KEY_LAYOUT = "clock_layout"
         const val KEY_SHOW_LOCATION = "show_location_message_v48"
+        const val KEY_DEBUG_MEDIA_LABELS = "debug_media_labels_v54"
         private const val KEY_TEST_DIRECT_BROWSE = "try_media_host_browse_link_v37"
         private const val KEY_TEST_STATE_NONE = "try_playback_state_none_v37"
         private const val KEY_TEST_STATE_STOPPED = "try_playback_state_stopped_v39"

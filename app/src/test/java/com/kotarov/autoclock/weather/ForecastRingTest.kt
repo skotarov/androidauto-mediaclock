@@ -72,11 +72,10 @@ class ForecastRingTest {
     }
 
     @Test fun opacityIsRelativeToCurrentHourNotListIndex() {
-        assertEquals(102, ForecastStore.ringAlpha(-1))
-        assertEquals(255, ForecastStore.ringAlpha(0))
-        (1..7).forEach { assertEquals(255, ForecastStore.ringAlpha(it)) }
-        assertEquals(166, ForecastStore.ringAlpha(8))
-        assertEquals(77, ForecastStore.ringAlpha(9))
+        assertEquals(115, ForecastStore.ringAlpha(-1))
+        (0..3).forEach { assertEquals(255, ForecastStore.ringAlpha(it)) }
+        (4..8).forEach { assertEquals(115, ForecastStore.ringAlpha(it)) }
+        assertEquals(51, ForecastStore.ringAlpha(9))
     }
 
     @Test fun midnightIncludesPreviousDayAt23() {

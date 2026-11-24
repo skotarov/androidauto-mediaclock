@@ -184,7 +184,8 @@ object ClockRenderer {
                 canvas.saveLayerAlpha(x - bounds, y - bounds, x + bounds, y + bounds, alpha)
                 else canvas.save()
             val geometry = iconGeometry(hour.code, hour.isDay)
-            val scale = 34f * unit / maxOf(geometry.width, geometry.height)
+            val iconSize = if (offset == 0) 45f else 34f
+            val scale = iconSize * unit / maxOf(geometry.width, geometry.height)
             canvas.save()
             canvas.translate(x, y - 8f * unit - geometry.visualCentreY * scale)
             canvas.scale(scale, scale)
@@ -193,7 +194,7 @@ object ClockRenderer {
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = themed(pale, theme)
                 textAlign = Paint.Align.CENTER
-                textSize = 15f * unit
+                textSize = (if (offset == 0) 18f else 15f) * unit
                 typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
             }
             canvas.drawText("${hour.temperatureC.roundToInt()}°", x, y + 21f * unit, paint)
@@ -255,10 +256,10 @@ object ClockRenderer {
             val hour = slot.hour
             if (hour != null && hour.code >= 0) {
                 val geometry = iconGeometry(hour.code, hour.isDay)
-                val iconSize = if (index == 0) 49f else 39f
+                val iconSize = if (index == 0) 56f else 39f
                 val iconScale = iconSize / maxOf(geometry.width, geometry.height)
                 canvas.save()
-                canvas.translate(x, 59f - geometry.visualCentreY * iconScale)
+                canvas.translate(x, (if (index == 0) 58f else 59f) - geometry.visualCentreY * iconScale)
                 canvas.scale(iconScale, iconScale)
                 drawWeatherIcon(canvas, hour.code, hour.isDay, theme)
                 canvas.restore()
@@ -355,12 +356,16 @@ object ClockRenderer {
     private fun iconGeometry(code: Int, isDay: Boolean): IconGeometry = when (code) {
         0 -> if (isDay) IconGeometry(82f, 82f, 0f)
              else IconGeometry(46f, 46f, 0f)
-        1, 2 -> IconGeometry(111f, 89f, 3f)
+        1, 2 -> if (isDay) IconGeometry(111f, 89f, 3f)
+                else IconGeometry(111f, 100f, -5f)
         45, 48 -> IconGeometry(98f, 105f, 4f)
         51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82 ->
-            IconGeometry(98f, 85f, 2f)
-        71, 73, 75, 77, 85, 86 -> IconGeometry(98f, 94f, 2f)
-        95, 96, 99 -> IconGeometry(98f, 105f, 6f)
+            if (isDay) IconGeometry(98f, 85f, 2f)
+            else IconGeometry(108f, 130f, -8f)
+        71, 73, 75, 77, 85, 86 -> if (isDay) IconGeometry(98f, 94f, 2f)
+            else IconGeometry(108f, 130f, -8f)
+        95, 96, 99 -> if (isDay) IconGeometry(98f, 105f, 6f)
+            else IconGeometry(108f, 138f, -5f)
         else -> IconGeometry(98f, 65f, -6f)
     }
 
@@ -448,7 +453,7 @@ object ClockRenderer {
                 else drawMoon(canvas, cx, cy, palette)
             1, 2 -> {
                 if (isDay) drawSun(canvas, cx - 21f, cy - 20f, palette, 18f)
-                else drawMoon(canvas, cx - 21f, cy - 20f, palette, 18f)
+                else drawMoon(canvas, cx - 28f, cy - 28f, palette, 22f)
                 drawCloud(canvas, cx, cy + 12f, palette)
             }
             3, null, -1 -> drawCloud(canvas, cx, cy, palette)
@@ -461,6 +466,7 @@ object ClockRenderer {
                 }
             }
             51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82 -> {
+                if (!isDay) drawMoon(canvas, cx - 29f, cy - 48f, palette, 18f)
                 // Draw rain BELOW the cloud, with a bright wide halo and a
                 // saturated core. The old 6px/15px dashes disappeared after
                 // Android Auto scaled and dimmed the clock artwork.
@@ -474,6 +480,7 @@ object ClockRenderer {
                 }
             }
             71, 73, 75, 77, 85, 86 -> {
+                if (!isDay) drawMoon(canvas, cx - 29f, cy - 48f, palette, 18f)
                 drawCloud(canvas, cx, cy - 14f, palette)
                 val snow = stroke(palette.snow, 6f)
                 repeat(3) { i ->
@@ -484,6 +491,7 @@ object ClockRenderer {
                 }
             }
             95, 96, 99 -> {
+                if (!isDay) drawMoon(canvas, cx - 29f, cy - 48f, palette, 18f)
                 drawCloud(canvas, cx, cy - 13f, palette)
                 val bolt = Path().apply {
                     moveTo(cx + 5f, cy + 14f)

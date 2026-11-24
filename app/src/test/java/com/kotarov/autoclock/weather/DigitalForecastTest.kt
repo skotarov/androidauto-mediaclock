@@ -19,7 +19,7 @@ class DigitalForecastTest {
     @Test fun sixColumnsBeginAtCurrentHourAndFadeAtEnd() {
         val slots = ForecastStore.digitalSlots(hours, now, zone)
         assertEquals((10..15).toList(), slots.map { it.time.hour })
-        assertEquals(listOf(255, 255, 255, 255, 166, 77), slots.map { it.alpha })
+        assertEquals(listOf(255, 255, 255, 255, 115, 51), slots.map { it.alpha })
         assertEquals(0, slots.first().hour?.code)
     }
 
