@@ -144,15 +144,20 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             result.sendResult(mutableListOf())
             return
         }
-        // One playable entry preserves Android Auto media discovery.
-        // The separate hourly forecast list is no longer exposed.
+        // Information only: the browser exposes no playable track or folder.
+        // Keep the active media session intact for the dashboard clock and
+        // Play/Pause. Android Auto itself still decides when to open Now Playing.
         val description = MediaDescriptionCompat.Builder()
-            .setMediaId(ClockLibraryRows.CLOCK_ID)
-            .setTitle("Auto Clock")
+            .setMediaId(AutoClockInfo.ID)
+            .setTitle(AutoClockInfo.title(installedVersion()))
             .build()
-        result.sendResult(mutableListOf(MediaBrowserCompat.MediaItem(
-            description, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE)))
+        result.sendResult(mutableListOf(MediaBrowserCompat.MediaItem(description, 0)))
     }
+
+    @Suppress("DEPRECATION")
+    private fun installedVersion(): String? =
+        try { packageManager.getPackageInfo(packageName, 0).versionName }
+        catch (_: Exception) { null }
 
     override fun onDestroy() {
         // Service shutdown must not change the saved weather preference.
