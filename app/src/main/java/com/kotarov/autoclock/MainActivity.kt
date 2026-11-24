@@ -22,6 +22,9 @@ import android.widget.SeekBar
 import android.widget.ScrollView
 import android.widget.TextView
 import android.app.Activity
+import android.app.AlertDialog
+import com.kotarov.autoclock.media.NoticeSound
+import com.kotarov.autoclock.media.NoticeSoundPlayer
 import android.widget.Switch
 import com.kotarov.autoclock.artwork.ClockRenderer
 import com.kotarov.autoclock.media.AutoClockMediaService
@@ -47,6 +50,7 @@ class MainActivity : Activity() {
     private lateinit var digitalLabel: TextView
     private lateinit var weatherToggle: Switch
     private var syncingWeatherToggle = false
+    private val soundPreview by lazy { NoticeSoundPlayer() }
     private val weatherPreferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == ClockPreset.KEY_ADD_WEATHER) syncWeatherToggle()
         else if (key == "weather_fetched_at") updatePreviewTiles()
@@ -187,7 +191,30 @@ class MainActivity : Activity() {
         }
         root.addView(locationMessage)
 
-
+        val soundButton = Button(this).apply {
+            isAllCaps = false
+            text = "Звук: " + NoticeSound.fromId(prefs.getString(NoticeSound.KEY, null)).label
+            setOnClickListener {
+                val options = NoticeSound.entries
+                val selected = NoticeSound.fromId(prefs.getString(NoticeSound.KEY, null))
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle("Звук на съобщенията")
+                    .setSingleChoiceItems(options.map { it.label }.toTypedArray(),
+                        options.indexOf(selected)) { dialog, index ->
+                        val sound = options[index]
+                        prefs.edit().putString(NoticeSound.KEY, sound.id).apply()
+                        text = "Звук: " + sound.label
+                        soundPreview.play(sound)
+                        dialog.dismiss()
+                    }
+                    .setNegativeButton("Отказ", null)
+                    .show()
+            }
+        }
+        root.addView(soundButton, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = dp(16) })
     }
 
     override fun onStart() {
@@ -198,6 +225,7 @@ class MainActivity : Activity() {
 
     override fun onStop() {
         settings().unregisterOnSharedPreferenceChangeListener(weatherPreferenceListener)
+        soundPreview.stop()
         super.onStop()
     }
 
