@@ -8,6 +8,11 @@ import android.graphics.Color
 import android.content.res.ColorStateList
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
+import android.view.View
+import com.kotarov.autoclock.media.CityAnnouncement
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -19,7 +24,6 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
 import androidx.core.app.ActivityCompat
 import com.kotarov.autoclock.artwork.ClockRenderer
-import com.kotarov.autoclock.media.AutoClockBrowseHostLaunch
 import com.kotarov.autoclock.media.AutoClockMediaService
 import com.kotarov.autoclock.media.ClockFamily
 import com.kotarov.autoclock.media.ClockPreset
@@ -43,6 +47,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var digitalLabel: TextView
     private var analogBitmap: Bitmap? = null
     private var digitalBitmap: Bitmap? = null
+    private val messageHandler = Handler(Looper.getMainLooper())
+    private lateinit var locationMessage: TextView
+    private val hideLocationMessage = Runnable {
+        if (::locationMessage.isInitialized) locationMessage.visibility = View.GONE
+    }
 
     private val ink = Color.WHITE
     private val background = Color.rgb(10, 10, 12)
@@ -149,44 +158,26 @@ class MainActivity : AppCompatActivity() {
         sizeRow.addView(text("А", 28f, 0))
         root.addView(sizeRow)
 
-        root.addView(text("Тестове", 18f, dp(6)))
-        val probeResult = text("", 13f, dp(2))
-        val probeButton = Button(this).apply {
-            text = "Отвори почасовия списък"
+        root.addView(Button(this).apply {
+            text = "Виж локация"
             isAllCaps = false
-            isEnabled = prefs.getBoolean(
-                AutoClockMediaService.KEY_TEST_DIRECT_BROWSE, false)
             setOnClickListener {
-                probeResult.text = when (AutoClockBrowseHostLaunch.tryOpen(this@MainActivity)) {
-                    AutoClockBrowseHostLaunch.Outcome.SENT -> "Изпратено"
-                    AutoClockBrowseHostLaunch.Outcome.UNSUPPORTED -> "Не се поддържа"
-                    AutoClockBrowseHostLaunch.Outcome.FAILED -> "Неуспешно"
-                }
+                val city = WeatherStore.current(this@MainActivity)?.localityLabel
+                locationMessage.text = city ?: "Няма данни за локацията"
+                locationMessage.visibility = View.VISIBLE
+                messageHandler.removeCallbacks(hideLocationMessage)
+                messageHandler.postDelayed(hideLocationMessage, CityAnnouncement.DURATION_MS)
+                // The already connected media service receives the same
+                // request; no playback change or new GPS/network request.
+                prefs.edit().putLong(AutoClockMediaService.KEY_SHOW_LOCATION,
+                    SystemClock.elapsedRealtimeNanos()).apply()
             }
+        })
+        locationMessage = text("", 18f, dp(4)).apply {
+            gravity = android.view.Gravity.CENTER
+            visibility = View.GONE
         }
-        root.addView(checkOption("Тест 1 — директно към списъка",
-            probeButton.isEnabled
-        ) { enabled ->
-            prefs.edit().putBoolean(
-                AutoClockMediaService.KEY_TEST_DIRECT_BROWSE, enabled).apply()
-            probeButton.isEnabled = enabled
-            probeResult.text = ""
-        })
-        root.addView(probeButton)
-        root.addView(probeResult)
-        root.addView(checkOption("Тест 2 — STATE_NONE",
-            prefs.getBoolean(AutoClockMediaService.KEY_TEST_STATE_NONE, false)
-        ) { enabled ->
-            prefs.edit().putBoolean(
-                AutoClockMediaService.KEY_TEST_STATE_NONE, enabled).apply()
-        })
-
-        root.addView(checkOption("Тест 3 — STATE_STOPPED",
-            prefs.getBoolean(AutoClockMediaService.KEY_TEST_STATE_STOPPED, false)
-        ) { enabled ->
-            prefs.edit().putBoolean(
-                AutoClockMediaService.KEY_TEST_STATE_STOPPED, enabled).apply()
-        })
+        root.addView(locationMessage)
 
     }
 
@@ -385,6 +376,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        messageHandler.removeCallbacks(hideLocationMessage)
         if (::analogImage.isInitialized) analogImage.setImageDrawable(null)
         if (::digitalImage.isInitialized) digitalImage.setImageDrawable(null)
         analogBitmap?.recycle()

@@ -5,13 +5,6 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
-    <!-- Needed to query for system media-template V2 handlers (Android 11+). -->
-    <queries>
-        <intent>
-            <action android:name="androidx.car.app.mediaextensions.action.MEDIA_TEMPLATE_V2" />
-        </intent>
-    </queries>
-
     <application
         android:allowBackup="true"
         android:label="Auto Clock 2"
@@ -31,12 +24,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
-        <!-- Host-activated TEST 1 session activity; never background-launched. -->
-        <activity
-            android:name=".media.AutoClockBrowseTrampolineActivity"
-            android:exported="false"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <service
             android:name=".media.AutoClockMediaService"

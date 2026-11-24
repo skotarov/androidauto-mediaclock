@@ -16,6 +16,24 @@ class CityAnnouncementTest {
         assertFalse(city.update("Пазарджик", 10000L))
     }
 
+    @Test fun manualRequestRepeatsSameCityForEightSeconds() {
+        val city = CityAnnouncement()
+        city.update("София", 0L)
+        city.show("София", 1000L)
+        assertEquals("София", city.title(8999L))
+        city.show("София", 5000L)
+        assertFalse(city.update("София", 6000L))
+        assertEquals("София", city.title(12999L))
+        assertNull(city.title(13000L))
+    }
+
+    @Test fun manualRequestWithoutLocationDoesNotInventCity() {
+        val city = CityAnnouncement()
+        city.show(null, 1000L)
+        assertEquals("Няма данни за локацията", city.title(1000L))
+        assertNull(city.title(9000L))
+    }
+
     @Test fun newCityReplacesAnActiveTitleAndRestartsEightSeconds() {
         val city = CityAnnouncement()
         city.update("София", 0L)
