@@ -36,17 +36,17 @@ jobs:
       - name: Copy APK with friendly filename
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk dist/AutoClock-2-v0.54-beta.apk
+          cp app/build/outputs/apk/debug/app-debug.apk dist/AutoClock-2-v0.55-beta.apk
 
       - name: Create or update public beta download
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if ! gh release view v0.54.0-beta >/dev/null 2>&1; then
-            gh release create v0.54.0-beta \
+          if ! gh release view v0.55.0-beta >/dev/null 2>&1; then
+            gh release create v0.55.0-beta \
               --target "$GITHUB_SHA" \
-              --title "Auto Clock 2 — beta 0.54.0" \
-              --notes "Larger current weather icon, four full-brightness hours, 45% remaining and 20% final slot, visible night cloud and precipitation symbols, metadata label test switch." \
+              --title "Auto Clock 2 — beta 0.55.0" \
+              --notes "Larger analog weather icons; future glyphs only when the visible weather symbol changes; hourly temperatures preserved." \
               --prerelease
           fi
-          gh release upload v0.54.0-beta dist/AutoClock-2-v0.54-beta.apk --clobber
+          gh release upload v0.55.0-beta dist/AutoClock-2-v0.55-beta.apk --clobber
