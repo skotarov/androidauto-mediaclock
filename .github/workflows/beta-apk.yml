@@ -36,17 +36,17 @@ jobs:
       - name: Copy APK with friendly filename
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk dist/AutoClock-2-v0.48-beta.apk
+          cp app/build/outputs/apk/debug/app-debug.apk dist/AutoClock-2-v0.49-beta.apk
 
       - name: Create or update public beta download
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if ! gh release view v0.48.0-beta >/dev/null 2>&1; then
-            gh release create v0.48.0-beta \
+          if ! gh release view v0.49.0-beta >/dev/null 2>&1; then
+            gh release create v0.49.0-beta \
               --target "$GITHUB_SHA" \
-              --title "Auto Clock 2 — beta 0.48.0" \
-              --notes "Remove screen experiments and hourly browse list; add View location button and eight-second temporary city media message." \
+              --title "Auto Clock 2 — beta 0.49.0" \
+              --notes "Play/Pause and phone weather switch share one saved preference; both states retain the live selected clock. Location announcements unchanged." \
               --prerelease
           fi
-          gh release upload v0.48.0-beta dist/AutoClock-2-v0.48-beta.apk --clobber
+          gh release upload v0.49.0-beta dist/AutoClock-2-v0.49-beta.apk --clobber

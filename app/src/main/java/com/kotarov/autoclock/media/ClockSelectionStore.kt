@@ -2,7 +2,7 @@ package com.kotarov.autoclock.media
 
 import android.content.SharedPreferences
 
-/** Persist analog/digital choices; weather-only is the Pause display. */
+/** Persist clock family and the single shared weather / playback switch. */
 object ClockSelectionStore {
     private const val KEY_SCHEMA_V13 = "display_simplified_v13"
     private const val KEY_ANALOG_DEFAULT_OFF_V20 = "analog_digital_default_off_v20"
@@ -93,6 +93,14 @@ object ClockSelectionStore {
             .apply()
     }
 
+    fun weatherEnabled(prefs: SharedPreferences): Boolean =
+        prefs.getBoolean(ClockPreset.KEY_ADD_WEATHER, false)
+
+    fun setWeatherEnabled(prefs: SharedPreferences, enabled: Boolean) {
+        if (weatherEnabled(prefs) != enabled)
+            prefs.edit().putBoolean(ClockPreset.KEY_ADD_WEATHER, enabled).apply()
+    }
+
     fun current(prefs: SharedPreferences): ClockPreset {
         val family = PlaybackDisplay.clockFamily(
             ClockFamily.fromId(prefs.getString(ClockPreset.KEY_FAMILY, null))
@@ -101,21 +109,7 @@ object ClockSelectionStore {
     }
 
     fun forFamily(prefs: SharedPreferences, family: ClockFamily): ClockPreset =
-        when (family) {
-            ClockFamily.ANALOG ->
-                if (prefs.getBoolean(ClockPreset.KEY_ADD_WEATHER, false))
-                    ClockPreset.ANALOG_WEATHER
-                else ClockPreset.ANALOG_PURE
-            ClockFamily.DIGITAL ->
-                if (prefs.getBoolean(ClockPreset.KEY_ADD_WEATHER, false))
-                    ClockPreset.DIGITAL_TIME_WEATHER
-                else ClockPreset.DIGITAL_TIME
-            // WEATHER_ONLY is the unmodified pause artwork.
-            ClockFamily.WEATHER ->
-                if (prefs.getBoolean(ClockPreset.KEY_WEATHER_ADD_DIGITAL, false))
-                    ClockPreset.WEATHER_WITH_TIME
-                else ClockPreset.WEATHER_ONLY
-        }
+        PlaybackDisplay.forFamily(family, weatherEnabled(prefs))
 
     fun choose(prefs: SharedPreferences, preset: ClockPreset) {
         val editor = prefs.edit()

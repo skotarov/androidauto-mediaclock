@@ -2,6 +2,7 @@ package com.kotarov.autoclock
 
 import android.Manifest
 import android.content.Context
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
@@ -45,6 +46,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var digitalImage: ImageView
     private lateinit var analogLabel: TextView
     private lateinit var digitalLabel: TextView
+    private lateinit var weatherToggle: SwitchCompat
+    private var syncingWeatherToggle = false
+    private val weatherPreferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == ClockPreset.KEY_ADD_WEATHER) syncWeatherToggle()
+    }
     private var analogBitmap: Bitmap? = null
     private var digitalBitmap: Bitmap? = null
     private val messageHandler = Handler(Looper.getMainLooper())
@@ -118,11 +124,13 @@ class MainActivity : AppCompatActivity() {
 
         root.addView(checkOption(
             "Добави времето",
-            prefs.getBoolean(ClockPreset.KEY_ADD_WEATHER, false)
+            ClockSelectionStore.weatherEnabled(prefs),
+            captureToggle = { weatherToggle = it }
         ) { checked ->
-            prefs.edit().putBoolean(ClockPreset.KEY_ADD_WEATHER, checked).apply()
-            // Both thumbnails always reflect this one preference immediately.
-            updatePreviewTiles()
+            if (!syncingWeatherToggle) {
+                ClockSelectionStore.setWeatherEnabled(prefs, checked)
+                updatePreviewTiles()
+            }
         })
         updatePreviewTiles()
 
@@ -179,6 +187,28 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(locationMessage)
 
+    }
+
+    override fun onStart() {
+        super.onStart()
+        settings().registerOnSharedPreferenceChangeListener(weatherPreferenceListener)
+        syncWeatherToggle()
+    }
+
+    override fun onStop() {
+        settings().unregisterOnSharedPreferenceChangeListener(weatherPreferenceListener)
+        super.onStop()
+    }
+
+    private fun syncWeatherToggle() {
+        if (!::weatherToggle.isInitialized) return
+        val checked = ClockSelectionStore.weatherEnabled(settings())
+        if (weatherToggle.isChecked != checked) {
+            syncingWeatherToggle = true
+            weatherToggle.isChecked = checked
+            syncingWeatherToggle = false
+            updatePreviewTiles()
+        }
     }
 
     override fun onResume() {
@@ -315,7 +345,9 @@ class MainActivity : AppCompatActivity() {
      * old checkbox, while the entire row remains a generous touch target.
      */
     private fun checkOption(
-        title: String, checked: Boolean, onChange: (Boolean) -> Unit
+        title: String, checked: Boolean,
+        captureToggle: ((SwitchCompat) -> Unit)? = null,
+        onChange: (Boolean) -> Unit
     ): LinearLayout {
         val toggle = SwitchCompat(this).apply {
             showText = false
@@ -333,6 +365,7 @@ class MainActivity : AppCompatActivity() {
             )
             setOnCheckedChangeListener { _, value -> onChange(value) }
         }
+        captureToggle?.invoke(toggle)
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL

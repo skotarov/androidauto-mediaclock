@@ -18,24 +18,19 @@ import com.kotarov.autoclock.weather.WeatherStore
 import com.kotarov.autoclock.weather.ForecastStore
 import java.time.LocalDateTime
 
-/**
- * v0.39: keep stable dashboard/library routing; test STATE_STOPPED separately
- * from STATE_NONE, which Android Auto hides from playback surfaces.
- * No minute browse refresh. No public Android Auto fullscreen/compact
- * callback exists: full date is supplied in standard track metadata only.
- */
+/** Play/Pause controls the single persisted weather preference.
+ * Both playback states always show a live clock; no audio is played. */
 class AutoClockMediaService : MediaBrowserServiceCompat() {
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var session: MediaSessionCompat
     private lateinit var prefs: SharedPreferences
-    private var running = false
-    private var preset = ClockPreset.ANALOG_PURE
+    private val running: Boolean
+        get() = ClockSelectionStore.weatherEnabled(prefs)
     private var artworkGeneration = 0L
     private val cityAnnouncement = CityAnnouncement()
     private val hideCityTitle = Runnable { publishClock() }
 
     private val settingsRefresh = Runnable {
-        preset = selectedPreset()
         artworkGeneration += 1L
         publishClock()
         publishPlaybackState()
@@ -67,25 +62,12 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         }
     }
 
-    /** Clock needs a new image once a minute only during Play. */
+    /** Both Play and Pause display the clock, so both advance every minute. */
     private val minuteTick = object : Runnable {
         override fun run() {
-            if (!running) return
-            preset = selectedPreset()
             publishClock()
-            publishPlaybackState()
             requestWeatherIfNecessary()
             scheduleNextMinute()
-        }
-    }
-
-    /** Stop retains weather, but doesn't draw 60 identical pictures an hour. */
-    private val stoppedWeatherTick = object : Runnable {
-        override fun run() {
-            if (running) return
-            requestWeatherIfNecessary()
-            publishClock()
-            scheduleStoppedWeatherTick()
         }
     }
 
@@ -100,12 +82,11 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         prefs.edit().remove(KEY_TEST_DIRECT_BROWSE).remove(KEY_TEST_STATE_NONE)
             .remove(KEY_TEST_STATE_STOPPED).apply()
         ClockSelectionStore.migrateSimplifiedIfNeeded(prefs)
-        preset = selectedPreset()
         session = MediaSessionCompat(this, "AutoClockMediaTestsV037").apply {
             setFlags(MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS)
             setCallback(object : MediaSessionCompat.Callback() {
                 override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
-                    if (mediaId == ClockLibraryRows.CLOCK_ID) startClock()
+                    if (mediaId == ClockLibraryRows.CLOCK_ID) setWeatherEnabled(true)
                 }
 
                 override fun onPrepareFromMediaId(mediaId: String?, extras: Bundle?) {
@@ -115,9 +96,9 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                     }
                 }
 
-                override fun onPlay() = startClock()
-                override fun onPause() = stopClock(forceRefresh = true)
-                override fun onStop() = stopClock(forceRefresh = true)
+                override fun onPlay() = setWeatherEnabled(true)
+                override fun onPause() = setWeatherEnabled(false)
+                override fun onStop() = setWeatherEnabled(false)
             })
             isActive = true
         }
@@ -128,8 +109,11 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         session.setSessionActivity(null)
         sessionToken = session.sessionToken
         prefs.registerOnSharedPreferenceChangeListener(prefsListener)
-        // Initially stopped: the weather is visible until Play.
-        stopClock()
+        // Restore the last explicit phone/car choice. Do not overwrite it.
+        publishClock()
+        publishPlaybackState()
+        requestWeatherIfNecessary()
+        scheduleNextMinute()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int =
@@ -171,10 +155,9 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     override fun onDestroy() {
-        running = false
+        // Service shutdown must not change the saved weather preference.
         artworkGeneration += 1L
         handler.removeCallbacks(minuteTick)
-        handler.removeCallbacks(stoppedWeatherTick)
         handler.removeCallbacks(settingsRefresh)
         handler.removeCallbacks(hideCityTitle)
         prefs.unregisterOnSharedPreferenceChangeListener(prefsListener)
@@ -200,38 +183,19 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         handler.postDelayed(hideCityTitle, CityAnnouncement.DURATION_MS)
     }
 
-    private fun startClock() {
-        preset = selectedPreset()
-        running = true
+    private fun setWeatherEnabled(enabled: Boolean) {
+        ClockSelectionStore.setWeatherEnabled(prefs, enabled)
+        // The same preference listener handles phone switches. Publish now
+        // for car transport commands, avoiding duplicate queued artwork.
+        handler.removeCallbacks(settingsRefresh)
         artworkGeneration += 1L
-        handler.removeCallbacks(stoppedWeatherTick)
         publishClock()
         publishPlaybackState()
         requestWeatherIfNecessary()
-        scheduleNextMinute()
-    }
-
-    private fun stopClock(forceRefresh: Boolean = false) {
-        running = false
-        handler.removeCallbacks(minuteTick)
-        publishClock()
-        publishPlaybackState()
-        // Pause/Stop explicitly requests fresh weather. The routine clock
-        // and stopped-weather ticks remain at their existing 15m throttle.
-        requestWeatherIfNecessary(forceRefresh)
-        scheduleStoppedWeatherTick()
-    }
-
-    private fun scheduleStoppedWeatherTick() {
-        handler.removeCallbacks(stoppedWeatherTick)
-        if (!running) {
-            handler.postDelayed(stoppedWeatherTick, WeatherStore.REFRESH_INTERVAL_MS)
-        }
     }
 
     private fun scheduleNextMinute() {
         handler.removeCallbacks(minuteTick)
-        if (!running) return
         handler.postDelayed(
             minuteTick,
             MinuteProgress.millisUntilNextMinute(System.currentTimeMillis())
@@ -239,11 +203,11 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private fun visiblePreset(): ClockPreset =
-        PlaybackDisplay.visiblePreset(preset, running)
+        PlaybackDisplay.visiblePreset(selectedPreset(), running)
 
     private fun requestWeatherIfNecessary(force: Boolean = false) {
-        // Hourly forecast shares the same worker/approximate location fix.
-        // Force only on explicit Pause/Stop; routine checks keep 15m interval.
+        // Keep locality announcements available even with forecast hidden.
+        // The shared worker retains its normal 15-minute throttle.
         WeatherStore.refreshIfDue(this, force = force)
     }
 
@@ -274,8 +238,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val locality = (weather ?: WeatherStore.current(this))?.localityLabel
         if (cityAnnouncement.update(locality, tick)) scheduleCityTitleHide()
         val temporaryTitle = cityAnnouncement.title(tick) ?: INVISIBLE_TEXT
-        val activeId = if (running) ClockLibraryRows.CLOCK_ID
-            else ClockLibraryRows.WEATHER_ID
+        val activeId = ClockLibraryRows.CLOCK_ID
 
         // Keep both a direct reduced-size bitmap and an artwork URI to cope
         // with Android Auto implementations that cache either representation.
