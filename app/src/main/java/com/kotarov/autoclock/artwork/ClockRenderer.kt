@@ -43,6 +43,10 @@ object ClockRenderer {
     // different offsets to match the size of the dial in Android Auto.
     private val tickX = FloatArray(60) { cos(Math.toRadians(it * 6.0 - 90)).toFloat() }
     private val tickY = FloatArray(60) { sin(Math.toRadians(it * 6.0 - 90)).toFloat() }
+    // A forecast describes the interval starting at its hour, not the dial mark.
+    // Place it exactly halfway to the next hour (+15 degrees clockwise).
+    private val forecastX = FloatArray(12) { cos(Math.toRadians(it * 30.0 - 75)).toFloat() }
+    private val forecastY = FloatArray(12) { sin(Math.toRadians(it * 30.0 - 75)).toFloat() }
     private fun themed(color: Int, theme: ClockTheme): Int =
         if (theme == ClockTheme.DARK) color else color xor 0x00ffffff
     private val timeFormat = DateTimeFormatter.ofPattern("HH:mm")
@@ -171,9 +175,9 @@ object ClockRenderer {
             // Match real elapsed hourly slots; the dial uses the phone zone.
             val offset = ((hour.epochSeconds - currentSlot) / 3600L).toInt()
             if (offset !in -1..ForecastStore.RING_FUTURE_HOURS || hour.code < 0) continue
-            val index = local.hour % 12 * 5
-            val x = CENTER_X + tickX[index] * ring
-            val y = centreY + tickY[index] * ring
+            val index = local.hour % 12
+            val x = CENTER_X + forecastX[index] * ring
+            val y = centreY + forecastY[index] * ring
             val alpha = ForecastStore.ringAlpha(offset)
             val bounds = 35f * unit
             val save = if (alpha < 255)
@@ -228,12 +232,26 @@ object ClockRenderer {
             textSize = 17f
         }
         val temp = Paint(label).apply { color = themed(white, theme) }
+        // Seven boundary labels delimit the six intervals. Keep the existing
+        // icon and temperature columns, sizes, spacing and fade unchanged.
+        val pitch = 73f
+        val firstBoundary = -slots.size * pitch / 2f
+        val labelColor = label.color
         slots.forEachIndexed { index, slot ->
-            val x = (index - 2.5f) * 73f
+            label.color = labelColor
+            label.alpha = slot.alpha
+            canvas.drawText(slot.time.format(timeFormat), firstBoundary + index * pitch, 25f, label)
+        }
+        if (slots.isNotEmpty()) {
+            label.alpha = slots.last().alpha
+            canvas.drawText(slots.last().time.plusHours(1).format(timeFormat),
+                firstBoundary + slots.size * pitch, 25f, label)
+        }
+        slots.forEachIndexed { index, slot ->
+            val x = firstBoundary + (index + 0.5f) * pitch
             val save = if (slot.alpha < 255)
-                canvas.saveLayerAlpha(x - 36f, 10f, x + 36f, 122f, slot.alpha)
+                canvas.saveLayerAlpha(x - 36f, 36f, x + 36f, 122f, slot.alpha)
                 else canvas.save()
-            canvas.drawText(slot.time.format(timeFormat), x, 25f, label)
             val hour = slot.hour
             if (hour != null && hour.code >= 0) {
                 val geometry = iconGeometry(hour.code, hour.isDay)
