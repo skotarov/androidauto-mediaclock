@@ -26,6 +26,7 @@ import kotlin.math.roundToInt
  */
 object ClockRenderer {
     const val SIZE = 512
+    const val MEDIA_BITMAP_SIZE = 320
     private const val CENTER_X = 256f
     // The large analog dial uses the original v0.29/v0.30 geometry except
     // for a minimal 6px downward adjustment to prevent top-rim cropping.
@@ -37,8 +38,14 @@ object ClockRenderer {
     private const val DIGITAL_FORECAST_REFERENCE_TIME_SIZE = 132f
     private const val DIGITAL_FORECAST_TIME_OFFSET = 61f
 
+    // Preserve the clock's exact position and size. Only the forecast
+    // gets extra inset for media hosts which crop or zoom the square art.
     private fun digitalForecastScale(unit: Float): Float =
-        unit * DIGITAL_TIME_SIZE / DIGITAL_FORECAST_REFERENCE_TIME_SIZE
+        unit * DIGITAL_TIME_SIZE / DIGITAL_FORECAST_REFERENCE_TIME_SIZE * 0.85f
+
+    private fun digitalForecastTopOffset(unit: Float): Float =
+        DIGITAL_FORECAST_TIME_OFFSET * unit * DIGITAL_TIME_SIZE /
+            DIGITAL_FORECAST_REFERENCE_TIME_SIZE
     private const val COMPACT_ANALOG_CENTER_Y = 208f
     // Original standard Y=216 with radius 122. Restore original near-top
     // placement, adding only 6px clearance: Y=222, top=100 instead of 94.
@@ -97,8 +104,8 @@ object ClockRenderer {
         }
         if (preset.usesWeather && !sourceLabel.isNullOrBlank()) {
             val sourceY = if (preset.hasAnalog) clockY + radius * 1.28f + 85f * unit
-                else clockY + (DIGITAL_FORECAST_TIME_OFFSET + 148f) * digitalForecastScale(unit)
-            val maxWidth = if (preset.hasAnalog) radius * 2f + 40f * unit else 390f
+                else clockY + digitalForecastTopOffset(unit) + 148f * digitalForecastScale(unit)
+            val maxWidth = if (preset.hasAnalog) radius * 2f + 40f * unit else 290f * unit
             drawSourceLabel(canvas, sourceLabel, CENTER_X, sourceY, unit, maxWidth, theme)
         }
         return bitmap
@@ -180,7 +187,7 @@ object ClockRenderer {
         val zone = ZoneId.systemDefault()
         val currentSlot = now.atZone(zone)
             .withMinute(0).withSecond(0).withNano(0).toEpochSecond()
-        val iconEpochs = ForecastStore.ringIconEpochs(forecast, currentSlot)
+        val changes = ForecastStore.ringChanges(forecast, currentSlot)
         for (hour in forecast) {
             val local = LocalDateTime.ofInstant(Instant.ofEpochSecond(hour.epochSeconds), zone)
             // Match real elapsed hourly slots; the dial uses the phone zone.
@@ -189,7 +196,9 @@ object ClockRenderer {
             val index = local.hour % 12
             val dx = forecastX[index]
             val dy = forecastY[index]
-            val hasIcon = hour.epochSeconds in iconEpochs
+            val hasIcon = hour.epochSeconds in changes.iconEpochs
+            val hasTemperature = hour.epochSeconds in changes.temperatureEpochs
+            if (!hasIcon && !hasTemperature) continue
             val geometry = iconGeometry(hour.code, hour.isDay)
             val iconSize = if (offset == 0) 58f else 45f
             val scale = iconSize * unit / maxOf(geometry.width, geometry.height)
@@ -207,7 +216,8 @@ object ClockRenderer {
             val fm = paint.fontMetrics
             val textInner = dy * baseline + minOf(dy * fm.ascent, dy * fm.descent) -
                 abs(dx) * paint.measureText(temperature) / 2f
-            var ring = maxOf(minimumRing, clearance - textInner)
+            var ring = if (hasTemperature)
+                maxOf(minimumRing, clearance - textInner) else minimumRing
             if (hasIcon) {
                 val iconInner = -dy * lift - scale *
                     (abs(dx) * geometry.width + abs(dy) * geometry.height) / 2f
@@ -227,7 +237,7 @@ object ClockRenderer {
                 drawWeatherIcon(canvas, hour.code, hour.isDay, theme)
                 canvas.restore()
             }
-            canvas.drawText(temperature, x, y + baseline, paint)
+            if (hasTemperature) canvas.drawText(temperature, x, y + baseline, paint)
             canvas.restoreToCount(save)
         }
     }
@@ -240,7 +250,7 @@ object ClockRenderer {
     ) {
         val scale = digitalForecastScale(unit)
         canvas.save()
-        canvas.translate(CENTER_X, centreY + DIGITAL_FORECAST_TIME_OFFSET * scale)
+        canvas.translate(CENTER_X, centreY + digitalForecastTopOffset(unit))
         canvas.scale(scale, scale)
 
         val slots = ForecastStore.digitalSlots(forecast, now)
