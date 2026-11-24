@@ -2,6 +2,7 @@ package com.kotarov.autoclock.weather
 
 import android.content.Context
 import android.location.Location
+import android.location.Geocoder
 import android.os.Handler
 import android.os.Looper
 import org.json.JSONArray
@@ -26,6 +27,9 @@ import kotlin.math.roundToInt
 object WeatherStore {
     const val PREFS = "clock_settings"
     const val KEY_CITY = "weather_city"
+    const val KEY_LOCALITY = "weather_locality_v47"
+    private const val KEY_LAT = "weather_locality_lat_v47"
+    private const val KEY_LON = "weather_locality_lon_v47"
     const val AUTO_ID = "auto"
     const val REFRESH_INTERVAL_MS = 15L * 60L * 1000L
     private const val MIN_RETRY_MS = REFRESH_INTERVAL_MS
@@ -60,7 +64,8 @@ object WeatherStore {
         /** Pressure reported by METAR altimeter setting, or modeled surface pressure. */
         val pressureHpa: Double? = null,
         /** Elevation of the reporting station/model grid, NOT the car's GPS altitude. */
-        val elevationMeters: Double? = null
+        val elevationMeters: Double? = null,
+        val localityLabel: String? = null
     ) {
         val formattedTemperature: String get() = "${temperatureC.roundToInt()}°C"
         val description: String get() = describe(weatherCode)
@@ -73,7 +78,7 @@ object WeatherStore {
         // Station/ICAO and observation provenance stay in phone settings.
         // Only the city/place is shown below the clock face.
         val artworkSource: String? get() =
-            if (autoSelected) WeatherStore.simplePlaceLabel(originLabel) else null
+            localityLabel ?: WeatherStore.simplePlaceLabel(originLabel).takeIf { it.isNotBlank() }
     }
 
     /** Strip station markers and bracketed ICAO codes on the main clock. */
@@ -164,7 +169,8 @@ object WeatherStore {
             reportTime,
             selected == AUTO_ID,
             pressureHpa = storedDouble(prefs, "weather_pressure_bits", 500.0..1100.0),
-            elevationMeters = storedDouble(prefs, "weather_elevation_bits", -500.0..9000.0)
+            elevationMeters = storedDouble(prefs, "weather_elevation_bits", -500.0..9000.0),
+            localityLabel = prefs.getString(KEY_LOCALITY, null)
         )
     }
 
@@ -206,7 +212,7 @@ object WeatherStore {
                 } else {
                     fetchOnThread(
                         app, selected, callback, location.latitude, location.longitude,
-                        force
+                        now
                     ) {
                         fetchNearestStation(location) ?: fetchAutoModelFallback(location)
                     }
@@ -214,7 +220,7 @@ object WeatherStore {
             }
         } else {
             val manual = City.byId(selected)
-            fetchOnThread(app, selected, callback, manual.lat, manual.lon, force) {
+            fetchOnThread(app, selected, callback, manual.lat, manual.lon, now) {
                 fetchModel(
                     manual.lat, manual.lon,
                     manual.label, "Open-Meteo · модел"
@@ -229,18 +235,31 @@ object WeatherStore {
         callback: (Boolean) -> Unit,
         latitude: Double,
         longitude: Double,
-        forceForecast: Boolean,
+        requestAt: Long,
         request: () -> Reading?
     ) {
         Thread({
             val result = try { request() } catch (_: Exception) { null }
+            val forecast = try { ForecastStore.fetchOnWorker(latitude, longitude) }
+                catch (_: Exception) { null }
+            val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val locality = if (selectionAtStart != AUTO_ID) City.byId(selectionAtStart).label
+                else resolveLocality(app, latitude, longitude)
+                    ?: prefs.getString(KEY_LOCALITY, null)?.takeIf {
+                        val lat = Double.fromBits(prefs.getLong(KEY_LAT, Double.NaN.toBits()))
+                        val lon = Double.fromBits(prefs.getLong(KEY_LON, Double.NaN.toBits()))
+                        lat.isFinite() && lon.isFinite() &&
+                            WeatherStations.kilometers(lat, lon, latitude, longitude) <= 1.0
+                    }
             var saved = false
             if (result != null &&
-                selectedMode(app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                    .getString(KEY_CITY, null)) == selectionAtStart
+                selectedMode(prefs.getString(KEY_CITY, null)) == selectionAtStart &&
+                prefs.getLong("weather_attempt_at", 0L) == requestAt
             ) {
-                val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                prefs.edit()
+                val editor = prefs.edit()
+                    .putString(KEY_LOCALITY, locality)
+                    .putLong(KEY_LAT, latitude.toBits())
+                    .putLong(KEY_LON, longitude.toBits())
                     .putString("weather_cached_mode", selectionAtStart)
                     .putString("weather_cached_city", selectionAtStart)
                     .putLong("weather_fetched_at", System.currentTimeMillis())
@@ -259,22 +278,26 @@ object WeatherStore {
                     .putLong("weather_elevation_bits",
                         java.lang.Double.doubleToRawLongBits(
                             result.elevationMeters ?: Double.NaN))
-                    .apply()
+                if (forecast != null)
+                    ForecastStore.putForecast(editor, selectionAtStart, latitude, longitude, forecast)
+                else if (!ForecastStore.matchesLocation(prefs, selectionAtStart, latitude, longitude))
+                    ForecastStore.clearForecast(editor)
+                editor.apply()
                 saved = true
-            }
-            // Forecast uses the same approximate coordinates; no extra GPS.
-            // Auto 15m ticks are throttled; an explicit Pause/settings open
-            // requests a fresh forecast as well as current observations.
-            try {
-                ForecastStore.refreshIfDueOnWorker(
-                    app, selectionAtStart, latitude, longitude,
-                    force = forceForecast
-                )
-            } catch (_: Exception) {
-                // An unavailable forecast must not break the current weather.
             }
             Handler(Looper.getMainLooper()).post { callback(saved) }
         }, "AutoClockWeather").apply { isDaemon = true }.start()
+    }
+
+    /** Android reverse geocoding on the existing worker, not a GPS listener. */
+    @Suppress("DEPRECATION")
+    private fun resolveLocality(context: Context, latitude: Double, longitude: Double): String? {
+        return try {
+            if (!Geocoder.isPresent()) return null
+            val address = Geocoder(context, Locale("bg", "BG"))
+                .getFromLocation(latitude, longitude, 1)?.firstOrNull()
+            address?.locality?.trim()?.takeIf { it.isNotEmpty() }
+        } catch (_: Exception) { null }
     }
 
     /** Exactly one API call lists the latest reports for all eight stations. */

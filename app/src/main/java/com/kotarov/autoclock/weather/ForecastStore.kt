@@ -1,6 +1,7 @@
 package com.kotarov.autoclock.weather
 
 import android.content.Context
+import android.content.SharedPreferences
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -21,10 +22,8 @@ object ForecastStore {
     const val KEY_SAVED_AT = "forecast_hourly_saved_at_v36"
     const val KEY_MODE = "forecast_hourly_mode_v36"
     private const val KEY_DATA = "forecast_hourly_payload_v36"
-    private const val KEY_LAST_ATTEMPT = "forecast_hourly_attempt_v36"
-    private const val KEY_ATTEMPT_MODE = "forecast_hourly_attempt_mode_v36"
-    private const val FETCH_INTERVAL_MS = 15L * 60L * 1000L
-    private const val RETRY_INTERVAL_MS = 10L * 60L * 1000L
+    private const val KEY_LAT = "forecast_hourly_lat_v47"
+    private const val KEY_LON = "forecast_hourly_lon_v47"
     private const val MAX_CACHE_AGE_MS = 4L * 60L * 60L * 1000L
 
     data class Hour(
@@ -137,25 +136,11 @@ object ForecastStore {
             .take(6)
             .toList()
 
-    /** Invoked ONLY from WeatherStore's existing background weather thread. */
-    fun refreshIfDueOnWorker(
-        app: Context, mode: String, latitude: Double, longitude: Double,
-        force: Boolean = false
-    ) {
-        val prefs = app.getSharedPreferences(WeatherStore.PREFS, Context.MODE_PRIVATE)
+    /** The weather worker already throttles requests to 15 minutes.
+     * Return the data without publishing it, so weather and location can be
+     * committed together in one SharedPreferences transaction. */
+    fun fetchOnWorker(latitude: Double, longitude: Double): String? {
         val now = System.currentTimeMillis()
-        val savedAt = prefs.getLong(KEY_SAVED_AT, 0L)
-        val hasFresh = prefs.getString(KEY_MODE, null) == mode &&
-            savedAt > 0 && now - savedAt in 0..FETCH_INTERVAL_MS
-        if (!force && hasFresh) return
-        val lastAttempt = prefs.getLong(KEY_LAST_ATTEMPT, 0L)
-        if (!force && prefs.getString(KEY_ATTEMPT_MODE, null) == mode &&
-            now >= lastAttempt && now - lastAttempt < RETRY_INTERVAL_MS) return
-        prefs.edit()
-            .putLong(KEY_LAST_ATTEMPT, now)
-            .putString(KEY_ATTEMPT_MODE, mode)
-            .apply()
-
         val url = "https://api.open-meteo.com/v1/forecast?" +
             "latitude=${String.format(Locale.US, "%.4f", latitude)}&" +
             "longitude=${String.format(Locale.US, "%.4f", longitude)}&" +
@@ -167,28 +152,40 @@ object ForecastStore {
                 connectTimeout = 5000
                 readTimeout = 5000
                 setRequestProperty("Accept", "application/json")
-                setRequestProperty("User-Agent", "AutoClock2/0.45 (hourly forecast)")
+                setRequestProperty("User-Agent", "AutoClock2/0.47 (hourly forecast)")
             }
-        } catch (_: Exception) { return }
+        } catch (_: Exception) { return null }
         val body = try {
-            if (connection.responseCode != HttpURLConnection.HTTP_OK) return
+            if (connection.responseCode != HttpURLConnection.HTTP_OK) return null
             connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
         } catch (_: Exception) {
-            return
+            return null
         } finally {
             connection.disconnect()
         }
-        if (nextSixHours(parse(body), now / 1000L).size != 6) return
+        if (nextSixHours(parse(body), now / 1000L).size != 6) return null
 
-        // Do not save weather for an old city if settings changed mid-request.
-        val latest = app.getSharedPreferences(WeatherStore.PREFS, Context.MODE_PRIVATE)
-        if (WeatherStore.selectedMode(latest.getString(WeatherStore.KEY_CITY, null)) != mode)
-            return
-        latest.edit()
-            .putString(KEY_MODE, mode)
-            .putString(KEY_DATA, body)
+        return body
+    }
+
+    fun matchesLocation(prefs: SharedPreferences, mode: String, lat: Double, lon: Double): Boolean {
+        if (prefs.getString(KEY_MODE, null) != mode) return false
+        val oldLat = Double.fromBits(prefs.getLong(KEY_LAT, Double.NaN.toBits()))
+        val oldLon = Double.fromBits(prefs.getLong(KEY_LON, Double.NaN.toBits()))
+        return oldLat.isFinite() && oldLon.isFinite() &&
+            WeatherStations.kilometers(oldLat, oldLon, lat, lon) <= 1.0
+    }
+
+    fun putForecast(editor: SharedPreferences.Editor, mode: String,
+                    lat: Double, lon: Double, body: String) {
+        editor.putString(KEY_MODE, mode).putString(KEY_DATA, body)
+            .putLong(KEY_LAT, lat.toBits()).putLong(KEY_LON, lon.toBits())
             .putLong(KEY_SAVED_AT, System.currentTimeMillis())
-            .apply()
+    }
+
+    fun clearForecast(editor: SharedPreferences.Editor) {
+        editor.remove(KEY_MODE).remove(KEY_DATA).remove(KEY_LAT).remove(KEY_LON)
+            .putLong(KEY_SAVED_AT, 0L)
     }
 
     fun parse(json: String): List<Hour> {

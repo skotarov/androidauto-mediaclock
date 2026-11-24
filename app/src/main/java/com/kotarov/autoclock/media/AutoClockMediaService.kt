@@ -6,6 +6,7 @@ import android.content.SharedPreferences
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.support.v4.media.MediaBrowserCompat
 import android.support.v4.media.MediaDescriptionCompat
 import android.support.v4.media.MediaMetadataCompat
@@ -35,6 +36,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private var artworkGeneration = 0L
     private var forecastListDirty = false
     private var lastBrowseTestEnabled: Boolean? = null
+    private val cityAnnouncement = CityAnnouncement()
+    private val hideCityTitle = Runnable { publishClock() }
 
     private val settingsRefresh = Runnable {
         preset = selectedPreset()
@@ -58,6 +61,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             key == KEY_LAYOUT || key == ClockTheme.KEY ||
             key == WeatherStore.KEY_CITY || key == "weather_cached_city" ||
             key == "weather_cached_mode" || key == "weather_station_label" ||
+            key == WeatherStore.KEY_LOCALITY ||
             key == "weather_source_name" || key == "weather_fetched_at" ||
             key == "weather_code" || key == "weather_temperature_bits" ||
             key == "weather_is_day" || key == "weather_pressure_bits" ||
@@ -205,6 +209,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         handler.removeCallbacks(minuteTick)
         handler.removeCallbacks(stoppedWeatherTick)
         handler.removeCallbacks(settingsRefresh)
+        handler.removeCallbacks(hideCityTitle)
         prefs.unregisterOnSharedPreferenceChangeListener(prefsListener)
         session.isActive = false
         session.release()
@@ -321,8 +326,14 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         // dashboard or the full Now Playing view. Supply a date in STANDARD
         // metadata but keep display metadata's original compact behavior.
         // This is a best-effort display hint, not reliable view detection.
+        val tick = SystemClock.elapsedRealtime()
+        if (cityAnnouncement.update(weather?.localityLabel, tick)) {
+            handler.removeCallbacks(hideCityTitle)
+            handler.postDelayed(hideCityTitle, CityAnnouncement.DURATION_MS)
+        }
+        val temporaryTitle = if (visible.usesWeather) cityAnnouncement.title(tick) else null
         val blankCompact = hideCompactMediaText()
-        val compactTitle = if (blankCompact) INVISIBLE_TEXT else lines.title
+        val compactTitle = temporaryTitle ?: if (blankCompact) INVISIBLE_TEXT else lines.title
         val compactSubtitle = if (blankCompact) INVISIBLE_TEXT else lines.subtitle
         val activeId = if (running) ClockLibraryRows.CLOCK_ID
             else ClockLibraryRows.WEATHER_ID
@@ -351,7 +362,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             .putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, miniBitmap)
             .putBitmap(MediaMetadataCompat.METADATA_KEY_ART, art)
             .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, activeId)
-            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, lines.title)
+            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, temporaryTitle ?: lines.title)
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, fullSubtitle)
             .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, compactTitle)
             .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, compactSubtitle)

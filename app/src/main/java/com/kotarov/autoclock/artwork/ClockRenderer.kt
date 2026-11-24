@@ -140,11 +140,15 @@ object ClockRenderer {
                 }
             }
         }
-        if (preset.usesWeather && !forecastRing && !digitalForecast && !sourceLabel.isNullOrBlank()) {
+        if (preset.usesWeather && !sourceLabel.isNullOrBlank()) {
             // Position the observation/source name immediately BELOW the ring.
             // The baseline is computed from each dial's actual bottom edge,
             // not from a fixed offset from the centre.
-            val sourceY = if (preset.hasAnalog) {
+            val sourceY = if (forecastRing) {
+                clockY + radius * 1.28f + 50f * unit
+            } else if (digitalForecast) {
+                clockY + 148f * (if (compact) 0.82f else 1f)
+            } else if (preset.hasAnalog) {
                 val gap = if (compact) 18f * unit else 16f * unit
                 clockY + radius + gap
             } else clockY + 118f * unit

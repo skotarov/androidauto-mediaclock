@@ -16,7 +16,7 @@ import androidx.core.content.ContextCompat
  * Never transmit the device's coordinates to the observation-station API.
  */
 object WeatherLocation {
-    private const val MAX_LAST_FIX_AGE_MS = 15L * 60 * 1000
+    private const val MAX_LAST_FIX_AGE_MS = 60L * 1000
     private const val FIX_TIMEOUT_MS = 8000L
 
     fun permitted(context: Context): Boolean =

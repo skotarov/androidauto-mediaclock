@@ -261,6 +261,7 @@ class MainActivity : AppCompatActivity() {
                 preset.id, now, weather?.weatherCode, weather?.isDay ?: true,
                 weather?.formattedTemperature, compact,
                 outputSize = 256, condition = weather?.description,
+                sourceLabel = weather?.artworkSource,
                 theme = theme,
                 forecast = if (family != ClockFamily.WEATHER && preset.usesWeather)
                     ForecastStore.currentRing(this,

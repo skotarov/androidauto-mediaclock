@@ -28,7 +28,7 @@ object ClockMediaLabels {
         }
 
         val icon = WeatherStore.symbol(weather?.weatherCode, weather?.isDay ?: true)
-        val place = weather?.let { WeatherStore.simplePlaceLabel(it.originLabel) }
+        val place = weather?.artworkSource
             ?.takeIf(String::isNotBlank) ?: "Няма данни"
         val location = "$icon $place"
 
