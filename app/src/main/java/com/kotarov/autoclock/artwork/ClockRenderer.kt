@@ -10,10 +10,14 @@ import android.graphics.Typeface
 import com.kotarov.autoclock.media.ClockPreset
 import com.kotarov.autoclock.media.ClockFamily
 import com.kotarov.autoclock.media.ClockTheme
+import com.kotarov.autoclock.weather.ForecastStore
 import java.time.LocalDateTime
+import java.time.Instant
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.roundToInt
 
 /**
  * Three main visual styles with zero, one or two independent additions.
@@ -58,7 +62,8 @@ object ClockRenderer {
         condition: String? = null,
         sourceLabel: String? = null,
         theme: ClockTheme = ClockTheme.DARK,
-        coloredWeatherIcons: Boolean = true
+        coloredWeatherIcons: Boolean = true,
+        forecast: List<ForecastStore.Hour> = emptyList()
     ): Bitmap {
         require(outputSize in 192..SIZE) { "Unsupported artwork size" }
         val bitmap = Bitmap.createBitmap(outputSize, outputSize, Bitmap.Config.RGB_565)
@@ -74,8 +79,7 @@ object ClockRenderer {
         } else if (preset.family == ClockFamily.DIGITAL) {
             CONTENT_CENTER_Y + DIGITAL_CENTER_DOWN
         } else CONTENT_CENTER_Y
-        val analogWeatherOffset = if (compact)
-            COMPACT_ANALOG_WEATHER_Y_OFFSET else STANDARD_ANALOG_WEATHER_Y_OFFSET
+        val forecastRing = preset.family == ClockFamily.ANALOG && preset.usesWeather
 
         // The primary style establishes the visual hierarchy. Add-ons are
         // independent: no checkboxes means no secondary information at all.
@@ -84,24 +88,11 @@ object ClockRenderer {
         when (preset.family) {
             ClockFamily.ANALOG -> {
                 when {
-                    preset.hasDigitalTime && preset.usesWeather -> {
-                        drawText(canvas, time.format(timeFormat), CENTER_X,
-                            clockY - 24f * unit, 46f * unit, white, unit)
-                        drawWeatherRow(canvas, CENTER_X, clockY + analogWeatherOffset * unit,
-                            weatherCode, isDay, temperature,
-                            ANALOG_WEATHER_TEXT_SIZE * unit, unit,
-                            coloredWeatherIcons = coloredWeatherIcons, theme = theme)
-                    }
+                    forecastRing -> drawForecastRing(canvas, time, radius, clockY,
+                        forecast, coloredWeatherIcons, theme)
                     preset.hasDigitalTime ->
                         drawText(canvas, time.format(timeFormat), CENTER_X,
                             clockY, 46f * unit, white, unit)
-                    preset.usesWeather ->
-                        drawWeatherRow(canvas, CENTER_X, clockY + analogWeatherOffset * unit,
-                            weatherCode, isDay, temperature,
-                            ANALOG_WEATHER_TEXT_SIZE * unit, unit,
-                            coloredWeatherIcons = coloredWeatherIcons, theme = theme)
-                    // No additions: genuinely clean analog face, with
-                    // hour/minute hands and markings but no digits or weather.
                     else -> Unit
                 }
             }
@@ -151,7 +142,7 @@ object ClockRenderer {
                 }
             }
         }
-        if (preset.usesWeather && !sourceLabel.isNullOrBlank()) {
+        if (preset.usesWeather && !forecastRing && !sourceLabel.isNullOrBlank()) {
             // Position the observation/source name immediately BELOW the ring.
             // The baseline is computed from each dial's actual bottom edge,
             // not from a fixed offset from the centre.
@@ -314,6 +305,55 @@ object ClockRenderer {
         Canvas(result).drawBitmap(original, 0f, 0f, paint)
         original.recycle()
         return result
+    }
+
+    /** Seven slots at their actual clock positions. The current slot fades
+     * to 50%; the last two use 65% and 30%. Missing slots stay blank.
+     * Draw each glyph into a small alpha layer so its overlapping strokes
+     * fade together; no persistent bitmap or per-second work is added.
+     */
+    private fun drawForecastRing(
+        canvas: Canvas, now: LocalDateTime, radius: Float, centreY: Float,
+        forecast: List<ForecastStore.Hour>, colored: Boolean, theme: ClockTheme
+    ) {
+        val unit = radius / STANDARD_RADIUS
+        val ring = radius * 1.28f
+        val zone = ZoneId.systemDefault()
+        val currentEpoch = now.atZone(zone).toEpochSecond()
+        val firstSlot = forecast.filter { it.epochSeconds <= currentEpoch }
+            .maxOfOrNull { it.epochSeconds }
+            ?: forecast.minOfOrNull { it.epochSeconds }?.minus(3600L)
+            ?: return
+        for (hour in forecast) {
+            val local = LocalDateTime.ofInstant(Instant.ofEpochSecond(hour.epochSeconds), zone)
+            // Match real elapsed hourly slots; the dial uses the phone zone.
+            val offset = ((hour.epochSeconds - firstSlot) / 3600L).toInt()
+            if (offset !in 0..6 || hour.code < 0) continue
+            val a = Math.toRadians(local.hour % 12 * 30.0 - 90.0)
+            val x = CENTER_X + cos(a).toFloat() * ring
+            val y = centreY + sin(a).toFloat() * ring
+            val alpha = when (offset) { 0 -> 128; 5 -> 166; 6 -> 77; else -> 255 }
+            val bounds = 35f * unit
+            val save = if (alpha < 255)
+                canvas.saveLayerAlpha(x - bounds, y - bounds, x + bounds, y + bounds, alpha)
+                else canvas.save()
+            val geometry = iconGeometry(hour.code, hour.isDay)
+            val scale = 34f * unit / maxOf(geometry.width, geometry.height)
+            canvas.save()
+            canvas.translate(x, y - 8f * unit - geometry.visualCentreY * scale)
+            canvas.scale(scale, scale)
+            drawWeatherIcon(canvas, hour.code, hour.isDay, colored, theme,
+                theme == ClockTheme.LIGHT)
+            canvas.restore()
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = pale
+                textAlign = Paint.Align.CENTER
+                textSize = 15f * unit
+                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            }
+            canvas.drawText("${hour.temperatureC.roundToInt()}°", x, y + 21f * unit, paint)
+            canvas.restoreToCount(save)
+        }
     }
 
     private fun drawSourceLabel(

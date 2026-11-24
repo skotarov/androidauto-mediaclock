@@ -33,7 +33,8 @@ object ForecastStore {
         val localDateTime: LocalDateTime,
         val code: Int,
         val temperatureC: Double,
-        val precipitationPercent: Int?
+        val precipitationPercent: Int?,
+        val isDay: Boolean = localDateTime.hour in 6..17
     ) {
         val temperatureText: String get() = "${temperatureC.roundToInt()}°C"
     }
@@ -41,7 +42,24 @@ object ForecastStore {
     fun current(
         context: Context,
         nowEpochSeconds: Long = System.currentTimeMillis() / 1000L
-    ): List<Hour> {
+    ): List<Hour> = nextSixHours(cached(context), nowEpochSeconds)
+
+    /** Current hourly slot plus six future slots; the Pause list is unchanged. */
+    fun currentRing(context: Context, nowEpochSeconds: Long = System.currentTimeMillis() / 1000L): List<Hour> =
+        ringHours(cached(context), nowEpochSeconds)
+
+    fun ringHours(all: List<Hour>, nowEpochSeconds: Long): List<Hour> {
+        val start = all.filter { it.epochSeconds <= nowEpochSeconds }
+            .maxOfOrNull { it.epochSeconds }?.takeIf { nowEpochSeconds - it < 3600L }
+            ?: all.filter { it.epochSeconds > nowEpochSeconds }
+                .minOfOrNull { it.epochSeconds }?.minus(3600L)
+            ?: return emptyList()
+        if (nowEpochSeconds - start !in 0L..3599L) return emptyList()
+        return all.filter { it.epochSeconds in start..(start + 6 * 3600L) }
+            .distinctBy { it.epochSeconds }.sortedBy { it.epochSeconds }
+    }
+
+    private fun cached(context: Context): List<Hour> {
         val prefs = context.getSharedPreferences(WeatherStore.PREFS, Context.MODE_PRIVATE)
         val mode = WeatherStore.selectedMode(prefs.getString(WeatherStore.KEY_CITY, null))
         if (prefs.getString(KEY_MODE, null) != mode) return emptyList()
@@ -49,7 +67,7 @@ object ForecastStore {
         if (saved <= 0 || System.currentTimeMillis() - saved !in 0..MAX_CACHE_AGE_MS)
             return emptyList()
         return try {
-            nextSixHours(parse(prefs.getString(KEY_DATA, null) ?: ""), nowEpochSeconds)
+            parse(prefs.getString(KEY_DATA, null) ?: "")
         } catch (_: Exception) {
             emptyList()
         }
@@ -85,7 +103,7 @@ object ForecastStore {
         val url = "https://api.open-meteo.com/v1/forecast?" +
             "latitude=${String.format(Locale.US, "%.4f", latitude)}&" +
             "longitude=${String.format(Locale.US, "%.4f", longitude)}&" +
-            "hourly=temperature_2m,weather_code,precipitation_probability&" +
+            "hourly=temperature_2m,weather_code,precipitation_probability,is_day&" +
             "timezone=auto&timeformat=unixtime&forecast_days=2"
         val connection = try {
             (URL(url).openConnection() as HttpURLConnection).apply {
@@ -125,6 +143,7 @@ object ForecastStore {
         val codes = hourly.optJSONArray("weather_code") ?: return emptyList()
         val temperatures = hourly.optJSONArray("temperature_2m") ?: return emptyList()
         val rain = hourly.optJSONArray("precipitation_probability")
+        val daylight = hourly.optJSONArray("is_day")
         val zone = try {
             ZoneId.of(root.optString("timezone", "UTC"))
         } catch (_: Exception) {
@@ -141,7 +160,9 @@ object ForecastStore {
             } catch (_: Exception) { continue }
             val code = codes.optInt(i, -1)
             val probability = rain?.optInt(i, -1)?.takeIf { it in 0..100 }
-            hours.add(Hour(epoch, local, code, temp, probability))
+            val isDay = daylight?.optInt(i, -1)?.takeIf { it in 0..1 }?.let { it == 1 }
+                ?: (local.hour in 6..17)
+            hours.add(Hour(epoch, local, code, temp, probability, isDay))
         }
         return hours
     }

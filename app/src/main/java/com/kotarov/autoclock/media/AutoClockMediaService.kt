@@ -300,8 +300,12 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val lines = ClockMediaLabels.forClock(visible, now, weather)
         val theme = selectedTheme()
         val colored = coloredWeatherIcons()
+        val showRing = visible.family == ClockFamily.ANALOG && visible.usesWeather
+        val forecast = if (showRing) ForecastStore.currentRing(this) else emptyList()
+        val revision = if (showRing) prefs.getLong(ForecastStore.KEY_SAVED_AT, 0L)
+            else weather?.observedAtMs ?: 0L
         val artwork = ClockArtworkProvider.artworkUri(
-            visible.id, now, weather?.observedAtMs ?: 0L,
+            visible.id, now, revision,
             compactLayout(), artworkGeneration, theme, colored
         )
         val miniArtwork = ClockArtworkProvider.miniArtworkUri(
@@ -333,7 +337,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             weather?.formattedTemperature, compactLayout(),
             outputSize = 320, condition = description,
             sourceLabel = weather?.artworkSource, theme = theme,
-            coloredWeatherIcons = colored
+            coloredWeatherIcons = colored, forecast = forecast
         )
         val miniBitmap = ClockRenderer.renderMini(
             visible.family, now, weather?.weatherCode,

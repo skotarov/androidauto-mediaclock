@@ -11,6 +11,8 @@ import java.io.FileOutputStream
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import com.kotarov.autoclock.weather.WeatherStore
+import com.kotarov.autoclock.weather.ForecastStore
+import java.time.ZoneId
 import com.kotarov.autoclock.media.ClockPreset
 import com.kotarov.autoclock.media.ClockFamily
 import com.kotarov.autoclock.media.ClockTheme
@@ -55,7 +57,7 @@ class ClockArtworkProvider : ContentProvider() {
         // phone settings invalidates both Android Auto and disk artwork caches.
         val layout = if (compact) "compact" else "standard"
         val destination = File(directory,
-            "v38-$layout-${theme.id}-${if (coloredWeatherIcons) "color" else "mono"}-$clockMode-$key-$weatherRevision.png")
+            "v42-$layout-${theme.id}-${if (coloredWeatherIcons) "color" else "mono"}-$clockMode-$key-$weatherRevision.png")
 
         synchronized(lock) {
             if (!destination.isFile || destination.length() == 0L) {
@@ -92,7 +94,11 @@ class ClockArtworkProvider : ContentProvider() {
                         condition = weather?.description,
                         sourceLabel = weather?.artworkSource,
                         theme = theme,
-                        coloredWeatherIcons = coloredWeatherIcons
+                        coloredWeatherIcons = coloredWeatherIcons,
+                        forecast = if (ClockPreset.fromId(clockMode).family == ClockFamily.ANALOG &&
+                            ClockPreset.fromId(clockMode).usesWeather)
+                            ForecastStore.currentRing(appContext, requestedMinute.atZone(ZoneId.systemDefault()).toEpochSecond())
+                            else emptyList()
                     )
                 }
                 try {
@@ -197,7 +203,7 @@ class ClockArtworkProvider : ContentProvider() {
             .appendPath(mode)
             .appendPath("clock_${now.format(KEY_FORMAT)}.png")
             .appendQueryParameter("rev", weatherRevision.coerceAtLeast(0L).toString())
-            .appendQueryParameter("style", "v38")
+            .appendQueryParameter("style", "v42")
             .appendQueryParameter("weather_color", coloredWeatherIcons.toString())
             .appendQueryParameter("theme", theme.id)
             .appendQueryParameter("generation", generation.toString())

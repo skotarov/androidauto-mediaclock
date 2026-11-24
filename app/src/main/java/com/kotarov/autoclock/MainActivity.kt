@@ -27,6 +27,7 @@ import com.kotarov.autoclock.media.ClockSelectionStore
 import com.kotarov.autoclock.media.ClockTheme
 import com.kotarov.autoclock.weather.WeatherLocation
 import com.kotarov.autoclock.weather.WeatherStore
+import com.kotarov.autoclock.weather.ForecastStore
 import java.time.LocalDateTime
 
 /**
@@ -260,7 +261,9 @@ class MainActivity : AppCompatActivity() {
                 preset.id, now, weather?.weatherCode, weather?.isDay ?: true,
                 weather?.formattedTemperature, compact,
                 outputSize = 256, condition = weather?.description,
-                theme = theme
+                theme = theme,
+                forecast = if (family == ClockFamily.ANALOG && preset.usesWeather)
+                    ForecastStore.currentRing(this) else emptyList()
             )
         }
         val newAnalog = make(ClockFamily.ANALOG)
