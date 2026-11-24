@@ -38,17 +38,11 @@ object ClockRenderer {
     // Slightly lower the pure digital face; analog and weather-only remain.
     private const val DIGITAL_CENTER_DOWN = 10f
     private const val DIGITAL_TIME_SIZE = 96f
-    private const val DIGITAL_FORECAST_REFERENCE_TIME_SIZE = 132f
-    private const val DIGITAL_FORECAST_TIME_OFFSET = 61f
-
-    // Preserve the clock's exact position and size. Only the forecast
-    // gets extra inset for media hosts which crop or zoom the square art.
-    private fun digitalForecastScale(unit: Float): Float =
-        unit * DIGITAL_TIME_SIZE / DIGITAL_FORECAST_REFERENCE_TIME_SIZE * 0.85f
-
-    private fun digitalForecastTopOffset(unit: Float): Float =
-        DIGITAL_FORECAST_TIME_OFFSET * unit * DIGITAL_TIME_SIZE /
-            DIGITAL_FORECAST_REFERENCE_TIME_SIZE
+    // All digital forecast measurements are in the main artwork coordinate
+    // space; no separate scaled forecast canvas.
+    private const val DIGITAL_FORECAST_TOP = 44f
+    private const val DIGITAL_FORECAST_PITCH = 51f
+    private const val DIGITAL_FORECAST_CITY_OFFSET = 115f
     private const val COMPACT_ANALOG_CENTER_Y = 208f
     // Original standard Y=216 with radius 122. Restore original near-top
     // placement, adding only 6px clearance: Y=222, top=100 instead of 94.
@@ -108,11 +102,11 @@ object ClockRenderer {
         }
         if (preset.usesWeather && !sourceLabel.isNullOrBlank()) {
             val sourceY = if (preset.hasAnalog) clockY + radius * 1.28f + 65f * unit
-                else clockY + digitalForecastTopOffset(unit) + 148f * digitalForecastScale(unit)
+                else clockY + (DIGITAL_FORECAST_TOP + DIGITAL_FORECAST_CITY_OFFSET) * unit
             val sourceX = if (preset.hasAnalog) CENTER_X + 175f * unit else CENTER_X
             val maxWidth = if (preset.hasAnalog) 160f * unit else 290f * unit
             drawSourceLabel(canvas, sourceLabel, sourceX, sourceY, unit, maxWidth, theme,
-                alignRight = preset.hasAnalog)
+                alignRight = preset.hasAnalog, size = if (preset.hasAnalog) 22f else 27f)
         }
         return bitmap
     }
@@ -305,63 +299,60 @@ object ClockRenderer {
         canvas.restoreToCount(save)
     }
 
-    /** Six hourly columns below the shared digital clock face.
-     * Scale the entire forecast strip in proportion to the plain HH:mm. */
+    /** Six hourly columns, drawn directly at their final artwork sizes. */
     private fun drawDigitalForecast(
         canvas: Canvas, now: LocalDateTime, centreY: Float, unit: Float,
         forecast: List<ForecastStore.Hour>, theme: ClockTheme
     ) {
-        val scale = digitalForecastScale(unit)
-        canvas.save()
-        canvas.translate(CENTER_X, centreY + digitalForecastTopOffset(unit))
-        canvas.scale(scale, scale)
-
+        val top = centreY + DIGITAL_FORECAST_TOP * unit
         val slots = ForecastStore.digitalSlots(forecast, now)
-        val label = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        val pitch = DIGITAL_FORECAST_PITCH * unit
+        val firstBoundary = CENTER_X - slots.size * pitch / 2f
+        val label = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
             color = themed(pale, theme)
             textAlign = Paint.Align.CENTER
-            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
-            textSize = 22f
+            typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD)
+            textSize = 20f * unit
         }
-        val temp = Paint(label).apply { color = themed(white, theme) }
-        // Seven boundary labels delimit the six intervals. Keep the existing
-        // hourly boundaries, column centres and fade unchanged.
-        val pitch = 73f
-        val firstBoundary = -slots.size * pitch / 2f
-        val labelColor = label.color
-        slots.forEachIndexed { index, slot ->
-            label.color = labelColor
-            label.alpha = slot.alpha
-            canvas.drawText(slot.time.format(timeFormat), firstBoundary + index * pitch, 25f, label)
+        // Keep all seven HH:mm boundary labels equally sized and separated.
+        val labels = slots.map { it.time.format(timeFormat) } +
+            listOfNotNull(slots.lastOrNull()?.time?.plusHours(1)?.format(timeFormat))
+        val widest = labels.maxOfOrNull { label.measureText(it) } ?: 0f
+        if (widest > pitch - 4f * unit)
+            label.textSize *= (pitch - 4f * unit) / widest
+        val temp = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
+            color = themed(white, theme)
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            textSize = 22f * unit
         }
-        if (slots.isNotEmpty()) {
-            label.alpha = slots.last().alpha
-            canvas.drawText(slots.last().time.plusHours(1).format(timeFormat),
-                firstBoundary + slots.size * pitch, 25f, label)
+        labels.forEachIndexed { index, value ->
+            label.alpha = slots[minOf(index, slots.lastIndex)].alpha
+            canvas.drawText(value, firstBoundary + index * pitch, top + 16f * unit, label)
         }
         slots.forEachIndexed { index, slot ->
             val x = firstBoundary + (index + 0.5f) * pitch
-            val save = if (slot.alpha < 255)
-                canvas.saveLayerAlpha(x - 36f, 30f, x + 36f, 132f, slot.alpha)
-                else canvas.save()
             val hour = slot.hour
             if (hour != null && hour.code >= 0) {
                 val geometry = iconGeometry(hour.code, hour.isDay)
-                val iconSize = 60f
-                val iconScale = iconSize / maxOf(geometry.width, geometry.height)
-                canvas.save()
-                canvas.translate(x, 58f - geometry.visualCentreY * iconScale)
+                val iconScale = 37f * unit / maxOf(geometry.width, geometry.height)
+                // Apply opacity to the complete icon only. Text is painted
+                // directly, with its own alpha, for clean antialiased edges.
+                val half = 23f * unit
+                val iconY = top + 44f * unit
+                val save = if (slot.alpha < 255)
+                    canvas.saveLayerAlpha(x - half, iconY - half, x + half, iconY + half, slot.alpha)
+                    else canvas.save()
+                canvas.translate(x, iconY - geometry.visualCentreY * iconScale)
                 canvas.scale(iconScale, iconScale)
                 drawWeatherIcon(canvas, hour.code, hour.isDay, theme)
-                canvas.restore()
+                canvas.restoreToCount(save)
             }
-            temp.textSize = 35f
-            temp.typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            temp.alpha = slot.alpha
             val temperature = hour?.let { "${it.temperatureC.roundToInt()}°" } ?: "–"
-            canvas.drawText(temperature, x, 115f, temp)
-            canvas.restoreToCount(save)
+            // Extra air below the icon; the city sits below this row.
+            canvas.drawText(temperature, x, top + 88f * unit, temp)
         }
-        canvas.restore()
     }
 
     private fun drawSourceLabel(
@@ -372,9 +363,10 @@ object ClockRenderer {
         unit: Float,
         maxWidth: Float,
         theme: ClockTheme,
-        alignRight: Boolean = false
+        alignRight: Boolean = false,
+        size: Float = 22f
     ) {
-        val baseSize = 22f * unit
+        val baseSize = size * unit
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = themed(pale, theme)
             textAlign = Paint.Align.CENTER
@@ -384,7 +376,8 @@ object ClockRenderer {
         val width = paint.measureText(value)
         val scale = if (width > 0f) minOf(1f, maxWidth / width) else 1f
         val centreX = if (alignRight) x - width * scale / 2f else x
-        drawText(canvas, value, centreX, y, baseSize * scale, pale, unit, theme)
+        drawText(canvas, value, centreX, y, baseSize * scale, pale,
+            if (alignRight) unit else unit * 0.65f, theme)
     }
 
     private fun stroke(color: Int, thickness: Float): Paint =
