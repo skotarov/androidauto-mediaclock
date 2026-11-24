@@ -30,23 +30,53 @@ jobs:
         with:
           gradle-version: 8.10.2
 
-      - name: Run unit tests and compile APK
-        run: gradle testDebugUnitTest assembleDebug --stacktrace
+      - name: Run unit tests and compile with permanent beta key
+        env:
+          BETA_SIGNING_SECRET: ${{ secrets.AUTO_CLOCK_BETA_SIGNING }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${BETA_SIGNING_SECRET:-}" ]]; then
+            echo "::error::Configure repository secret AUTO_CLOCK_BETA_SIGNING before publishing a beta."
+            exit 1
+          fi
+          mapfile -t signing_lines <<< "$BETA_SIGNING_SECRET"
+          if [[ "${#signing_lines[@]}" -lt 2 ]]; then
+            echo "::error::Invalid beta signing secret."
+            exit 1
+          fi
+          export AUTO_CLOCK_BETA_PASSWORD="${signing_lines[0]%$'\r'}"
+          encoded_store="${signing_lines[1]%$'\r'}"
+          echo "::add-mask::$AUTO_CLOCK_BETA_PASSWORD"
+          echo "::add-mask::$encoded_store"
+          export AUTO_CLOCK_BETA_STORE="$RUNNER_TEMP/autoclock-beta.p12"
+          umask 077
+          trap 'rm -f "$AUTO_CLOCK_BETA_STORE"' EXIT
+          printf '%s' "$encoded_store" | base64 --decode > "$AUTO_CLOCK_BETA_STORE"
+          unset BETA_SIGNING_SECRET encoded_store signing_lines
+          fingerprint=$(keytool -exportcert -storetype PKCS12 -keystore "$AUTO_CLOCK_BETA_STORE" -storepass:env AUTO_CLOCK_BETA_PASSWORD -alias autoclock-beta | sha256sum | cut -d' ' -f1)
+          if [[ "$fingerprint" != "b29e5f80e27dd8aeebb7ede5329a9ffe46a1d8ef7270e2981aae32233fd9b2b1" ]]; then
+            echo "::error::Beta certificate does not match the permanent signing identity."
+            exit 1
+          fi
+          gradle --no-daemon testDebugUnitTest assembleDebug --stacktrace
+          signer=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)
+          "$signer" verify --print-certs app/build/outputs/apk/debug/app-debug.apk | grep -Fx 'Signer #1 certificate SHA-256 digest: b29e5f80e27dd8aeebb7ede5329a9ffe46a1d8ef7270e2981aae32233fd9b2b1'
 
       - name: Copy APK with friendly filename
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk dist/AutoClock-2-v0.75-beta.apk
+          cp app/build/outputs/apk/debug/app-debug.apk dist/AutoClock-2-v0.76-beta.apk
 
       - name: Create or update public beta download
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if ! gh release view v0.75.0-beta >/dev/null 2>&1; then
-            gh release create v0.75.0-beta \
+          if ! gh release view v0.76.0-beta >/dev/null 2>&1; then
+            gh release create v0.76.0-beta \
               --target "$GITHUB_SHA" \
-              --title "Auto Clock 2 — beta 0.75.0" \
-              --notes "Retry missing locations on demand, support a coarse fused fallback on Android 12+, and distinguish permissions, location services, fixes and place-name failures." \
+              --title "Auto Clock 2 — beta 0.76.0" \
+              --notes "Permanent beta signing identity. Uninstall older differently signed beta builds once; subsequent signed beta updates retain settings. Includes v0.75 location fixes." \
               --prerelease
           fi
-          gh release upload v0.75.0-beta dist/AutoClock-2-v0.75-beta.apk --clobber
+          gh release upload v0.76.0-beta dist/AutoClock-2-v0.76-beta.apk --clobber
