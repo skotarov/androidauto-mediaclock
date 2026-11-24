@@ -103,13 +103,13 @@ class ForecastRingTest {
         }
         val offsets = ForecastStore.ringIconEpochs(data, start).sorted()
             .map { ((it - start) / 3600L).toInt() }
-        assertEquals(listOf(-1, 0, 3, 5, 7, 8), offsets)
+        assertEquals(listOf(0, 3, 5, 7, 8), offsets)
     }
 
     @Test fun overcastDoesNotChangeAtNightAndMissingDataRestartsIcons() {
         val data = hours.filter { it.epochSeconds != start + 2 * 3600L }
             .map { it.copy(code = 3, isDay = it.epochSeconds <= start) }
-        assertEquals(setOf(start - 3600L, start, start + 3 * 3600L),
+        assertEquals(setOf(start, start + 3 * 3600L),
             ForecastStore.ringIconEpochs(data, start))
     }
 
@@ -126,7 +126,7 @@ class ForecastRingTest {
                     }, isDay = true)
             }
         val changes = ForecastStore.ringChanges(data, start)
-        assertEquals(setOf(start - 3600L, start, start + 2 * 3600L), changes.iconEpochs)
+        assertEquals(setOf(start, start + 2 * 3600L), changes.iconEpochs)
         assertEquals(setOf(start - 3600L, start, start + 3600L, start + 4 * 3600L),
             changes.temperatureEpochs)
     }
@@ -136,8 +136,25 @@ class ForecastRingTest {
             .map { it.copy(code = 3, temperatureC = 9.0, isDay = true) }
         val changes = ForecastStore.ringChanges(data, start)
         val expected = setOf(start - 3600L, start, start + 3 * 3600L)
-        assertEquals(expected, changes.iconEpochs)
+        assertEquals(expected - (start - 3600L), changes.iconEpochs)
         assertEquals(expected, changes.temperatureEpochs)
+    }
+
+    @Test fun pastGlyphAppearsOnlyWhenDifferentFromCurrent() {
+        val past = hours.first { it.epochSeconds == start - 3600L }
+        val current = hours.first { it.epochSeconds == start }
+        val pastCloud = past.copy(code = 1, isDay = true)
+        val currentCloud = current.copy(code = 2, isDay = true)
+        assertEquals(setOf(start), ForecastStore.ringIconEpochs(
+            listOf(currentCloud, pastCloud), start))
+        assertEquals(setOf(start - 3600L, start), ForecastStore.ringIconEpochs(
+            listOf(pastCloud, currentCloud.copy(code = 61)), start))
+        assertEquals(setOf(start - 3600L, start), ForecastStore.ringIconEpochs(
+            listOf(pastCloud, currentCloud.copy(isDay = false)), start))
+        assertEquals(setOf(start - 3600L), ForecastStore.ringIconEpochs(
+            listOf(pastCloud), start))
+        assertEquals(setOf(start - 3600L), ForecastStore.ringIconEpochs(
+            listOf(pastCloud, currentCloud.copy(code = -1)), start))
     }
 
     @Test fun pauseListRemainsSixFutureHours() {

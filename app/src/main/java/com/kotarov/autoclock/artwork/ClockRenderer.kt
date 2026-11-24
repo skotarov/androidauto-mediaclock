@@ -202,14 +202,14 @@ object ClockRenderer {
             val hasTemperature = hour.epochSeconds in changes.temperatureEpochs
             if (!hasIcon && !hasTemperature) continue
             val geometry = iconGeometry(hour.code, hour.isDay)
-            val iconSize = if (offset == 0) 58f else 45f
+            val iconSize = if (offset == 0) 54f else 41f
             val scale = iconSize * unit / maxOf(geometry.width, geometry.height)
             val lift = (if (offset == 0) 24f else 16f) * unit
             val temperature = "${hour.temperatureC.roundToInt()}°"
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = themed(pale, theme)
                 textAlign = Paint.Align.CENTER
-                textSize = (if (offset == 0) 18f else 15f) * unit
+                textSize = (if (offset == 0) 20f else 17f) * unit
                 typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
             }
             // Project the glyph and text bounding boxes onto the outward
@@ -264,7 +264,7 @@ object ClockRenderer {
         }
         val temp = Paint(label).apply { color = themed(white, theme) }
         // Seven boundary labels delimit the six intervals. Keep the existing
-        // icon and temperature columns, sizes, spacing and fade unchanged.
+        // hourly boundaries, column centres and fade unchanged.
         val pitch = 73f
         val firstBoundary = -slots.size * pitch / 2f
         val labelColor = label.color
@@ -281,12 +281,12 @@ object ClockRenderer {
         slots.forEachIndexed { index, slot ->
             val x = firstBoundary + (index + 0.5f) * pitch
             val save = if (slot.alpha < 255)
-                canvas.saveLayerAlpha(x - 36f, 36f, x + 36f, 122f, slot.alpha)
+                canvas.saveLayerAlpha(x - 36f, 30f, x + 36f, 132f, slot.alpha)
                 else canvas.save()
             val hour = slot.hour
             if (hour != null && hour.code >= 0) {
                 val geometry = iconGeometry(hour.code, hour.isDay)
-                val iconSize = if (index == 0) 56f else 39f
+                val iconSize = if (index == 0) 60f else 44f
                 val iconScale = iconSize / maxOf(geometry.width, geometry.height)
                 canvas.save()
                 canvas.translate(x, (if (index == 0) 58f else 59f) - geometry.visualCentreY * iconScale)
@@ -294,11 +294,11 @@ object ClockRenderer {
                 drawWeatherIcon(canvas, hour.code, hour.isDay, theme)
                 canvas.restore()
             }
-            temp.textSize = if (index == 0) 32f else 25f
+            temp.textSize = if (index == 0) 35f else 28f
             temp.typeface = Typeface.create(Typeface.SANS_SERIF,
                 if (index == 0) Typeface.BOLD else Typeface.NORMAL)
             val temperature = hour?.let { "${it.temperatureC.roundToInt()}°" } ?: "–"
-            canvas.drawText(temperature, x, 108f, temp)
+            canvas.drawText(temperature, x, 115f, temp)
             canvas.restoreToCount(save)
         }
         canvas.restore()

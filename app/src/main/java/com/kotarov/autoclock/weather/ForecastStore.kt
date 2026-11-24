@@ -96,7 +96,8 @@ object ForecastStore {
 
     data class RingChanges(val iconEpochs: Set<Long>, val temperatureEpochs: Set<Long>)
 
-    /** The past and current slots establish a baseline. For every future
+    /** The past slot shows its glyph only if it differs from current conditions.
+     * The current slot always establishes a baseline. For every future
      * hour, compare icon and displayed whole degrees independently with
      * the immediately preceding hour, including hours with no visible glyph.
      * Missing data restarts the baseline. */
@@ -123,6 +124,12 @@ object ForecastStore {
             }
             previous = hour
         }
+        // Compare the immediately previous hour with the current visible glyph.
+        // Keep its temperature independent; missing current data cannot hide it.
+        val past = hours.firstOrNull { it.epochSeconds == currentSlot - 3600L && it.code >= 0 }
+        val current = hours.firstOrNull { it.epochSeconds == currentSlot && it.code >= 0 }
+        if (past != null && current != null && ringGlyph(past) == ringGlyph(current))
+            icons.remove(past.epochSeconds)
         return RingChanges(icons, temperatures)
     }
 
