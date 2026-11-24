@@ -207,7 +207,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     private fun requestWeatherIfNecessary(force: Boolean = false) {
         // Keep locality announcements available even with forecast hidden.
-        // The shared worker retains its normal 15-minute throttle.
+        // The shared worker retains its normal 5-minute throttle.
         WeatherStore.refreshIfDue(this, force = force)
     }
 

@@ -14,8 +14,8 @@ import kotlin.math.roundToInt
 /**
  * Six NEXT whole hours from an Open-Meteo modeled forecast, separate from
  * current METAR weather. The existing weather worker reuses its coordinates:
- * no extra GPS fix or service; normal HTTP reads cap at 15 minutes.
- * Explicit Pause/settings-open refreshes may bypass this cap.
+ * no extra GPS fix or service; normal HTTP reads cap at 5 minutes.
+ * Explicit settings-open refreshes may bypass this cap.
  */
 object ForecastStore {
     // Fresh cache keys: never read the older v0.35 daily forecast as hourly.
@@ -136,7 +136,7 @@ object ForecastStore {
             .take(6)
             .toList()
 
-    /** The weather worker already throttles requests to 15 minutes.
+    /** The weather worker already throttles requests to 5 minutes.
      * Return the data without publishing it, so weather and location can be
      * committed together in one SharedPreferences transaction. */
     fun fetchOnWorker(latitude: Double, longitude: Double): String? {
@@ -152,7 +152,7 @@ object ForecastStore {
                 connectTimeout = 5000
                 readTimeout = 5000
                 setRequestProperty("Accept", "application/json")
-                setRequestProperty("User-Agent", "AutoClock2/0.47 (hourly forecast)")
+                setRequestProperty("User-Agent", "AutoClock2/0.50 (hourly forecast)")
             }
         } catch (_: Exception) { return null }
         val body = try {

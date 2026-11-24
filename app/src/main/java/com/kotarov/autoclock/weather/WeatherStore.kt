@@ -22,7 +22,7 @@ import kotlin.math.roundToInt
  * Open-Meteo model at the approximate device location.
  *
  * No continuous GPS listener, wakelock, ongoing background work or per-minute
- * weather requests. Requests are capped to once per 15 minutes in weather display.
+ * weather requests. Requests are capped to once per 5 minutes in weather display.
  */
 object WeatherStore {
     const val PREFS = "clock_settings"
@@ -31,7 +31,7 @@ object WeatherStore {
     private const val KEY_LAT = "weather_locality_lat_v47"
     private const val KEY_LON = "weather_locality_lon_v47"
     const val AUTO_ID = "auto"
-    const val REFRESH_INTERVAL_MS = 15L * 60L * 1000L
+    const val REFRESH_INTERVAL_MS = 5L * 60L * 1000L
     private const val MIN_RETRY_MS = REFRESH_INTERVAL_MS
     private const val MAX_AGE_MS = 3L * 60L * 60L * 1000L
     private const val MAX_OBSERVATION_AGE_MS = 3L * 60L * 60L * 1000L
