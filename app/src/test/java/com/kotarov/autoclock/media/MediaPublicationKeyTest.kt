@@ -8,7 +8,7 @@ class MediaPublicationKeyTest {
         val key = MediaPublicationKey("minute1", " ", " ")
         assertEquals(key, MediaPublicationKey("minute1", " ", " "))
         assertNotEquals(key, key.copy(artwork = "minute2"))
-        assertNotEquals(key, key.copy(title = "Внимание"))
-        assertNotEquals(key, key.copy(subtitle = "София"))
+        assertNotEquals(key, key.copy(title = "Warning"))
+        assertNotEquals(key, key.copy(subtitle = "Sofia"))
     }
 }

@@ -1,8 +1,8 @@
 package com.kotarov.autoclock.media
 
 enum class ClockFamily(val id: String, val label: String) {
-    ANALOG("analog", "Аналогов часовник"),
-    DIGITAL("digital", "Цифров часовник");
+    ANALOG("analog", "Analog clock"),
+    DIGITAL("digital", "Digital clock");
     companion object {
         fun fromId(id: String?): ClockFamily? = entries.firstOrNull { it.id == id }
     }

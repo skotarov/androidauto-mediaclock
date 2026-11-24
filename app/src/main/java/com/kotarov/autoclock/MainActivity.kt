@@ -105,9 +105,9 @@ class MainActivity : Activity() {
             setPadding(0, 0, 0, dp(6))
         }
         val (analog, analogPreview, analogTitle) =
-            createChoiceCard("Аналогов", ClockFamily.ANALOG)
+            createChoiceCard("Analog", ClockFamily.ANALOG)
         val (digital, digitalPreview, digitalTitle) =
-            createChoiceCard("Цифров", ClockFamily.DIGITAL)
+            createChoiceCard("Digital", ClockFamily.DIGITAL)
         analogCard = analog
         digitalCard = digital
         analogImage = analogPreview
@@ -126,7 +126,7 @@ class MainActivity : Activity() {
 
         // Directly BELOW the two thumbnails, with no explanatory widgets.
         root.addView(checkOption(
-            "Светла тема",
+            "Light theme",
             ClockTheme.fromId(prefs.getString(ClockTheme.KEY, null)) == ClockTheme.LIGHT
         ) { checked ->
             prefs.edit().putString(
@@ -137,7 +137,7 @@ class MainActivity : Activity() {
         })
 
         root.addView(checkOption(
-            "Добави времето",
+            "Weather",
             ClockSelectionStore.weatherEnabled(prefs),
             captureToggle = { weatherToggle = it }
         ) { checked ->
@@ -148,18 +148,18 @@ class MainActivity : Activity() {
         })
         updatePreviewTiles()
 
-        root.addView(text("Размер", 18f, dp(5)))
+        root.addView(text("Size", 18f, dp(5)))
         val sizeRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
         }
-        sizeRow.addView(text("А", 14f, 0))
+        sizeRow.addView(text("A", 14f, 0))
         val sizeSlider = SeekBar(this).apply {
             max = 1 // Keep the two validated render sizes: compact / standard.
             progress = if (prefs.getString(
                     AutoClockMediaService.KEY_LAYOUT, "standard"
                 ) == "compact") 0 else 1
-            contentDescription = "Размер на часовника"
+            contentDescription = "Clock size"
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(
                     seekBar: SeekBar?, value: Int, fromUser: Boolean
@@ -177,15 +177,15 @@ class MainActivity : Activity() {
         }
         sizeRow.addView(sizeSlider,
             LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        sizeRow.addView(text("А", 28f, 0))
+        sizeRow.addView(text("A", 28f, 0))
         root.addView(sizeRow)
 
         root.addView(Button(this).apply {
-            text = "Виж локация"
+            text = "Location"
             isAllCaps = false
             setOnClickListener {
                 val city = WeatherStore.locality(this@MainActivity)
-                locationMessage.text = city ?: "Няма данни за локацията"
+                locationMessage.text = city ?: "Location unavailable"
                 locationMessage.visibility = View.VISIBLE
                 messageHandler.removeCallbacks(hideLocationMessage)
                 messageHandler.postDelayed(hideLocationMessage, CityAnnouncement.DURATION_MS)
@@ -206,21 +206,21 @@ class MainActivity : Activity() {
 
         val soundButton = Button(this).apply {
             isAllCaps = false
-            text = "Звук: " + NoticeSound.fromId(prefs.getString(NoticeSound.KEY, null)).label
+            text = "Sound: " + NoticeSound.fromId(prefs.getString(NoticeSound.KEY, null)).label
             setOnClickListener {
                 val options = NoticeSound.entries
                 val selected = NoticeSound.fromId(prefs.getString(NoticeSound.KEY, null))
                 AlertDialog.Builder(this@MainActivity)
-                    .setTitle("Звук на съобщенията")
+                    .setTitle("Alert sound")
                     .setSingleChoiceItems(options.map { it.label }.toTypedArray(),
                         options.indexOf(selected)) { dialog, index ->
                         val sound = options[index]
                         prefs.edit().putString(NoticeSound.KEY, sound.id).apply()
-                        text = "Звук: " + sound.label
+                        text = "Sound: " + sound.label
                         soundPreview.play(sound)
                         dialog.dismiss()
                     }
-                    .setNegativeButton("Отказ", null)
+                    .setNegativeButton("Cancel", null)
                     .show()
             }
         }
@@ -279,7 +279,7 @@ class MainActivity : Activity() {
     private fun createChoiceCard(label: String, family: ClockFamily): Choice {
         val image = ImageView(this).apply {
             scaleType = ImageView.ScaleType.FIT_CENTER
-            contentDescription = "$label часовник"
+            contentDescription = "$label clock"
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT

@@ -20,9 +20,9 @@ import kotlin.math.roundToInt
  * Workers deliver only to the current active generation. */
 object WeatherStore {
     const val PREFS = "clock_settings"
-    const val KEY_LOCALITY = "weather_locality_v47"
-    const val KEY_WARNING = "weather_warning_v52"
-    const val KEY_WARNING_REV = "weather_warning_revision_v52"
+    const val KEY_LOCALITY = "weather_locality_en_v71"
+    const val KEY_WARNING = "weather_warning_en_v71"
+    const val KEY_WARNING_REV = "weather_warning_revision_en_v71"
     private const val KEY_LAT = "weather_locality_lat_v47"
     private const val KEY_LON = "weather_locality_lon_v47"
     const val AUTO_ID = "auto"
@@ -82,8 +82,8 @@ object WeatherStore {
 
     /** Strip station markers and bracketed ICAO codes on the main clock. */
     fun simplePlaceLabel(value: String): String =
-        value.removePrefix("Станция ")
-            .removePrefix("Район ")
+        value.removePrefix("Station ")
+            .removePrefix("Area ")
             .substringBefore(" (")
             .trim()
 
@@ -110,10 +110,23 @@ object WeatherStore {
                 java.lang.Double.doubleToRawLongBits(Double.NaN))
         )
         if (!temp.isFinite()) return null
-        val source = prefs.getString("weather_source_name", null)
-            ?: "Няма източник"
-        val label = prefs.getString("weather_station_label", null)
-            ?: "Авто"
+        // Older releases cached Bulgarian display strings. Keep valid
+        // numerical weather data, but rebuild its human-readable labels.
+        val cachedSource = prefs.getString("weather_source_name", null)
+        val cachedLabel = prefs.getString("weather_station_label", null)
+        val station = WeatherStations.stations.firstOrNull {
+            cachedLabel?.endsWith("(${it.icao})") == true
+        }
+        val source = when {
+            cachedSource?.contains("METAR") == true -> "NOAA · METAR observation"
+            cachedSource?.contains("Open-Meteo") == true -> "Open-Meteo · model"
+            else -> "No source"
+        }
+        val label = when {
+            station != null -> "Station ${station.label}"
+            source.startsWith("Open-Meteo") -> "Current location"
+            else -> "Auto"
+        }
         val reportTime = prefs.getLong("weather_observation_time", fetchedAt)
         if (source.contains("METAR") &&
             System.currentTimeMillis() - reportTime !in 0..MAX_OBSERVATION_AGE_MS
@@ -289,8 +302,8 @@ object WeatherStore {
                 }
                 val model = ForecastStore.currentModel(forecast)
                 if (reading == null && model != null) reading = Reading(model.temperature,
-                    model.code, model.isDay, "Текущо местоположение",
-                    "Open-Meteo · модел", System.currentTimeMillis())
+                    model.code, model.isDay, "Current location",
+                    "Open-Meteo · model", System.currentTimeMillis())
                 warning = ForecastStore.warning(forecast, System.currentTimeMillis() / 1000L,
                     model?.code ?: reading?.code)
             } catch (_: Exception) {
@@ -347,7 +360,7 @@ object WeatherStore {
     private fun resolveLocality(context: Context, latitude: Double, longitude: Double): String? {
         return try {
             if (!Geocoder.isPresent()) return null
-            val address = Geocoder(context, Locale("bg", "BG"))
+            val address = Geocoder(context, Locale.ENGLISH)
                 .getFromLocation(latitude, longitude, 1)?.firstOrNull()
             address?.locality?.trim()?.takeIf { it.isNotEmpty() }
         } catch (_: Exception) { null }
@@ -390,8 +403,8 @@ object WeatherStore {
             temperature = report.optDouble("temp"),
             code = metarWeatherCode(report),
             isDay = estimatedDaylightBulgaria(),
-            place = "Станция ${nearest.label}",
-            source = "NOAA · измерване METAR",
+            place = "Station ${nearest.label}",
+            source = "NOAA · METAR observation",
             reportTimeMs = timeMs
         )
     }
@@ -466,16 +479,16 @@ object WeatherStore {
     }
 
     fun describe(code: Int): String = when (code) {
-        0 -> "Ясно"
-        1, 2 -> "Частична облачност"
-        3 -> "Облачно"
-        45, 48 -> "Мъгла"
-        51, 53, 55, 56, 57 -> "Ръмеж"
-        61, 63, 65, 66, 67 -> "Дъжд"
-        71, 73, 75, 77 -> "Сняг"
-        80, 81, 82 -> "Превалявания"
-        85, 86 -> "Снеговалеж"
-        95, 96, 99 -> "Буря"
-        else -> "Времето"
+        0 -> "Clear"
+        1, 2 -> "Partly cloudy"
+        3 -> "Cloudy"
+        45, 48 -> "Fog"
+        51, 53, 55, 56, 57 -> "Drizzle"
+        61, 63, 65, 66, 67 -> "Rain"
+        71, 73, 75, 77 -> "Snow"
+        80, 81, 82 -> "Showers"
+        85, 86 -> "Snow showers"
+        95, 96, 99 -> "Storm"
+        else -> "Weather"
     }
 }

@@ -10,12 +10,12 @@ class WeatherWarningTest {
 
     @Test fun repeatsSameWarningForEachFreshCheck() {
         val hours = listOf(hour(3600, 61, 80))
-        assertEquals("Вероятност за валежи: 80%", WeatherWarning.message(hours, 1000, 0))
-        assertEquals("Вероятност за валежи: 80%", WeatherWarning.message(hours, 1300, 0))
+        assertEquals("Precipitation: 80%", WeatherWarning.message(hours, 1000, 0))
+        assertEquals("Precipitation: 80%", WeatherWarning.message(hours, 1300, 0))
     }
     @Test fun prioritizesCurrentHazardAndIgnoresDistantForecast() {
-        assertEquals("Мъгла", WeatherWarning.message(emptyList(), 1000, 45))
-        assertEquals("До 1 ч: Гръмотевична буря", WeatherWarning.message(listOf(hour(3600, 95, 80)), 1000, 0))
+        assertEquals("Fog", WeatherWarning.message(emptyList(), 1000, 45))
+        assertEquals("Within 1h: Thunderstorm", WeatherWarning.message(listOf(hour(3600, 95, 80)), 1000, 0))
         assertNull(WeatherWarning.message(listOf(hour(7200, 95, 100)), 1000, 0))
     }
     @Test fun noWarningForLowOrMissingProbability() {

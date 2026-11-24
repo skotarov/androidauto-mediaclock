@@ -20,13 +20,13 @@ class CityAnnouncement {
 
     /** Manual request repeats the current city, without changing playback. */
     fun show(city: String?, now: Long) {
-        message = Notice("Информация",
-            city?.trim()?.takeIf { it.isNotBlank() } ?: "Няма данни за локацията")
+        message = Notice("Info",
+            city?.trim()?.takeIf { it.isNotBlank() } ?: "Location unavailable")
         until = now + DURATION_MS
     }
 
     fun showWarning(warning: String, now: Long) {
-        message = Notice("Внимание", warning)
+        message = Notice("Warning", warning)
         until = now + DURATION_MS
     }
 

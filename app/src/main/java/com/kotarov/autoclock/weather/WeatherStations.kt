@@ -18,14 +18,14 @@ object WeatherStations {
     }
 
     val stations = listOf(
-        Station("LBSF", "София", 42.6964, 23.4177),
-        Station("LBPD", "Пловдив", 42.0678, 24.8508),
-        Station("LBPG", "Граф Игнатиево", 42.2908, 24.7139),
-        Station("LBGO", "Горна Оряховица", 43.1514, 25.7129),
-        Station("LBBG", "Бургас", 42.5699, 27.5152),
-        Station("LBWN", "Варна", 43.2321, 27.8251),
-        Station("LBPL", "Долна Митрополия", 43.4517, 24.5028),
-        Station("LBWB", "Балчик", 43.4244, 28.1808)
+        Station("LBSF", "Sofia", 42.6964, 23.4177),
+        Station("LBPD", "Plovdiv", 42.0678, 24.8508),
+        Station("LBPG", "Graf Ignatievo", 42.2908, 24.7139),
+        Station("LBGO", "Gorna Oryahovitsa", 43.1514, 25.7129),
+        Station("LBBG", "Burgas", 42.5699, 27.5152),
+        Station("LBWN", "Varna", 43.2321, 27.8251),
+        Station("LBPL", "Dolna Mitropolia", 43.4517, 24.5028),
+        Station("LBWB", "Balchik", 43.4244, 28.1808)
     )
 
     fun kilometers(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {

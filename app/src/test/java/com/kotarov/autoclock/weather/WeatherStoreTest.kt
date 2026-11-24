@@ -9,13 +9,13 @@ class WeatherStoreTest {
         assertEquals(15L * 60L * 1000L, WeatherStore.REFRESH_INTERVAL_MS)
     }
 
-    @Test fun weatherCodesAreMappedToShortBulgarianLabels() {
-        assertEquals("Ясно", WeatherStore.describe(0))
-        assertEquals("Мъгла", WeatherStore.describe(45))
-        assertEquals("Дъжд", WeatherStore.describe(63))
-        assertEquals("Сняг", WeatherStore.describe(73))
-        assertEquals("Буря", WeatherStore.describe(95))
-        assertEquals("Времето", WeatherStore.describe(-1))
+    @Test fun weatherCodesAreMappedToShortEnglishLabels() {
+        assertEquals("Clear", WeatherStore.describe(0))
+        assertEquals("Fog", WeatherStore.describe(45))
+        assertEquals("Rain", WeatherStore.describe(63))
+        assertEquals("Snow", WeatherStore.describe(73))
+        assertEquals("Storm", WeatherStore.describe(95))
+        assertEquals("Weather", WeatherStore.describe(-1))
     }
 
     @Test fun weatherSymbolsAreMappedAcrossDifferentConditions() {
@@ -29,25 +29,25 @@ class WeatherStoreTest {
     }
 
     @Test fun clockPlaceLabelOmitsStationAndBracketedCode() {
-        assertEquals("София",
-            WeatherStore.simplePlaceLabel("Станция София (LBSF)"))
-        assertEquals("София",
-            WeatherStore.simplePlaceLabel("Район София"))
-        assertEquals("Варна",
-            WeatherStore.simplePlaceLabel("Станция Варна (LBWN)"))
+        assertEquals("Sofia",
+            WeatherStore.simplePlaceLabel("Station Sofia (LBSF)"))
+        assertEquals("Sofia",
+            WeatherStore.simplePlaceLabel("Area Sofia"))
+        assertEquals("Varna",
+            WeatherStore.simplePlaceLabel("Station Varna (LBWN)"))
         val observed = WeatherStore.Snapshot(
             temperatureC = 12.0,
             weatherCode = 2,
             observedAtMs = 10L,
             isDay = true,
-            originLabel = "Станция София (LBSF)",
-            sourceLabel = "NOAA · измерване METAR",
+            originLabel = "Station Sofia (LBSF)",
+            sourceLabel = "NOAA · METAR observation",
             reportTimeMs = 10L,
             autoSelected = true
         )
-        assertEquals("София", observed.artworkSource)
+        assertEquals("Sofia", observed.artworkSource)
         // Retain full provenance for phone source/status.
-        assertEquals("Станция София (LBSF)", observed.originLabel)
+        assertEquals("Station Sofia (LBSF)", observed.originLabel)
     }
 
 }

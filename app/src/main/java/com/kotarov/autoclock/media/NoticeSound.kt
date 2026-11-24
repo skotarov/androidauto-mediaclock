@@ -8,13 +8,13 @@ import kotlin.math.sin
 /** The six original demo melodies, reconstructed from their PCM samples.
  * Generate only the selected short clip on demand; no bundled audio assets. */
 enum class NoticeSound(val id: String, val label: String, val durationMs: Int) {
-    SILENT("silent", "Без звук", 0),
-    SOFT_PING("soft_ping", "1. Мек звън", 470),
-    DOUBLE_PING("double_ping", "2. Двоен сигнал", 585),
-    CAR_CHIME("car_chime", "3. Автомобилен сигнал", 660),
-    SOFT_KNOCK("soft_knock", "4. Дискретно почукване", 500),
-    ATTENTION("attention", "5. Внимание", 710),
-    WARNING("warning", "6. Предупреждение", 900);
+    SILENT("silent", "Silent", 0),
+    SOFT_PING("soft_ping", "1. Soft ping", 470),
+    DOUBLE_PING("double_ping", "2. Double ping", 585),
+    CAR_CHIME("car_chime", "3. Car chime", 660),
+    SOFT_KNOCK("soft_knock", "4. Soft knock", 500),
+    ATTENTION("attention", "5. Attention", 710),
+    WARNING("warning", "6. Warning", 900);
 
     private data class Tone(val start: Int, val duration: Int, val hz: Double,
         val amp: Double, val decay: Double, val harmonic: Double, val bell: Boolean = false)
