@@ -5,6 +5,9 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.RectF
+import android.graphics.Region
+import android.graphics.SweepGradient
 import android.graphics.Typeface
 import com.kotarov.autoclock.media.ClockPreset
 import com.kotarov.autoclock.media.ClockFamily
@@ -59,6 +62,7 @@ object ClockRenderer {
     private val tickY = FloatArray(60) { sin(Math.toRadians(it * 6.0 - 90)).toFloat() }
     // A forecast describes the interval starting at its hour, not the dial mark.
     // Place it exactly halfway to the next hour (+15 degrees clockwise).
+    private const val STANDALONE_TEMPERATURE_RADIUS = 1.19f
     private val forecastX = FloatArray(12) { cos(Math.toRadians(it * 30.0 - 75)).toFloat() }
     private val forecastY = FloatArray(12) { sin(Math.toRadians(it * 30.0 - 75)).toFloat() }
     private fun themed(color: Int, theme: ClockTheme): Int =
@@ -190,6 +194,9 @@ object ClockRenderer {
         val currentSlot = now.atZone(zone)
             .withMinute(0).withSecond(0).withNano(0).toEpochSecond()
         val changes = ForecastStore.ringChanges(forecast, currentSlot)
+        // Keep the guide line out of the weather glyphs and text. These
+        // exclusions are used only when drawing the arc, not the dial.
+        val arcExclusions = Path()
         for (hour in forecast) {
             val local = LocalDateTime.ofInstant(Instant.ofEpochSecond(hour.epochSeconds), zone)
             // Match real elapsed hourly slots; the dial uses the phone zone.
@@ -223,7 +230,7 @@ object ClockRenderer {
             // Halve the standalone temperature centre's gap from the dial:
             // 1.38R -> 1.19R. Allow a minimal outward adjustment only if
             // wide text would otherwise touch the outer stroke.
-            val temperatureRing = if (hasIcon) minimumRing else radius * 1.19f
+            val temperatureRing = if (hasIcon) minimumRing else radius * STANDALONE_TEMPERATURE_RADIUS
             val temperatureClearance = if (hasIcon) clearance else radius + 4f * unit
             var ring = if (hasTemperature)
                 maxOf(temperatureRing, temperatureClearance - textInner) else minimumRing
@@ -234,6 +241,18 @@ object ClockRenderer {
             }
             val x = CENTER_X + dx * ring
             val y = centreY + dy * ring
+            val gap = 3f * unit
+            if (hasTemperature) {
+                val halfWidth = paint.measureText(temperature) / 2f
+                arcExclusions.addRect(x - halfWidth - gap, y + baseline + fm.ascent - gap,
+                    x + halfWidth + gap, y + baseline + fm.descent + gap, Path.Direction.CW)
+            }
+            if (hasIcon) {
+                val halfWidth = geometry.width * scale / 2f
+                val halfHeight = geometry.height * scale / 2f
+                arcExclusions.addRect(x - halfWidth - gap, y - lift - halfHeight - gap,
+                    x + halfWidth + gap, y - lift + halfHeight + gap, Path.Direction.CW)
+            }
             val alpha = ForecastStore.ringAlpha(offset)
             val bounds = 60f * unit
             val save = if (alpha < 255)
@@ -249,6 +268,41 @@ object ClockRenderer {
             if (hasTemperature) canvas.drawText(temperature, x, y + baseline, paint)
             canvas.restoreToCount(save)
         }
+        // Start at the CURRENT hourly symbol, not the first changed forecast.
+        // The sixth slot is five hourly intervals (150 degrees) farther on.
+        if (currentSlot in changes.iconEpochs &&
+            forecast.any { it.code >= 0 && it.epochSeconds > currentSlot &&
+                it.epochSeconds <= currentSlot + ForecastStore.RING_FUTURE_HOURS * 3600L }) {
+            drawForecastFadeArc(canvas, now.hour, radius, centreY, theme, arcExclusions)
+        }
+    }
+
+    /** A thin, continuously fading guide on the standalone temperature ring.
+     * One gradient and one arc: no per-segment paint allocations. */
+    @Suppress("DEPRECATION")
+    private fun drawForecastFadeArc(
+        canvas: Canvas, currentHour: Int, radius: Float, centreY: Float,
+        theme: ClockTheme, exclusions: Path
+    ) {
+        val unit = radius / STANDARD_RADIUS
+        val arcRadius = radius * STANDALONE_TEMPERATURE_RADIUS
+        val sweep = ForecastStore.RING_FUTURE_HOURS * 30f
+        val rgb = themed(pale, theme) and 0x00ffffff
+        val startColor = rgb or (140 shl 24)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 2.2f * unit
+            shader = SweepGradient(CENTER_X, centreY,
+                intArrayOf(startColor, rgb, rgb, startColor),
+                floatArrayOf(0f, sweep / 360f, 0.999f, 1f))
+        }
+        val oval = RectF(CENTER_X - arcRadius, centreY - arcRadius,
+            CENTER_X + arcRadius, centreY + arcRadius)
+        val save = canvas.save()
+        canvas.clipPath(exclusions, Region.Op.DIFFERENCE)
+        canvas.rotate((currentHour % 12) * 30f - 75f, CENTER_X, centreY)
+        canvas.drawArc(oval, 0f, sweep, false, paint)
+        canvas.restoreToCount(save)
     }
 
     /** Six hourly columns below the shared digital clock face.
