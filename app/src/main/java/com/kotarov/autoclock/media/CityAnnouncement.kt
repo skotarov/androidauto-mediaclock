@@ -14,19 +14,20 @@ class CityAnnouncement {
         if (next.equals(previous, ignoreCase = true)) return false
         lastCity = next
         if (previous == null) return false
-        show(next, now)
+        message = Notice("📍", next)
+        until = now + DURATION_MS
         return true
     }
 
     /** Manual request repeats the current city, without changing playback. */
     fun show(city: String?, now: Long) {
-        message = Notice("Info",
+        message = Notice("ℹ️",
             city?.trim()?.takeIf { it.isNotBlank() } ?: "Location unavailable")
         until = now + DURATION_MS
     }
 
     fun showWarning(warning: String, now: Long) {
-        message = Notice("Warning", warning)
+        message = Notice(warningIcon(warning), warning)
         until = now + DURATION_MS
     }
 
@@ -35,6 +36,18 @@ class CityAnnouncement {
     fun title(now: Long): String? = notice(now)?.body
 
     companion object {
+        /** The title contains only a symbol. Keep the complete English
+         * warning in the subtitle, including any forecast time prefix. */
+        internal fun warningIcon(warning: String): String =
+            when (warning.removePrefix("Within 1h: ").trim()) {
+                "Thunderstorm" -> "⛈️"
+                "Heavy snow" -> "❄️"
+                "Heavy rain" -> "🌧️"
+                "Fog" -> "🌫️"
+                "Risk of ice" -> "⚠️"
+                else -> if (warning.startsWith("Precipitation:")) "🌧️" else "⚠️"
+            }
+
         const val DURATION_MS = 8000L
     }
 }

@@ -311,6 +311,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             }
         }
         val notice = cityAnnouncement.notice(tick)
+        // Title / Display Title: icon only. Artist / Display Subtitle:
+        // the full message, for hosts using either metadata convention.
         val temporaryTitle = notice?.heading ?: INVISIBLE_TEXT
         val temporarySubtitle = notice?.body ?: INVISIBLE_TEXT
         val key = artwork.toString() + "|" + miniArtwork.toString()

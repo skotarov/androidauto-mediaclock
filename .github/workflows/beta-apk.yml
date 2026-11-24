@@ -36,17 +36,17 @@ jobs:
       - name: Copy APK with friendly filename
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk dist/AutoClock-2-v0.71-beta.apk
+          cp app/build/outputs/apk/debug/app-debug.apk dist/AutoClock-2-v0.72-beta.apk
 
       - name: Create or update public beta download
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if ! gh release view v0.71.0-beta >/dev/null 2>&1; then
-            gh release create v0.71.0-beta \
+          if ! gh release view v0.72.0-beta >/dev/null 2>&1; then
+            gh release create v0.72.0-beta \
               --target "$GITHUB_SHA" \
-              --title "Auto Clock 2 — beta 0.71.0" \
-              --notes "English-only interface, alerts and English geocoding; preserve settings and numerical forecasts." \
+              --title "Auto Clock 2 — beta 0.72.0" \
+              --notes "Icon-only notice titles with full English messages in subtitles; preserve notice duration and sounds." \
               --prerelease
           fi
-          gh release upload v0.71.0-beta dist/AutoClock-2-v0.71-beta.apk --clobber
+          gh release upload v0.72.0-beta dist/AutoClock-2-v0.72-beta.apk --clobber
