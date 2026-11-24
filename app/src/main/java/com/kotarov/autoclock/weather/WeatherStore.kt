@@ -118,7 +118,6 @@ object WeatherStore {
     ) {
         val app = context.applicationContext
         val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val selected = selectedMode(prefs.getString(KEY_CITY, null))
         val now = System.currentTimeMillis()
         val lastAttempt = prefs.getLong("weather_attempt_at", 0L)
         if (inFlight || (now >= lastAttempt && now - lastAttempt < MIN_RETRY_MS)) {
