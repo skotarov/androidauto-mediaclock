@@ -25,6 +25,13 @@ object ForecastStore {
     private const val KEY_LAT = "forecast_hourly_lat_v47"
     private const val KEY_LON = "forecast_hourly_lon_v47"
     private const val MAX_CACHE_AGE_MS = 4L * 60L * 60L * 1000L
+    private data class Parsed(val payload: String, val hours: List<Hour>)
+    @Volatile private var parsed: Parsed? = null
+
+    @Synchronized private fun parsedHours(payload: String): List<Hour> {
+        parsed?.takeIf { it.payload == payload }?.let { return it.hours }
+        return parse(payload).also { parsed = Parsed(payload, it) }
+    }
 
     data class Hour(
         val epochSeconds: Long,
@@ -122,7 +129,7 @@ object ForecastStore {
         if (saved <= 0 || System.currentTimeMillis() - saved !in 0..MAX_CACHE_AGE_MS)
             return emptyList()
         return try {
-            parse(prefs.getString(KEY_DATA, null) ?: "")
+            parsedHours(prefs.getString(KEY_DATA, null) ?: "")
         } catch (_: Exception) {
             emptyList()
         }
@@ -145,7 +152,7 @@ object ForecastStore {
             "latitude=${String.format(Locale.US, "%.4f", latitude)}&" +
             "longitude=${String.format(Locale.US, "%.4f", longitude)}&" +
             "hourly=temperature_2m,weather_code,precipitation_probability,is_day&" +
-            "timezone=auto&timeformat=unixtime&past_days=1&forecast_days=2"
+            "current=temperature_2m,weather_code,is_day&timezone=auto&timeformat=unixtime&past_hours=1&forecast_hours=10"
         val connection = try {
             (URL(url).openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
@@ -163,10 +170,25 @@ object ForecastStore {
         } finally {
             connection.disconnect()
         }
-        if (nextSixHours(parse(body), now / 1000L).size != 6) return null
+        if (nextSixHours(parsedHours(body), now / 1000L).size < 6) return null
 
         return body
     }
+
+    fun currentModel(body: String?): ModelCurrent? {
+        val root = try { JSONObject(body ?: return null) } catch (_: Exception) { return null }
+        val current = root.optJSONObject("current") ?: return null
+        val temperature = current.optDouble("temperature_2m", Double.NaN)
+        if (!temperature.isFinite() || temperature !in -100.0..70.0) return null
+        return ModelCurrent(temperature, current.optInt("weather_code", -1),
+            current.optInt("is_day", 1) == 1)
+    }
+
+    data class ModelCurrent(val temperature: Double, val code: Int, val isDay: Boolean)
+
+    fun warning(body: String?, nowEpochSeconds: Long, currentCode: Int?): String? =
+        WeatherWarning.message(if (body == null) emptyList() else parsedHours(body),
+            nowEpochSeconds, currentCode)
 
     fun matchesLocation(prefs: SharedPreferences, mode: String, lat: Double, lon: Double): Boolean {
         if (prefs.getString(KEY_MODE, null) != mode) return false

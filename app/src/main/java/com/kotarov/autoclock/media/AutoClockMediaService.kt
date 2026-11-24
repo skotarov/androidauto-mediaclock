@@ -28,16 +28,33 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         get() = ClockSelectionStore.weatherEnabled(prefs)
     private var artworkGeneration = 0L
     private val cityAnnouncement = CityAnnouncement()
-    private val hideCityTitle = Runnable { publishClock() }
+    private var clientActive = false
+    private var lastWarningRevision = 0L
+    private var queuedWarning: String? = null
+    private var baseMetadata: MediaMetadataCompat? = null
+    private var artKey: String? = null
+    private val hideCityTitle = Runnable {
+        if (clientActive) {
+            val next = queuedWarning
+            queuedWarning = null
+            if (next != null) {
+                cityAnnouncement.show(next, SystemClock.elapsedRealtime())
+                scheduleCityTitleHide()
+            }
+            publishClock()
+        }
+    }
 
     private val settingsRefresh = Runnable {
-        artworkGeneration += 1L
-        publishClock()
-        publishPlaybackState()
-        requestWeatherIfNecessary()
+        if (clientActive) {
+            publishClock()
+            publishPlaybackState()
+            requestWeatherIfNecessary()
+        }
     }
 
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (!clientActive) return@OnSharedPreferenceChangeListener
         if (key == KEY_SHOW_LOCATION) {
             val city = WeatherStore.current(this)?.localityLabel
             cityAnnouncement.show(city, SystemClock.elapsedRealtime())
@@ -49,7 +66,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             key == KEY_LAYOUT || key == ClockTheme.KEY ||
             key == WeatherStore.KEY_CITY || key == "weather_cached_city" ||
             key == "weather_cached_mode" || key == "weather_station_label" ||
-            key == WeatherStore.KEY_LOCALITY ||
+            key == WeatherStore.KEY_LOCALITY || key == WeatherStore.KEY_WARNING_REV ||
             key == "weather_source_name" || key == "weather_fetched_at" ||
             key == "weather_code" || key == "weather_temperature_bits" ||
             key == "weather_is_day" || key == "weather_pressure_bits" ||
@@ -65,6 +82,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     /** Both Play and Pause display the clock, so both advance every minute. */
     private val minuteTick = object : Runnable {
         override fun run() {
+            if (!clientActive) return
             publishClock()
             requestWeatherIfNecessary()
             scheduleNextMinute()
@@ -110,10 +128,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         sessionToken = session.sessionToken
         prefs.registerOnSharedPreferenceChangeListener(prefsListener)
         // Restore the last explicit phone/car choice. Do not overwrite it.
-        publishClock()
         publishPlaybackState()
-        requestWeatherIfNecessary()
-        scheduleNextMinute()
+        // Do not start periodic work until an accepted media client connects.
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int =
@@ -133,6 +149,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         if (!AutoClockBrowseRouting.allowLibrary(
                 clientPackageName, requestedSuggestions
             )) return null
+        resumeClientWork()
         return BrowserRoot(ROOT_ID, null)
     }
 
@@ -159,7 +176,38 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         try { packageManager.getPackageInfo(packageName, 0).versionName }
         catch (_: Exception) { null }
 
+    private fun resumeClientWork() {
+        if (clientActive) return
+        clientActive = true
+        lastWarningRevision = prefs.getLong(WeatherStore.KEY_WARNING_REV, 0L)
+        publishClock()
+        publishPlaybackState()
+        requestWeatherIfNecessary()
+        scheduleNextMinute()
+    }
+
+    private fun suspendClientWork() {
+        clientActive = false
+        handler.removeCallbacks(minuteTick)
+        handler.removeCallbacks(settingsRefresh)
+        handler.removeCallbacks(hideCityTitle)
+        queuedWarning = null
+        baseMetadata = null
+        artKey = null
+    }
+
+    override fun onUnbind(intent: Intent?): Boolean {
+        suspendClientWork()
+        return true
+    }
+
+    override fun onRebind(intent: Intent?) {
+        super.onRebind(intent)
+        // onGetRoot resumes work for the accepted client.
+    }
+
     override fun onDestroy() {
+        suspendClientWork()
         // Service shutdown must not change the saved weather preference.
         artworkGeneration += 1L
         handler.removeCallbacks(minuteTick)
@@ -193,14 +241,16 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         // The same preference listener handles phone switches. Publish now
         // for car transport commands, avoiding duplicate queued artwork.
         handler.removeCallbacks(settingsRefresh)
-        artworkGeneration += 1L
-        publishClock()
-        publishPlaybackState()
-        requestWeatherIfNecessary()
+        if (clientActive) {
+            publishClock()
+            publishPlaybackState()
+            requestWeatherIfNecessary()
+        }
     }
 
     private fun scheduleNextMinute() {
         handler.removeCallbacks(minuteTick)
+        if (!clientActive) return
         handler.postDelayed(
             minuteTick,
             MinuteProgress.millisUntilNextMinute(System.currentTimeMillis())
@@ -224,8 +274,6 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val theme = selectedTheme()
         val colored = coloredWeatherIcons()
         val showClockForecast = visible.family != ClockFamily.WEATHER && visible.usesWeather
-        val forecast = if (showClockForecast) ForecastStore.currentRing(this,
-            now.atZone(java.time.ZoneId.systemDefault()).toEpochSecond(), weather) else emptyList()
         val revision = if (showClockForecast) prefs.getLong(ForecastStore.KEY_SAVED_AT, 0L) +
             (weather?.observedAtMs ?: 0L) else weather?.observedAtMs ?: 0L
         val artwork = ClockArtworkProvider.artworkUri(
@@ -242,11 +290,28 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         // Observe locality even when the clock's weather option is off.
         val locality = (weather ?: WeatherStore.current(this))?.localityLabel
         if (cityAnnouncement.update(locality, tick)) scheduleCityTitleHide()
+        val warningRevision = prefs.getLong(WeatherStore.KEY_WARNING_REV, 0L)
+        if (warningRevision != lastWarningRevision) {
+            lastWarningRevision = warningRevision
+            val warning = prefs.getString(WeatherStore.KEY_WARNING, null)
+            queuedWarning = null
+            if (warning != null) {
+                if (cityAnnouncement.title(tick) != null) queuedWarning = warning
+                else {
+                    cityAnnouncement.show(warning, tick)
+                    scheduleCityTitleHide()
+                }
+            }
+        }
         val temporaryTitle = cityAnnouncement.title(tick) ?: INVISIBLE_TEXT
         val activeId = ClockLibraryRows.CLOCK_ID
 
         // Keep both a direct reduced-size bitmap and an artwork URI to cope
         // with Android Auto implementations that cache either representation.
+        val key = artwork.toString() + "|" + miniArtwork.toString()
+        if (artKey != key || baseMetadata == null) {
+        val forecast = if (showClockForecast) ForecastStore.currentRing(this,
+            now.atZone(java.time.ZoneId.systemDefault()).toEpochSecond(), weather) else emptyList()
         val art = ClockRenderer.render(
             visible.id, now, weather?.weatherCode, weather?.isDay ?: true,
             weather?.formattedTemperature, compactLayout(),
@@ -259,20 +324,24 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             weather?.isDay ?: true, weather?.formattedTemperature, theme,
             coloredWeatherIcons = colored
         )
-        val metadata = MediaMetadataCompat.Builder()
+        baseMetadata = MediaMetadataCompat.Builder()
             .putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, miniBitmap)
             .putBitmap(MediaMetadataCompat.METADATA_KEY_ART, art)
             .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, activeId)
-            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, temporaryTitle)
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, INVISIBLE_TEXT)
-            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, temporaryTitle)
             .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, INVISIBLE_TEXT)
             .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_DESCRIPTION, INVISIBLE_TEXT)
             .putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ART_URI, artwork.toString())
             .putString(MediaMetadataCompat.METADATA_KEY_ART_URI, artwork.toString())
             .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON_URI, miniArtwork.toString())
-        // No duration or fake audio is provided.
-        session.setMetadata(metadata.build())
+            .build()
+        artKey = key
+        }
+        // A title change does not allocate or redraw any artwork.
+        session.setMetadata(MediaMetadataCompat.Builder(baseMetadata!!)
+            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, temporaryTitle)
+            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, temporaryTitle)
+            .build())
     }
 
     private fun publishPlaybackState() {

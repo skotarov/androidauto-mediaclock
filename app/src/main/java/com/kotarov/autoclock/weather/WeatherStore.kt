@@ -28,6 +28,9 @@ object WeatherStore {
     const val PREFS = "clock_settings"
     const val KEY_CITY = "weather_city"
     const val KEY_LOCALITY = "weather_locality_v47"
+    const val KEY_WARNING = "weather_warning_v52"
+    const val KEY_WARNING_REV = "weather_warning_revision_v52"
+    private var inFlight = false
     private const val KEY_LAT = "weather_locality_lat_v47"
     private const val KEY_LON = "weather_locality_lon_v47"
     const val AUTO_ID = "auto"
@@ -196,9 +199,13 @@ object WeatherStore {
         val selected = selectedMode(prefs.getString(KEY_CITY, null))
         val now = System.currentTimeMillis()
         val lastAttempt = prefs.getLong("weather_attempt_at", 0L)
-        if (!force && prefs.getString("weather_attempt_city", null) == selected &&
+        if (inFlight || (!force && prefs.getString("weather_attempt_city", null) == selected &&
             now >= lastAttempt && now - lastAttempt < MIN_RETRY_MS
-        ) return
+        )) {
+            callback(false)
+            return
+        }
+        inFlight = true
 
         prefs.edit().putLong("weather_attempt_at", now)
             .putString("weather_attempt_city", selected).apply()
@@ -208,13 +215,14 @@ object WeatherStore {
             // the Android runtime permission request when Auto is selected.
             WeatherLocation.requestOnce(app) { location ->
                 if (location == null) {
+                    inFlight = false
                     callback(false)
                 } else {
                     fetchOnThread(
                         app, selected, callback, location.latitude, location.longitude,
                         now
                     ) {
-                        fetchNearestStation(location) ?: fetchAutoModelFallback(location)
+                        fetchNearestStation(location)
                     }
                 }
             }
@@ -239,18 +247,24 @@ object WeatherStore {
         request: () -> Reading?
     ) {
         Thread({
-            val result = try { request() } catch (_: Exception) { null }
+            val observed = try { request() } catch (_: Exception) { null }
             val forecast = try { ForecastStore.fetchOnWorker(latitude, longitude) }
                 catch (_: Exception) { null }
+            val result = observed ?: ForecastStore.currentModel(forecast)?.let {
+                Reading(it.temperature, it.code, it.isDay, "Текущо местоположение",
+                    "Open-Meteo · модел", System.currentTimeMillis())
+            }
             val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val oldLat = Double.fromBits(prefs.getLong(KEY_LAT, Double.NaN.toBits()))
+            val oldLon = Double.fromBits(prefs.getLong(KEY_LON, Double.NaN.toBits()))
+            val near = oldLat.isFinite() && oldLon.isFinite() &&
+                WeatherStations.kilometers(oldLat, oldLon, latitude, longitude) <= 0.3
+            val known = prefs.getString(KEY_LOCALITY, null)
             val locality = if (selectionAtStart != AUTO_ID) City.byId(selectionAtStart).label
+                else if (near && known != null) known
                 else resolveLocality(app, latitude, longitude)
-                    ?: prefs.getString(KEY_LOCALITY, null)?.takeIf {
-                        val lat = Double.fromBits(prefs.getLong(KEY_LAT, Double.NaN.toBits()))
-                        val lon = Double.fromBits(prefs.getLong(KEY_LON, Double.NaN.toBits()))
-                        lat.isFinite() && lon.isFinite() &&
-                            WeatherStations.kilometers(lat, lon, latitude, longitude) <= 1.0
-                    }
+            val warning = ForecastStore.warning(forecast, System.currentTimeMillis() / 1000L,
+                result?.code)
             var saved = false
             if (result != null &&
                 selectedMode(prefs.getString(KEY_CITY, null)) == selectionAtStart &&
@@ -258,6 +272,8 @@ object WeatherStore {
             ) {
                 val editor = prefs.edit()
                     .putString(KEY_LOCALITY, locality)
+                    .putString(KEY_WARNING, warning)
+                    .putLong(KEY_WARNING_REV, requestAt)
                     .putLong(KEY_LAT, latitude.toBits())
                     .putLong(KEY_LON, longitude.toBits())
                     .putString("weather_cached_mode", selectionAtStart)
@@ -285,7 +301,10 @@ object WeatherStore {
                 editor.apply()
                 saved = true
             }
-            Handler(Looper.getMainLooper()).post { callback(saved) }
+            Handler(Looper.getMainLooper()).post {
+                inFlight = false
+                callback(saved)
+            }
         }, "AutoClockWeather").apply { isDaemon = true }.start()
     }
 
@@ -300,9 +319,12 @@ object WeatherStore {
         } catch (_: Exception) { null }
     }
 
+    private val STATION_ID_SET = WeatherStations.stations.map { it.icao }.toSet()
+    private val STATION_IDS = STATION_ID_SET.joinToString(",")
+
     /** Exactly one API call lists the latest reports for all eight stations. */
     private fun fetchNearestStation(location: Location): Reading? {
-        val ids = WeatherStations.stations.joinToString(",") { it.icao }
+        val ids = STATION_IDS
         val json = fetchText(
             "https://aviationweather.gov/api/data/metar?ids=$ids&format=json",
             "AutoClock2/0.13 (Android personal weather display)"
@@ -313,7 +335,7 @@ object WeatherStore {
         for (i in 0 until results.length()) {
             val report = results.optJSONObject(i) ?: continue
             val id = report.optString("icaoId", report.optString("stationId", ""))
-            if (id !in WeatherStations.stations.map { it.icao }) continue
+            if (id !in STATION_ID_SET) continue
             val temp = report.optDouble("temp", Double.NaN)
             val stamp = report.optLong("obsTime", 0L)
             val timeMs = if (stamp > 10_000_000_000L) stamp else stamp * 1000L
@@ -383,20 +405,6 @@ object WeatherStore {
             3, 9, 10 -> hour in 7..18
             else -> hour in 8..16
         }
-    }
-
-    private fun fetchAutoModelFallback(location: Location): Reading? {
-        val nearestCity = City.entries.minByOrNull {
-            WeatherStations.kilometers(location.latitude, location.longitude,
-                it.lat, it.lon)
-        }
-        val close = nearestCity != null &&
-            WeatherStations.kilometers(location.latitude, location.longitude,
-                nearestCity.lat, nearestCity.lon) < 120.0
-        val label = if (close) "Район ${nearestCity!!.label}"
-                    else "Текущо местоположение"
-        return fetchModel(location.latitude, location.longitude,
-            label, "Open-Meteo · модел (няма станция)")
     }
 
     private fun fetchModel(
