@@ -19,7 +19,7 @@ import com.kotarov.autoclock.weather.ForecastStore
 import java.time.LocalDateTime
 
 /** Play/Pause controls the single persisted weather preference.
- * Both playback states always show a live clock; no audio is played. */
+ * Both playback states show a live clock; audio is limited to short notices. */
 class AutoClockMediaService : MediaBrowserServiceCompat() {
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var session: MediaSessionCompat
@@ -27,6 +27,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private val running: Boolean
         get() = ClockSelectionStore.weatherEnabled(prefs)
     private val cityAnnouncement = CityAnnouncement()
+    private val noticeSound = NoticeSoundPlayer()
+    private var lastSoundNotice: CityAnnouncement.Notice? = null
     private var clientActive = false
     private var lastWarningRevision = 0L
     private var queuedWarning: String? = null
@@ -186,6 +188,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         handler.removeCallbacks(settingsRefresh)
         handler.removeCallbacks(hideCityTitle)
         queuedWarning = null
+        noticeSound.stop()
         baseMetadata = null
         artKey = null
         miniKey = null
@@ -333,6 +336,12 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, temporaryTitle)
             .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, temporarySubtitle)
             .build())
+        // Each newly created notice is a distinct object, even if the same
+        // warning appears again at a later refresh. Never sound on redraw.
+        if (notice != null && notice !== lastSoundNotice) {
+            lastSoundNotice = notice
+            noticeSound.play(NoticeSound.fromId(prefs.getString(NoticeSound.KEY, null)))
+        }
     }
 
     private fun publishPlaybackState() {
