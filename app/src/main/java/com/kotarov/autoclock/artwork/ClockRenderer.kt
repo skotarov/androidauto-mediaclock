@@ -220,9 +220,13 @@ object ClockRenderer {
             val baseline = if (hasIcon) 21f * unit else -(fm.ascent + fm.descent) / 2f
             val textInner = dy * baseline + minOf(dy * fm.ascent, dy * fm.descent) -
                 abs(dx) * paint.measureText(temperature) / 2f
+            // Halve the standalone temperature centre's gap from the dial:
+            // 1.38R -> 1.19R. Allow a minimal outward adjustment only if
+            // wide text would otherwise touch the outer stroke.
+            val temperatureRing = if (hasIcon) minimumRing else radius * 1.19f
+            val temperatureClearance = if (hasIcon) clearance else radius + 4f * unit
             var ring = if (hasTemperature)
-                maxOf(if (hasIcon) minimumRing else radius * 1.38f,
-                    clearance - textInner) else minimumRing
+                maxOf(temperatureRing, temperatureClearance - textInner) else minimumRing
             if (hasIcon) {
                 val iconInner = -dy * lift - scale *
                     (abs(dx) * geometry.width + abs(dy) * geometry.height) / 2f
