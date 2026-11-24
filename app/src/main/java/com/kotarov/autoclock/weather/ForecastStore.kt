@@ -68,11 +68,11 @@ object ForecastStore {
         }
     }
 
-    const val RING_HOURS = 11
-    const val RING_FUTURE_HOURS = 9
+    const val RING_HOURS = 6
+    const val RING_FUTURE_HOURS = RING_HOURS - 1
 
     /** Current and next three hours are fully opaque; the rest are 45%,
-     * except the final future hour (20%). The past slot is also 45%. */
+     * except the final future hour (20%). */
     fun forecastAlpha(offset: Int, lastOffset: Int): Int = when {
         offset == lastOffset -> 51
         offset in 0..3 -> 255
@@ -96,8 +96,7 @@ object ForecastStore {
 
     data class RingChanges(val iconEpochs: Set<Long>, val temperatureEpochs: Set<Long>)
 
-    /** The past slot shows its glyph only if it differs from current conditions.
-     * The current slot always establishes a baseline. For every future
+    /** The current slot always establishes a baseline. For every future
      * hour, compare icon and displayed whole degrees independently with
      * the immediately preceding hour, including hours with no visible glyph.
      * Missing data restarts the baseline. */
@@ -106,7 +105,7 @@ object ForecastStore {
         val temperatures = mutableSetOf<Long>()
         var previous: Hour? = null
         for (hour in hours.sortedBy { it.epochSeconds }) {
-            if (hour.epochSeconds < currentSlot - 3600L ||
+            if (hour.epochSeconds < currentSlot ||
                 hour.epochSeconds > currentSlot + RING_FUTURE_HOURS * 3600L) continue
             if (hour.code < 0) {
                 previous = null
@@ -124,19 +123,13 @@ object ForecastStore {
             }
             previous = hour
         }
-        // Compare the immediately previous hour with the current visible glyph.
-        // Keep its temperature independent; missing current data cannot hide it.
-        val past = hours.firstOrNull { it.epochSeconds == currentSlot - 3600L && it.code >= 0 }
-        val current = hours.firstOrNull { it.epochSeconds == currentSlot && it.code >= 0 }
-        if (past != null && current != null && ringGlyph(past) == ringGlyph(current))
-            icons.remove(past.epochSeconds)
         return RingChanges(icons, temperatures)
     }
 
     fun ringIconEpochs(hours: List<Hour>, currentSlot: Long): Set<Long> =
         ringChanges(hours, currentSlot).iconEpochs
 
-    /** Previous hourly model slot, current observation and nine future slots. */
+    /** Current observation and five future hourly slots. */
     fun currentRing(
         context: Context,
         nowEpochSeconds: Long = System.currentTimeMillis() / 1000L,
@@ -149,7 +142,7 @@ object ForecastStore {
     ): List<Hour> {
         val start = Instant.ofEpochSecond(nowEpochSeconds).atZone(zone)
             .withMinute(0).withSecond(0).withNano(0).toEpochSecond()
-        return all.filter { it.epochSeconds in (start - 3600L)..(start + RING_FUTURE_HOURS * 3600L) }
+        return all.filter { it.epochSeconds in start..(start + RING_FUTURE_HOURS * 3600L) }
             .distinctBy { it.epochSeconds }.sortedBy { it.epochSeconds }
     }
 

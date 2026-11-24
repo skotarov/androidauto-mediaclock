@@ -174,7 +174,7 @@ object ClockRenderer {
     }
 
     /** Reverse only the light main artwork; dark incurs no additional work. */
-    /** Eleven hourly positions with change-only future glyphs. Keep each
+    /** Six hourly positions with change-only future glyphs. Keep each
      * glyph and temperature outside the dial's outer stroke, accounting for
      * the vertical glyph lift and the different shapes around the circle.
      * Fade each complete slot in a small alpha layer. */
@@ -194,7 +194,7 @@ object ClockRenderer {
             val local = LocalDateTime.ofInstant(Instant.ofEpochSecond(hour.epochSeconds), zone)
             // Match real elapsed hourly slots; the dial uses the phone zone.
             val offset = ((hour.epochSeconds - currentSlot) / 3600L).toInt()
-            if (offset !in -1..ForecastStore.RING_FUTURE_HOURS || hour.code < 0) continue
+            if (offset !in 0..ForecastStore.RING_FUTURE_HOURS || hour.code < 0) continue
             val index = local.hour % 12
             val dx = forecastX[index]
             val dy = forecastY[index]
@@ -202,24 +202,27 @@ object ClockRenderer {
             val hasTemperature = hour.epochSeconds in changes.temperatureEpochs
             if (!hasIcon && !hasTemperature) continue
             val geometry = iconGeometry(hour.code, hour.isDay)
-            val iconSize = if (offset == 0) 54f else 41f
+            val iconSize = 41f
             val scale = iconSize * unit / maxOf(geometry.width, geometry.height)
-            val lift = (if (offset == 0) 24f else 16f) * unit
+            val lift = 16f * unit
             val temperature = "${hour.temperatureC.roundToInt()}°"
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = themed(pale, theme)
                 textAlign = Paint.Align.CENTER
-                textSize = (if (offset == 0) 20f else 17f) * unit
+                textSize = 20f * unit
                 typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
             }
             // Project the glyph and text bounding boxes onto the outward
             // radial direction. Move only as far as necessary for clearance.
-            val baseline = 21f * unit
             val fm = paint.fontMetrics
+            // Temperature-only slots sit centred on a common circular path,
+            // rather than leaving an empty icon-sized gap above the text.
+            val baseline = if (hasIcon) 21f * unit else -(fm.ascent + fm.descent) / 2f
             val textInner = dy * baseline + minOf(dy * fm.ascent, dy * fm.descent) -
                 abs(dx) * paint.measureText(temperature) / 2f
             var ring = if (hasTemperature)
-                maxOf(minimumRing, clearance - textInner) else minimumRing
+                maxOf(if (hasIcon) minimumRing else radius * 1.38f,
+                    clearance - textInner) else minimumRing
             if (hasIcon) {
                 val iconInner = -dy * lift - scale *
                     (abs(dx) * geometry.width + abs(dy) * geometry.height) / 2f
@@ -260,7 +263,7 @@ object ClockRenderer {
             color = themed(pale, theme)
             textAlign = Paint.Align.CENTER
             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
-            textSize = 17f
+            textSize = 22f
         }
         val temp = Paint(label).apply { color = themed(white, theme) }
         // Seven boundary labels delimit the six intervals. Keep the existing
@@ -286,17 +289,16 @@ object ClockRenderer {
             val hour = slot.hour
             if (hour != null && hour.code >= 0) {
                 val geometry = iconGeometry(hour.code, hour.isDay)
-                val iconSize = if (index == 0) 60f else 44f
+                val iconSize = 60f
                 val iconScale = iconSize / maxOf(geometry.width, geometry.height)
                 canvas.save()
-                canvas.translate(x, (if (index == 0) 58f else 59f) - geometry.visualCentreY * iconScale)
+                canvas.translate(x, 58f - geometry.visualCentreY * iconScale)
                 canvas.scale(iconScale, iconScale)
                 drawWeatherIcon(canvas, hour.code, hour.isDay, theme)
                 canvas.restore()
             }
-            temp.textSize = if (index == 0) 35f else 28f
-            temp.typeface = Typeface.create(Typeface.SANS_SERIF,
-                if (index == 0) Typeface.BOLD else Typeface.NORMAL)
+            temp.textSize = 35f
+            temp.typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
             val temperature = hour?.let { "${it.temperatureC.roundToInt()}°" } ?: "–"
             canvas.drawText(temperature, x, 115f, temp)
             canvas.restoreToCount(save)
