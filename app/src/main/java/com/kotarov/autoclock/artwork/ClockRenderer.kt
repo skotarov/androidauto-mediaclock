@@ -385,15 +385,15 @@ object ClockRenderer {
         0 -> if (isDay) IconGeometry(82f, 82f, 0f)
              else IconGeometry(46f, 46f, 0f)
         1, 2 -> if (isDay) IconGeometry(111f, 89f, 3f)
-                else IconGeometry(111f, 100f, -5f)
+                else IconGeometry(120f, 105f, -15f)
         45, 48 -> IconGeometry(98f, 105f, 4f)
         51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82 ->
             if (isDay) IconGeometry(98f, 85f, 2f)
-            else IconGeometry(108f, 130f, -8f)
+            else IconGeometry(122f, 138f, -13f)
         71, 73, 75, 77, 85, 86 -> if (isDay) IconGeometry(98f, 94f, 2f)
-            else IconGeometry(108f, 130f, -8f)
+            else IconGeometry(122f, 130f, -17f)
         95, 96, 99 -> if (isDay) IconGeometry(98f, 105f, 6f)
-            else IconGeometry(108f, 138f, -5f)
+            else IconGeometry(122f, 142f, -11f)
         else -> IconGeometry(98f, 65f, -6f)
     }
 
@@ -481,7 +481,7 @@ object ClockRenderer {
                 else drawMoon(canvas, cx, cy, palette)
             1, 2 -> {
                 if (isDay) drawSun(canvas, cx - 21f, cy - 20f, palette, 18f)
-                else drawMoon(canvas, cx - 28f, cy - 28f, palette, 22f)
+                else drawCombinedMoon(canvas, cx - 27f, cy - 33f, palette)
                 drawCloud(canvas, cx, cy + 12f, palette)
             }
             3, null, -1 -> drawCloud(canvas, cx, cy, palette)
@@ -494,7 +494,7 @@ object ClockRenderer {
                 }
             }
             51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82 -> {
-                if (!isDay) drawMoon(canvas, cx - 29f, cy - 48f, palette, 18f)
+                if (!isDay) drawCombinedMoon(canvas, cx - 28f, cy - 48f, palette)
                 // Draw rain BELOW the cloud, with a bright wide halo and a
                 // saturated core. The old 6px/15px dashes disappeared after
                 // Android Auto scaled and dimmed the clock artwork.
@@ -508,7 +508,7 @@ object ClockRenderer {
                 }
             }
             71, 73, 75, 77, 85, 86 -> {
-                if (!isDay) drawMoon(canvas, cx - 29f, cy - 48f, palette, 18f)
+                if (!isDay) drawCombinedMoon(canvas, cx - 28f, cy - 48f, palette)
                 drawCloud(canvas, cx, cy - 14f, palette)
                 val snow = stroke(palette.snow, 6f)
                 repeat(3) { i ->
@@ -519,7 +519,7 @@ object ClockRenderer {
                 }
             }
             95, 96, 99 -> {
-                if (!isDay) drawMoon(canvas, cx - 29f, cy - 48f, palette, 18f)
+                if (!isDay) drawCombinedMoon(canvas, cx - 28f, cy - 48f, palette)
                 drawCloud(canvas, cx, cy - 13f, palette)
                 val bolt = Path().apply {
                     moveTo(cx + 5f, cy + 14f)
@@ -561,6 +561,24 @@ object ClockRenderer {
         canvas.drawCircle(cx, cy, radius, fill(palette.moon))
         canvas.drawCircle(cx + radius * 0.46f, cy - radius * 0.36f,
             radius, fill(palette.moonCutout))
+    }
+
+    /** A larger, thicker crescent behind the cloud. Cut the shape out
+     * rather than painting a background-colored disc over nearby artwork.
+     * Keep the standalone clear-night moon unchanged. */
+    private fun drawCombinedMoon(
+        canvas: Canvas, cx: Float, cy: Float, palette: WeatherPalette
+    ) {
+        val radius = 33f
+        val crescent = Path().apply {
+            addCircle(cx, cy, radius, Path.Direction.CW)
+        }
+        val cutout = Path().apply {
+            addCircle(cx + radius * 0.66f, cy - radius * 0.32f,
+                radius, Path.Direction.CW)
+        }
+        crescent.op(cutout, Path.Op.DIFFERENCE)
+        canvas.drawPath(crescent, fill(palette.moon))
     }
 
     private fun drawCloud(
