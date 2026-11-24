@@ -315,8 +315,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         session.setPlaybackState(
             PlaybackStateCompat.Builder()
                 .setState(
-                    if (running) PlaybackStateCompat.STATE_PLAYING
-                    else PlaybackStateCompat.STATE_PAUSED,
+                    ClockPlaybackState.forRunning(running),
                     PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN,
                     0f
                 )
