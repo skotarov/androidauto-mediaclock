@@ -177,19 +177,16 @@ class MainActivity : Activity() {
                 prefs.edit().putLong(AutoClockMediaService.KEY_SHOW_LOCATION,
                     SystemClock.elapsedRealtimeNanos()).apply()
             }
-        })
+        }, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = dp(32) })
         locationMessage = text("", 18f, dp(4)).apply {
             gravity = android.view.Gravity.CENTER
             visibility = View.GONE
         }
         root.addView(locationMessage)
 
-        root.addView(checkOption(
-            "Тест на надписите",
-            prefs.getBoolean(AutoClockMediaService.KEY_DEBUG_MEDIA_LABELS, false)
-        ) { checked ->
-            prefs.edit().putBoolean(AutoClockMediaService.KEY_DEBUG_MEDIA_LABELS, checked).apply()
-        })
 
     }
 
