@@ -27,6 +27,7 @@ import com.kotarov.autoclock.media.NoticeSound
 import com.kotarov.autoclock.media.NoticeSoundPlayer
 import android.widget.Switch
 import com.kotarov.autoclock.artwork.ClockRenderer
+import com.kotarov.autoclock.artwork.ArtworkWorkers
 import com.kotarov.autoclock.media.AutoClockMediaService
 import com.kotarov.autoclock.media.ClockFamily
 import com.kotarov.autoclock.media.ClockPreset
@@ -64,6 +65,11 @@ class MainActivity : Activity() {
         val forecast: List<ForecastStore.Hour>
     )
     private var previewKey: PreviewKey? = null
+    private var requestedPreview: PreviewKey? = null
+    private data class PreviewImages(val analog: Bitmap, val digital: Bitmap) {
+        fun discard() { analog.recycle(); digital.recycle() }
+    }
+    private val previewWorker = ArtworkWorkers.create<PreviewImages> { it.discard() }
     private val messageHandler = Handler(Looper.getMainLooper())
     private lateinit var locationMessage: TextView
     private val hideLocationMessage = Runnable {
@@ -319,19 +325,39 @@ class MainActivity : Activity() {
             now.atZone(java.time.ZoneId.systemDefault()).toEpochSecond(), weather) else emptyList()
         val next = PreviewKey(now, theme, compact, analog.id, digital.id, weather, locality, forecast)
         if (previewKey != next || analogBitmap == null || digitalBitmap == null) {
-            fun make(preset: ClockPreset): Bitmap = ClockRenderer.render(
-                preset.id, now, compact, outputSize = 256,
-                sourceLabel = if (preset.usesWeather) locality else null,
-                theme = theme, forecast = if (preset.usesWeather) forecast else emptyList())
-            val newAnalog = make(analog)
-            val newDigital = make(digital)
-            analogImage.setImageBitmap(newAnalog)
-            digitalImage.setImageBitmap(newDigital)
-            analogBitmap?.recycle()
-            digitalBitmap?.recycle()
-            analogBitmap = newAnalog
-            digitalBitmap = newDigital
-            previewKey = next
+            if (requestedPreview != next) {
+                requestedPreview = next
+                previewWorker.submit({
+                    fun make(preset: ClockPreset): Bitmap = ClockRenderer.render(
+                        preset.id, now, compact, outputSize = 256,
+                        sourceLabel = if (preset.usesWeather) locality else null,
+                        theme = theme, forecast = if (preset.usesWeather) forecast else emptyList())
+                    val first = make(analog)
+                    try {
+                        PreviewImages(first, make(digital))
+                    } catch (e: Throwable) {
+                        first.recycle()
+                        throw e
+                    }
+                }) { outcome ->
+                    requestedPreview = null
+                    val result = outcome.getOrNull()
+                    if (result != null) {
+                        analogImage.setImageBitmap(result.analog)
+                        digitalImage.setImageBitmap(result.digital)
+                        analogBitmap?.recycle()
+                        digitalBitmap?.recycle()
+                        analogBitmap = result.analog
+                        digitalBitmap = result.digital
+                        previewKey = next
+                    } else {
+                        android.util.Log.w("AutoClock", "Preview render failed", outcome.exceptionOrNull())
+                    }
+                }
+            }
+        } else if (requestedPreview != null) {
+            previewWorker.cancel()
+            requestedPreview = null
         }
 
         val selected = ClockSelectionStore.current(prefs).family
@@ -449,6 +475,8 @@ class MainActivity : Activity() {
     }
 
     private fun releasePreviews() {
+        previewWorker.cancel()
+        requestedPreview = null
         if (::analogImage.isInitialized) analogImage.setImageDrawable(null)
         if (::digitalImage.isInitialized) digitalImage.setImageDrawable(null)
         analogBitmap?.recycle()

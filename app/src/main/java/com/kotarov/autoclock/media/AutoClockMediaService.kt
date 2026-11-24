@@ -1,6 +1,7 @@
 package com.kotarov.autoclock.media
 
 import android.content.Intent
+import android.graphics.Bitmap
 import android.content.SharedPreferences
 import android.os.Bundle
 import android.os.Handler
@@ -15,6 +16,7 @@ import androidx.media.MediaBrowserServiceCompat
 import com.kotarov.autoclock.artwork.ClockArtworkProvider
 import com.kotarov.autoclock.artwork.ClockRenderer
 import com.kotarov.autoclock.artwork.PublishedArtwork
+import com.kotarov.autoclock.artwork.ArtworkWorkers
 import com.kotarov.autoclock.weather.WeatherStore
 import com.kotarov.autoclock.weather.ForecastStore
 import java.time.LocalDateTime
@@ -38,6 +40,14 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private var miniKey: String? = null
     private var lastPublished: MediaPublicationKey? = null
     private var lastPlayback: Boolean? = null
+    private data class RenderedArt(val main: Bitmap, val mini: Bitmap, val ownsMini: Boolean) {
+        fun discard() {
+            main.recycle()
+            if (ownsMini) mini.recycle()
+        }
+    }
+    private val artworkWorker = ArtworkWorkers.create<RenderedArt> { it.discard() }
+    private var requestedArtKey: String? = null
     private val hideCityTitle = Runnable {
         if (clientActive) {
             val next = queuedWarning
@@ -194,6 +204,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         handler.removeCallbacks(hideCityTitle)
         queuedWarning = null
         noticeSound.stop()
+        artworkWorker.cancel()
+        requestedArtKey = null
         baseMetadata = null
         artKey = null
         miniKey = null
@@ -263,6 +275,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         PlaybackDisplay.visiblePreset(selectedPreset(), running)
 
     private fun publishClock() {
+        if (!clientActive) return
         val now = LocalDateTime.now()
         val visible = visiblePreset()
         val weather = if (visible.usesWeather) WeatherStore.current(this) else null
@@ -300,53 +313,79 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val notice = cityAnnouncement.notice(tick)
         val temporaryTitle = notice?.heading ?: INVISIBLE_TEXT
         val temporarySubtitle = notice?.body ?: INVISIBLE_TEXT
-        val activeId = CLOCK_ID
-
-        // Keep both a direct reduced-size bitmap and an artwork URI to cope
-        // with Android Auto implementations that cache either representation.
         val key = artwork.toString() + "|" + miniArtwork.toString()
         if (artKey != key || baseMetadata == null) {
-        val forecast = if (showClockForecast) ForecastStore.currentRing(this,
-            now.atZone(java.time.ZoneId.systemDefault()).toEpochSecond(), weather) else emptyList()
-        val art = ClockRenderer.render(
-            visible.id, now, compactLayout(),
-            outputSize = if (showClockForecast && !visible.hasAnalog) ClockRenderer.SIZE
-                else ClockRenderer.MEDIA_BITMAP_SIZE, sourceLabel = if (showClockForecast) WeatherStore.locality(this) ?: weather?.artworkSource else null,
-            theme = theme, forecast = forecast
-        )
-        val currentMiniKey = miniArtwork.toString()
-        val miniBitmap = if (miniKey == currentMiniKey)
-            baseMetadata?.getBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON)
-                ?: ClockRenderer.renderMini(visible.family, now, theme)
-            else ClockRenderer.renderMini(visible.family, now, theme)
-        miniKey = currentMiniKey
-        PublishedArtwork.publish(artwork.toString(), art, false)
-        PublishedArtwork.publish(currentMiniKey, miniBitmap, true)
-        baseMetadata = MediaMetadataCompat.Builder()
-            .putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, miniBitmap)
-            .putBitmap(MediaMetadataCompat.METADATA_KEY_ART, art)
-            .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, activeId)
-            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, INVISIBLE_TEXT)
-            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, INVISIBLE_TEXT)
-            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_DESCRIPTION, INVISIBLE_TEXT)
-            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ART_URI, artwork.toString())
-            .putString(MediaMetadataCompat.METADATA_KEY_ART_URI, artwork.toString())
-            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON_URI, miniArtwork.toString())
-            .build()
-        artKey = key
-        }
-        // Skip identical host IPC updates while retaining the separate notice
-        // sound handling (an identical title can still be a new notice).
-        val publication = MediaPublicationKey(key, temporaryTitle, temporarySubtitle)
-        if (publication != lastPublished) {
-        session.setMetadata(MediaMetadataCompat.Builder(baseMetadata!!)
-            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, temporaryTitle)
-            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, temporarySubtitle)
-            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, INVISIBLE_TEXT)
-            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, temporaryTitle)
-            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, temporarySubtitle)
-            .build())
-        lastPublished = publication
+            if (requestedArtKey != key) {
+                requestedArtKey = key
+                // Snapshot every render input on the owner thread. Never read
+                // mutable service state or touch MediaSession in the worker.
+                val compact = compactLayout()
+                val forecast = if (showClockForecast) ForecastStore.currentRing(this,
+                    now.atZone(java.time.ZoneId.systemDefault()).toEpochSecond(), weather) else emptyList()
+                val label = if (showClockForecast) locality ?: weather?.artworkSource else null
+                val miniUri = miniArtwork.toString()
+                val artUri = artwork.toString()
+                val previousMini = if (miniKey == miniUri)
+                    baseMetadata?.getBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON) else null
+                artworkWorker.submit({
+                    val art = ClockRenderer.render(visible.id, now, compact,
+                        outputSize = if (showClockForecast && !visible.hasAnalog) ClockRenderer.SIZE
+                            else ClockRenderer.MEDIA_BITMAP_SIZE,
+                        sourceLabel = label, theme = theme, forecast = forecast)
+                    try {
+                        RenderedArt(art, previousMini ?: ClockRenderer.renderMini(visible.family, now, theme),
+                            previousMini == null)
+                    } catch (e: Throwable) {
+                        art.recycle()
+                        throw e
+                    }
+                }) { outcome ->
+                    requestedArtKey = null
+                    val result = outcome.getOrNull()
+                    if (result == null) {
+                        android.util.Log.w("AutoClock", "Artwork render failed", outcome.exceptionOrNull())
+                    } else if (!clientActive) {
+                        result.discard()
+                    } else {
+                        // The worker suppresses superseded requests; the
+                        // latest settings are checked again by publishClock.
+                        miniKey = miniUri
+                        PublishedArtwork.publish(artUri, result.main, false)
+                        PublishedArtwork.publish(miniUri, result.mini, true)
+                        baseMetadata = MediaMetadataCompat.Builder()
+                            .putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, result.mini)
+                            .putBitmap(MediaMetadataCompat.METADATA_KEY_ART, result.main)
+                            .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, CLOCK_ID)
+                            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, INVISIBLE_TEXT)
+                            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, INVISIBLE_TEXT)
+                            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_DESCRIPTION, INVISIBLE_TEXT)
+                            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ART_URI, artUri)
+                            .putString(MediaMetadataCompat.METADATA_KEY_ART_URI, artUri)
+                            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON_URI, miniUri)
+                            .build()
+                        artKey = key
+                        publishClock()
+                    }
+                }
+            }
+        } else {
+            // A rapid change back to the already displayed design must
+            // invalidate an outstanding render of the intermediate design.
+            if (requestedArtKey != null) {
+                artworkWorker.cancel()
+                requestedArtKey = null
+            }
+            val publication = MediaPublicationKey(key, temporaryTitle, temporarySubtitle)
+            if (publication != lastPublished) {
+                session.setMetadata(MediaMetadataCompat.Builder(baseMetadata!!)
+                    .putString(MediaMetadataCompat.METADATA_KEY_TITLE, temporaryTitle)
+                    .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, temporarySubtitle)
+                    .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, INVISIBLE_TEXT)
+                    .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, temporaryTitle)
+                    .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, temporarySubtitle)
+                    .build())
+                lastPublished = publication
+            }
         }
         // Each newly created notice is a distinct object, even if the same
         // warning appears again at a later refresh. Never sound on redraw.
