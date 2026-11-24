@@ -103,10 +103,12 @@ object ClockRenderer {
                 drawDigitalForecast(canvas, time, clockY, unit, forecast, theme)
         }
         if (preset.usesWeather && !sourceLabel.isNullOrBlank()) {
-            val sourceY = if (preset.hasAnalog) clockY + radius * 1.28f + 85f * unit
+            val sourceY = if (preset.hasAnalog) clockY + radius * 1.28f + 65f * unit
                 else clockY + digitalForecastTopOffset(unit) + 148f * digitalForecastScale(unit)
-            val maxWidth = if (preset.hasAnalog) radius * 2f + 40f * unit else 290f * unit
-            drawSourceLabel(canvas, sourceLabel, CENTER_X, sourceY, unit, maxWidth, theme)
+            val sourceX = if (preset.hasAnalog) CENTER_X + 175f * unit else CENTER_X
+            val maxWidth = if (preset.hasAnalog) 160f * unit else 290f * unit
+            drawSourceLabel(canvas, sourceLabel, sourceX, sourceY, unit, maxWidth, theme,
+                alignRight = preset.hasAnalog)
         }
         return bitmap
     }
@@ -309,7 +311,8 @@ object ClockRenderer {
         y: Float,
         unit: Float,
         maxWidth: Float,
-        theme: ClockTheme
+        theme: ClockTheme,
+        alignRight: Boolean = false
     ) {
         val baseSize = 22f * unit
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -320,7 +323,8 @@ object ClockRenderer {
         }
         val width = paint.measureText(value)
         val scale = if (width > 0f) minOf(1f, maxWidth / width) else 1f
-        drawText(canvas, value, x, y, baseSize * scale, pale, unit, theme)
+        val centreX = if (alignRight) x - width * scale / 2f else x
+        drawText(canvas, value, centreX, y, baseSize * scale, pale, unit, theme)
     }
 
     private fun stroke(color: Int, thickness: Float): Paint =
