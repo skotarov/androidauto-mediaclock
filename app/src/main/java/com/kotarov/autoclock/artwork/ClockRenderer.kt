@@ -170,6 +170,7 @@ object ClockRenderer {
         val zone = ZoneId.systemDefault()
         val currentSlot = now.atZone(zone)
             .withMinute(0).withSecond(0).withNano(0).toEpochSecond()
+        val iconEpochs = ForecastStore.ringIconEpochs(forecast, currentSlot)
         for (hour in forecast) {
             val local = LocalDateTime.ofInstant(Instant.ofEpochSecond(hour.epochSeconds), zone)
             // Match real elapsed hourly slots; the dial uses the phone zone.
@@ -179,18 +180,21 @@ object ClockRenderer {
             val x = CENTER_X + forecastX[index] * ring
             val y = centreY + forecastY[index] * ring
             val alpha = ForecastStore.ringAlpha(offset)
-            val bounds = 35f * unit
+            val bounds = 60f * unit
             val save = if (alpha < 255)
                 canvas.saveLayerAlpha(x - bounds, y - bounds, x + bounds, y + bounds, alpha)
                 else canvas.save()
-            val geometry = iconGeometry(hour.code, hour.isDay)
-            val iconSize = if (offset == 0) 45f else 34f
-            val scale = iconSize * unit / maxOf(geometry.width, geometry.height)
-            canvas.save()
-            canvas.translate(x, y - 8f * unit - geometry.visualCentreY * scale)
-            canvas.scale(scale, scale)
-            drawWeatherIcon(canvas, hour.code, hour.isDay, theme)
-            canvas.restore()
+            if (hour.epochSeconds in iconEpochs) {
+                val geometry = iconGeometry(hour.code, hour.isDay)
+                val iconSize = if (offset == 0) 58f else 45f
+                val scale = iconSize * unit / maxOf(geometry.width, geometry.height)
+                val lift = if (offset == 0) 24f else 16f
+                canvas.save()
+                canvas.translate(x, y - lift * unit - geometry.visualCentreY * scale)
+                canvas.scale(scale, scale)
+                drawWeatherIcon(canvas, hour.code, hour.isDay, theme)
+                canvas.restore()
+            }
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = themed(pale, theme)
                 textAlign = Paint.Align.CENTER
