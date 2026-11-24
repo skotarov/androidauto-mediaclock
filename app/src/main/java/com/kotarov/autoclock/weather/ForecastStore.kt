@@ -44,6 +44,25 @@ object ForecastStore {
         nowEpochSeconds: Long = System.currentTimeMillis() / 1000L
     ): List<Hour> = nextSixHours(cached(context), nowEpochSeconds)
 
+    const val DIGITAL_HOURS = 6
+
+    /** Stable six columns beginning at the current local hour. Missing data
+     * leaves an empty column rather than shifting later forecasts forward. */
+    data class DigitalSlot(val time: LocalDateTime, val hour: Hour?, val alpha: Int)
+
+    fun digitalSlots(
+        forecast: List<Hour>, now: LocalDateTime,
+        zone: ZoneId = ZoneId.systemDefault()
+    ): List<DigitalSlot> {
+        val start = now.atZone(zone).withMinute(0).withSecond(0).withNano(0)
+        val byEpoch = forecast.associateBy { it.epochSeconds }
+        return (0 until DIGITAL_HOURS).map { offset ->
+            val slot = start.plusHours(offset.toLong())
+            DigitalSlot(slot.toLocalDateTime(), byEpoch[slot.toEpochSecond()],
+                when (offset) { DIGITAL_HOURS - 2 -> 166; DIGITAL_HOURS - 1 -> 77; else -> 255 })
+        }
+    }
+
     const val RING_HOURS = 11
     const val RING_FUTURE_HOURS = 9
 

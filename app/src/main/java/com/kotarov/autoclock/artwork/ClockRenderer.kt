@@ -80,6 +80,7 @@ object ClockRenderer {
             CONTENT_CENTER_Y + DIGITAL_CENTER_DOWN
         } else CONTENT_CENTER_Y
         val forecastRing = preset.family == ClockFamily.ANALOG && preset.usesWeather
+        val digitalForecast = preset.family == ClockFamily.DIGITAL && !preset.hasAnalog && preset.usesWeather
 
         // The primary style establishes the visual hierarchy. Add-ons are
         // independent: no checkboxes means no secondary information at all.
@@ -109,11 +110,8 @@ object ClockRenderer {
                             clockY, 46f * unit, white, unit)
                     }
                 } else if (preset.usesWeather) {
-                    drawText(canvas, time.format(timeFormat), CENTER_X,
-                        clockY - 35f * unit, 88f * unit, white, unit)
-                    drawWeatherRow(canvas, CENTER_X, clockY + 47f * unit,
-                        weatherCode, isDay, temperature, 36f * unit, unit, 330f,
-                        coloredWeatherIcons, theme)
+                    drawDigitalForecast(canvas, time, clockY, compact,
+                        forecast, coloredWeatherIcons, theme)
                 } else {
                     // Pure digital: no dial, date or weather.
                     drawText(canvas, time.format(timeFormat), CENTER_X,
@@ -142,7 +140,7 @@ object ClockRenderer {
                 }
             }
         }
-        if (preset.usesWeather && !forecastRing && !sourceLabel.isNullOrBlank()) {
+        if (preset.usesWeather && !forecastRing && !digitalForecast && !sourceLabel.isNullOrBlank()) {
             // Position the observation/source name immediately BELOW the ring.
             // The baseline is computed from each dial's actual bottom edge,
             // not from a fixed offset from the centre.
@@ -351,6 +349,65 @@ object ClockRenderer {
             canvas.drawText("${hour.temperatureC.roundToInt()}°", x, y + 21f * unit, paint)
             canvas.restoreToCount(save)
         }
+    }
+
+    /** Digital weather layout: prominent HH:mm, then six evenly spaced
+     * hourly columns. The first column is larger and fully opaque. */
+    private fun drawDigitalForecast(
+        canvas: Canvas, now: LocalDateTime, centreY: Float, compact: Boolean,
+        forecast: List<ForecastStore.Hour>, colored: Boolean, theme: ClockTheme
+    ) {
+        val scale = if (compact) 0.82f else 1f
+        canvas.save()
+        canvas.translate(CENTER_X, centreY)
+        canvas.scale(scale, scale)
+
+        val timePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = white
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            textSize = 132f
+        }
+        val shownTime = now.format(timeFormat)
+        val width = timePaint.measureText(shownTime)
+        if (width > 448f) timePaint.textSize *= 448f / width
+        val timeBaseline = -61f - (timePaint.fontMetrics.ascent + timePaint.fontMetrics.descent) / 2f
+        canvas.drawText(shownTime, 0f, timeBaseline, timePaint)
+
+        val slots = ForecastStore.digitalSlots(forecast, now)
+        val label = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = pale
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
+            textSize = 17f
+        }
+        val temp = Paint(label).apply { color = white }
+        slots.forEachIndexed { index, slot ->
+            val x = (index - 2.5f) * 73f
+            val save = if (slot.alpha < 255)
+                canvas.saveLayerAlpha(x - 36f, 10f, x + 36f, 122f, slot.alpha)
+                else canvas.save()
+            canvas.drawText(slot.time.format(timeFormat), x, 25f, label)
+            val hour = slot.hour
+            if (hour != null && hour.code >= 0) {
+                val geometry = iconGeometry(hour.code, hour.isDay)
+                val iconSize = if (index == 0) 49f else 39f
+                val iconScale = iconSize / maxOf(geometry.width, geometry.height)
+                canvas.save()
+                canvas.translate(x, 59f - geometry.visualCentreY * iconScale)
+                canvas.scale(iconScale, iconScale)
+                drawWeatherIcon(canvas, hour.code, hour.isDay, colored, theme,
+                    theme == ClockTheme.LIGHT)
+                canvas.restore()
+            }
+            temp.textSize = if (index == 0) 32f else 25f
+            temp.typeface = Typeface.create(Typeface.SANS_SERIF,
+                if (index == 0) Typeface.BOLD else Typeface.NORMAL)
+            val temperature = hour?.let { "${it.temperatureC.roundToInt()}°" } ?: "–"
+            canvas.drawText(temperature, x, 108f, temp)
+            canvas.restoreToCount(save)
+        }
+        canvas.restore()
     }
 
     private fun drawSourceLabel(

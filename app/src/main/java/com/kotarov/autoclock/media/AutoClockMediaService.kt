@@ -302,10 +302,10 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val lines = ClockMediaLabels.forClock(visible, now, weather)
         val theme = selectedTheme()
         val colored = coloredWeatherIcons()
-        val showRing = visible.family == ClockFamily.ANALOG && visible.usesWeather
-        val forecast = if (showRing) ForecastStore.currentRing(this,
+        val showClockForecast = visible.family != ClockFamily.WEATHER && visible.usesWeather
+        val forecast = if (showClockForecast) ForecastStore.currentRing(this,
             now.atZone(java.time.ZoneId.systemDefault()).toEpochSecond(), weather) else emptyList()
-        val revision = if (showRing) prefs.getLong(ForecastStore.KEY_SAVED_AT, 0L) +
+        val revision = if (showClockForecast) prefs.getLong(ForecastStore.KEY_SAVED_AT, 0L) +
             (weather?.observedAtMs ?: 0L) else weather?.observedAtMs ?: 0L
         val artwork = ClockArtworkProvider.artworkUri(
             visible.id, now, revision,

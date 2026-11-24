@@ -262,7 +262,7 @@ class MainActivity : AppCompatActivity() {
                 weather?.formattedTemperature, compact,
                 outputSize = 256, condition = weather?.description,
                 theme = theme,
-                forecast = if (family == ClockFamily.ANALOG && preset.usesWeather)
+                forecast = if (family != ClockFamily.WEATHER && preset.usesWeather)
                     ForecastStore.currentRing(this,
                         now.atZone(java.time.ZoneId.systemDefault()).toEpochSecond(), weather) else emptyList()
             )
