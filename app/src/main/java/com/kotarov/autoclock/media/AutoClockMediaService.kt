@@ -301,7 +301,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             now.atZone(java.time.ZoneId.systemDefault()).toEpochSecond(), weather) else emptyList()
         val art = ClockRenderer.render(
             visible.id, now, compactLayout(),
-            outputSize = 320, sourceLabel = weather?.artworkSource,
+            outputSize = ClockRenderer.MEDIA_BITMAP_SIZE, sourceLabel = weather?.artworkSource,
             theme = theme, forecast = forecast
         )
         val currentMiniKey = miniArtwork.toString()
