@@ -57,7 +57,7 @@ class ClockArtworkProvider : ContentProvider() {
         // phone settings invalidates both Android Auto and disk artwork caches.
         val layout = if (compact) "compact" else "standard"
         val destination = File(directory,
-            "v42-$layout-${theme.id}-${if (coloredWeatherIcons) "color" else "mono"}-$clockMode-$key-$weatherRevision.png")
+            "v43-$layout-${theme.id}-${if (coloredWeatherIcons) "color" else "mono"}-$clockMode-$key-$weatherRevision.png")
 
         synchronized(lock) {
             if (!destination.isFile || destination.length() == 0L) {
@@ -203,7 +203,7 @@ class ClockArtworkProvider : ContentProvider() {
             .appendPath(mode)
             .appendPath("clock_${now.format(KEY_FORMAT)}.png")
             .appendQueryParameter("rev", weatherRevision.coerceAtLeast(0L).toString())
-            .appendQueryParameter("style", "v42")
+            .appendQueryParameter("style", "v43")
             .appendQueryParameter("weather_color", coloredWeatherIcons.toString())
             .appendQueryParameter("theme", theme.id)
             .appendQueryParameter("generation", generation.toString())

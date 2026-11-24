@@ -307,7 +307,7 @@ object ClockRenderer {
         return result
     }
 
-    /** Seven slots at their actual clock positions. The current slot fades
+    /** Ten slots at their actual clock positions. The current slot fades
      * to 50%; the last two use 65% and 30%. Missing slots stay blank.
      * Draw each glyph into a small alpha layer so its overlapping strokes
      * fade together; no persistent bitmap or per-second work is added.
@@ -328,11 +328,16 @@ object ClockRenderer {
             val local = LocalDateTime.ofInstant(Instant.ofEpochSecond(hour.epochSeconds), zone)
             // Match real elapsed hourly slots; the dial uses the phone zone.
             val offset = ((hour.epochSeconds - firstSlot) / 3600L).toInt()
-            if (offset !in 0..6 || hour.code < 0) continue
+            if (offset !in 0 until ForecastStore.RING_HOURS || hour.code < 0) continue
             val a = Math.toRadians(local.hour % 12 * 30.0 - 90.0)
             val x = CENTER_X + cos(a).toFloat() * ring
             val y = centreY + sin(a).toFloat() * ring
-            val alpha = when (offset) { 0 -> 128; 5 -> 166; 6 -> 77; else -> 255 }
+            val alpha = when (offset) {
+                0 -> 128
+                ForecastStore.RING_HOURS - 2 -> 166
+                ForecastStore.RING_HOURS - 1 -> 77
+                else -> 255
+            }
             val bounds = 35f * unit
             val save = if (alpha < 255)
                 canvas.saveLayerAlpha(x - bounds, y - bounds, x + bounds, y + bounds, alpha)
