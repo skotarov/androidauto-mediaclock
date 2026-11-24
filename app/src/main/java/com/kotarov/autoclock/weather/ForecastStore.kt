@@ -81,6 +81,42 @@ object ForecastStore {
 
     fun ringAlpha(offset: Int): Int = forecastAlpha(offset, RING_FUTURE_HOURS)
 
+    /** Match the actual Canvas glyph, not the raw WMO intensity code.
+     * Day/night matters only for glyphs that visibly include sun or moon. */
+    private fun ringGlyph(hour: Hour): Int = when (hour.code) {
+        0 -> if (hour.isDay) 0 else 1
+        1, 2 -> if (hour.isDay) 2 else 3
+        45, 48 -> 4
+        51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82 ->
+            if (hour.isDay) 5 else 6
+        71, 73, 75, 77, 85, 86 -> if (hour.isDay) 7 else 8
+        95, 96, 99 -> if (hour.isDay) 9 else 10
+        else -> 11
+    }
+
+    /** Keep current and past icons; future icons mark changes only.
+     * Missing data breaks continuity. Temperatures are independent. */
+    fun ringIconEpochs(hours: List<Hour>, currentSlot: Long): Set<Long> {
+        val icons = mutableSetOf<Long>()
+        var previous: Hour? = null
+        for (hour in hours.sortedBy { it.epochSeconds }) {
+            if (hour.epochSeconds < currentSlot - 3600L ||
+                hour.epochSeconds > currentSlot + RING_FUTURE_HOURS * 3600L) continue
+            if (hour.code < 0) {
+                previous = null
+                continue
+            }
+            val prior = previous
+            if (hour.epochSeconds <= currentSlot || prior == null ||
+                hour.epochSeconds - prior.epochSeconds != 3600L ||
+                ringGlyph(hour) != ringGlyph(prior)) {
+                icons.add(hour.epochSeconds)
+            }
+            previous = hour
+        }
+        return icons
+    }
+
     /** Previous hourly model slot, current observation and nine future slots. */
     fun currentRing(
         context: Context,
