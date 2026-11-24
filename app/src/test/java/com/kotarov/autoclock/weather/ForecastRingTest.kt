@@ -89,6 +89,30 @@ class ForecastRingTest {
         assertEquals(listOf(23, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9), ring.map { it.localDateTime.hour })
     }
 
+    @Test fun repeatedGlyphsAreHiddenButChangesAndCurrentRemain() {
+        val data = hours.filter { it.epochSeconds <= start + 9 * 3600L }.map { h ->
+            val offset = ((h.epochSeconds - start) / 3600L).toInt()
+            h.copy(code = when (offset) {
+                -1, 0 -> 1
+                1, 2 -> 2
+                3 -> 61
+                4 -> 63
+                5, 6 -> 3
+                else -> 0
+            }, isDay = offset < 8)
+        }
+        val offsets = ForecastStore.ringIconEpochs(data, start).sorted()
+            .map { ((it - start) / 3600L).toInt() }
+        assertEquals(listOf(-1, 0, 3, 5, 7, 8), offsets)
+    }
+
+    @Test fun overcastDoesNotChangeAtNightAndMissingDataRestartsIcons() {
+        val data = hours.filter { it.epochSeconds != start + 2 * 3600L }
+            .map { it.copy(code = 3, isDay = it.epochSeconds <= start) }
+        assertEquals(setOf(start - 3600L, start, start + 3 * 3600L),
+            ForecastStore.ringIconEpochs(data, start))
+    }
+
     @Test fun pauseListRemainsSixFutureHours() {
         assertEquals((9..14).toList(), ForecastStore.nextSixHours(hours, start + 60)
             .map { it.localDateTime.hour })
