@@ -44,23 +44,31 @@ object ForecastStore {
         nowEpochSeconds: Long = System.currentTimeMillis() / 1000L
     ): List<Hour> = nextSixHours(cached(context), nowEpochSeconds)
 
-    const val RING_HOURS = 10
+    const val RING_HOURS = 11
+    const val RING_FUTURE_HOURS = 9
 
-    /** Current observation plus nine future slots; the Pause list is unchanged. */
+    /** Fade only the past hour and the last two future hours. */
+    fun ringAlpha(offset: Int): Int = when (offset) {
+        -1 -> 102
+        RING_FUTURE_HOURS - 1 -> 166
+        RING_FUTURE_HOURS -> 77
+        else -> 255
+    }
+
+    /** Previous hourly model slot, current observation and nine future slots. */
     fun currentRing(
         context: Context,
         nowEpochSeconds: Long = System.currentTimeMillis() / 1000L,
         observation: WeatherStore.Snapshot? = WeatherStore.current(context)
     ): List<Hour> = ringWithObservation(cached(context), nowEpochSeconds, observation)
 
-    fun ringHours(all: List<Hour>, nowEpochSeconds: Long): List<Hour> {
-        val start = all.filter { it.epochSeconds <= nowEpochSeconds }
-            .maxOfOrNull { it.epochSeconds }?.takeIf { nowEpochSeconds - it < 3600L }
-            ?: all.filter { it.epochSeconds > nowEpochSeconds }
-                .minOfOrNull { it.epochSeconds }?.minus(3600L)
-            ?: return emptyList()
-        if (nowEpochSeconds - start !in 0L..3599L) return emptyList()
-        return all.filter { it.epochSeconds in start..(start + (RING_HOURS - 1) * 3600L) }
+    fun ringHours(
+        all: List<Hour>, nowEpochSeconds: Long,
+        zone: ZoneId = ZoneId.systemDefault()
+    ): List<Hour> {
+        val start = Instant.ofEpochSecond(nowEpochSeconds).atZone(zone)
+            .withMinute(0).withSecond(0).withNano(0).toEpochSecond()
+        return all.filter { it.epochSeconds in (start - 3600L)..(start + RING_FUTURE_HOURS * 3600L) }
             .distinctBy { it.epochSeconds }.sortedBy { it.epochSeconds }
     }
 
@@ -72,7 +80,7 @@ object ForecastStore {
         all: List<Hour>, nowEpochSeconds: Long,
         observation: WeatherStore.Snapshot?, zone: ZoneId = ZoneId.systemDefault()
     ): List<Hour> {
-        val hours = ringHours(all, nowEpochSeconds)
+        val hours = ringHours(all, nowEpochSeconds, zone)
         if (observation == null || observation.weatherCode < 0) return hours
         val slot = Instant.ofEpochSecond(nowEpochSeconds).atZone(zone)
             .withMinute(0).withSecond(0).withNano(0)
@@ -81,12 +89,11 @@ object ForecastStore {
             observation.weatherCode, observation.temperatureC, null, observation.isDay)
         // Never allow a modeled point at the same dial hour to overpaint
         // the measured current conditions, including offset time zones.
-        val future = hours.filter {
-            it.epochSeconds > nowEpochSeconds &&
-                it.epochSeconds < epoch + RING_HOURS * 3600L &&
+        val surrounding = hours.filter {
+            it.epochSeconds != epoch &&
                 Instant.ofEpochSecond(it.epochSeconds).atZone(zone).hour != slot.hour
         }
-        return (listOf(current) + future).sortedBy { it.epochSeconds }.take(RING_HOURS)
+        return (listOf(current) + surrounding).sortedBy { it.epochSeconds }.take(RING_HOURS)
     }
 
     private fun cached(context: Context): List<Hour> {
@@ -141,7 +148,7 @@ object ForecastStore {
                 connectTimeout = 5000
                 readTimeout = 5000
                 setRequestProperty("Accept", "application/json")
-                setRequestProperty("User-Agent", "AutoClock2/0.43 (hourly forecast)")
+                setRequestProperty("User-Agent", "AutoClock2/0.45 (hourly forecast)")
             }
         } catch (_: Exception) { return }
         val body = try {

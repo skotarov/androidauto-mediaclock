@@ -11,8 +11,8 @@ android {
         applicationId = "com.kotarov.autoclock2"
         minSdk = 23
         targetSdk = 35
-        versionCode = 44
-        versionName = "0.44.0-beta"
+        versionCode = 45
+        versionName = "0.45.0-beta"
     }
 
     compileOptions {

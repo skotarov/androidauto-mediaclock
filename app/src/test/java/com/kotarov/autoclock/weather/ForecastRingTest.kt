@@ -15,19 +15,19 @@ class ForecastRingTest {
             2, 9.0 + i, null)
     }
 
-    @Test fun currentPlusNineAt0848() {
-        assertEquals((8..17).toList(), ForecastStore.ringHours(hours, start + 48 * 60)
+    @Test fun previousCurrentPlusNineAt0848() {
+        assertEquals((7..17).toList(), ForecastStore.ringHours(hours, start + 48 * 60)
             .map { it.localDateTime.hour })
     }
 
     @Test fun shiftsAt0900() {
-        assertEquals((9..18).toList(), ForecastStore.ringHours(hours, start + 3600)
+        assertEquals((8..18).toList(), ForecastStore.ringHours(hours, start + 3600)
             .map { it.localDateTime.hour })
     }
 
-    @Test fun missingHourIsNotReplacedByAnEleventhSlot() {
+    @Test fun missingHourIsNotReplacedByATwelfthSlot() {
         val missing = hours.filter { it.localDateTime.hour != 10 }
-        assertEquals(listOf(8, 9, 11, 12, 13, 14, 15, 16, 17), ForecastStore.ringHours(missing, start + 60)
+        assertEquals(listOf(7, 8, 9, 11, 12, 13, 14, 15, 16, 17), ForecastStore.ringHours(missing, start + 60)
             .map { it.localDateTime.hour })
     }
 
@@ -39,22 +39,25 @@ class ForecastRingTest {
 
     @Test fun actualObservationOverridesModelOnlyInCurrentSlot() {
         val ring = ForecastStore.ringWithObservation(hours, start + 48 * 60, observation, zone)
-        assertEquals(10, ring.size)
-        assertEquals(0, ring.first().code)
-        assertEquals("0°C", ring.first().temperatureText)
-        assertEquals(8, ring.first().localDateTime.hour)
-        assertEquals(2, ring[1].code)
-        assertEquals(10.0, ring[1].temperatureC, 0.0)
+        assertEquals(11, ring.size)
+        assertEquals(7, ring.first().localDateTime.hour)
+        assertEquals(2, ring.first().code)
+        assertEquals(0, ring[1].code)
+        assertEquals("0°C", ring[1].temperatureText)
+        assertEquals(8, ring[1].localDateTime.hour)
+        assertEquals(2, ring[2].code)
+        assertEquals(10.0, ring[2].temperatureC, 0.0)
     }
 
     @Test fun observedSunReplacesCloudAtCurrentHourEvenAfterHourChange() {
         val ring = ForecastStore.ringWithObservation(hours, start + 3600 + 60, observation, zone)
-        assertEquals(9, ring.first().localDateTime.hour)
-        assertEquals(0, ring.first().code)
-        assertEquals(0.0, ring.first().temperatureC, 0.0)
+        assertEquals(8, ring.first().localDateTime.hour)
+        assertEquals(9, ring[1].localDateTime.hour)
+        assertEquals(0, ring[1].code)
+        assertEquals(0.0, ring[1].temperatureC, 0.0)
         assertEquals(1, ring.count { it.localDateTime.hour == 9 })
-        assertEquals(10, ring[1].localDateTime.hour)
-        assertEquals(2, ring[1].code)
+        assertEquals(10, ring[2].localDateTime.hour)
+        assertEquals(2, ring[2].code)
     }
 
     @Test fun observationWorksEvenWithoutForecast() {
@@ -66,6 +69,25 @@ class ForecastRingTest {
     @Test fun absentObservationKeepsModel() {
         assertEquals(ForecastStore.ringHours(hours, start + 60),
             ForecastStore.ringWithObservation(hours, start + 60, null, zone))
+    }
+
+    @Test fun opacityIsRelativeToCurrentHourNotListIndex() {
+        assertEquals(102, ForecastStore.ringAlpha(-1))
+        assertEquals(255, ForecastStore.ringAlpha(0))
+        (1..7).forEach { assertEquals(255, ForecastStore.ringAlpha(it)) }
+        assertEquals(166, ForecastStore.ringAlpha(8))
+        assertEquals(77, ForecastStore.ringAlpha(9))
+    }
+
+    @Test fun midnightIncludesPreviousDayAt23() {
+        val midnight = LocalDateTime.of(2026, 11, 24, 0, 0).atZone(zone).toEpochSecond()
+        val data = (-1..10).map { i ->
+            val epoch = midnight + i * 3600L
+            ForecastStore.Hour(epoch, LocalDateTime.ofInstant(Instant.ofEpochSecond(epoch), zone),
+                2, 9.0, null)
+        }
+        val ring = ForecastStore.ringHours(data, midnight + 60, zone)
+        assertEquals(listOf(23, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9), ring.map { it.localDateTime.hour })
     }
 
     @Test fun pauseListRemainsSixFutureHours() {
