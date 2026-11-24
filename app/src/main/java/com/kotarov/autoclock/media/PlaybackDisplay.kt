@@ -14,6 +14,6 @@ object PlaybackDisplay {
     fun forFamily(family: ClockFamily, weather: Boolean): ClockPreset =
         when (clockFamily(family)) {
             ClockFamily.DIGITAL -> if (weather) ClockPreset.DIGITAL_TIME_WEATHER else ClockPreset.DIGITAL_TIME
-            else -> if (weather) ClockPreset.ANALOG_WEATHER else ClockPreset.ANALOG_PURE
+            ClockFamily.ANALOG -> if (weather) ClockPreset.ANALOG_WEATHER else ClockPreset.ANALOG_PURE
         }
 }

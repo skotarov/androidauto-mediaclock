@@ -2,95 +2,23 @@ package com.kotarov.autoclock.media
 
 import android.content.SharedPreferences
 
-/** Persist clock family and the single shared weather / playback switch. */
 object ClockSelectionStore {
-    private const val KEY_SCHEMA_V13 = "display_simplified_v13"
-    private const val KEY_ANALOG_DEFAULT_OFF_V20 = "analog_digital_default_off_v20"
-    private const val KEY_SHARED_WEATHER_MIGRATED_V40 = "shared_weather_migrated_v40"
+    private const val MIGRATED = "display_four_modes_v52"
 
-    /**
-     * New installs show the clean analog dial without digital digits.
-     *
-     * In v0.13-v0.19 the migration forcibly checked "Add digital time"
-     * even if the setting had never been explicitly selected. A one-time
-     * v0.20 correction clears that legacy default on upgrade. Afterward
-     * manual checkbox changes are preserved on all future launches.
-     */
     fun migrateSimplifiedIfNeeded(prefs: SharedPreferences) {
-        val wasSimplified = prefs.getBoolean(KEY_SCHEMA_V13, false)
-        migrateIfNeeded(prefs)
-        if (!wasSimplified) {
-            prefs.edit()
-                // Keep intentional migrated choices; do not force digits on.
-                .putBoolean(ClockPreset.KEY_ANALOG_ADD_DIGITAL,
-                    prefs.getBoolean(ClockPreset.KEY_ANALOG_ADD_DIGITAL, false))
-                .putBoolean(ClockPreset.KEY_DIGITAL_ADD_ANALOG, false)
-                .putBoolean(ClockPreset.KEY_WEATHER_ADD_ANALOG, false)
-                .putBoolean(KEY_SCHEMA_V13, true)
-                .apply()
-        }
-        if (!prefs.getBoolean(KEY_ANALOG_DEFAULT_OFF_V20, false)) {
-            val editor = prefs.edit()
-                .putBoolean(KEY_ANALOG_DEFAULT_OFF_V20, true)
-            if (wasSimplified) {
-                // Previous releases enabled digits by default. Reset once,
-                // then preserve the user's explicit choice from this version.
-                editor.putBoolean(ClockPreset.KEY_ANALOG_ADD_DIGITAL, false)
-            }
-            editor.apply()
-        }
-        // Preserve weather if it had been enabled for EITHER clock before v0.40.
-        // The removed analog digital-time option is never read when rendering.
-        if (!prefs.getBoolean(KEY_SHARED_WEATHER_MIGRATED_V40, false)) {
-            val weatherOn = prefs.getBoolean(ClockPreset.KEY_ANALOG_ADD_WEATHER, false) ||
-                prefs.getBoolean(ClockPreset.KEY_DIGITAL_ADD_WEATHER, false)
-            prefs.edit()
-                .putBoolean(ClockPreset.KEY_ADD_WEATHER, weatherOn)
-                .putBoolean(KEY_SHARED_WEATHER_MIGRATED_V40, true)
-                .apply()
-        }
-    }
-
-    fun migrateIfNeeded(prefs: SharedPreferences) {
-        if (prefs.getBoolean(ClockPreset.KEY_SCHEMA_V11, false)) return
-
-        val analog = prefs.getString(ClockPreset.KEY_OLD_ANALOG_DETAIL, null)
-        val digital = prefs.getString(ClockPreset.KEY_OLD_DIGITAL_DETAIL, null)
-        val weather = prefs.getString(ClockPreset.KEY_OLD_WEATHER_DETAIL, null)
-        val oldMode = prefs.getString("display_mode", null)
-        val oldPreset = ClockPreset.fromId(oldMode)
-
-        // Prefer explicit v0.10 saved details, then the older selected mode.
-        val analogDetail = analog ?: if (oldPreset.family == ClockFamily.ANALOG) {
-            when (oldPreset) {
-                ClockPreset.ANALOG_TIME -> "time"
-                ClockPreset.ANALOG_TIME_WEATHER -> "time_weather"
-                ClockPreset.ANALOG_WEATHER -> "weather"
-                else -> null
-            }
-        } else null
-        val digitalDetail = digital ?: if (oldPreset.family == ClockFamily.DIGITAL) {
-            if (oldPreset.usesWeather) "time_weather" else "time"
-        } else null
-        val weatherDetail = weather ?: if (oldPreset.family == ClockFamily.WEATHER) {
-            if (oldPreset.hasDigitalTime) "with_time" else "only"
-        } else null
-
-        val family = prefs.getString(ClockPreset.KEY_FAMILY, null)
-            ?: oldPreset.family.id
-
-        prefs.edit()
-            .putString(ClockPreset.KEY_FAMILY, family)
-            .putBoolean(ClockPreset.KEY_ANALOG_ADD_DIGITAL,
-                analogDetail == "time" || analogDetail == "time_weather")
-            .putBoolean(ClockPreset.KEY_ANALOG_ADD_WEATHER,
-                analogDetail == "weather" || analogDetail == "time_weather")
-            .putBoolean(ClockPreset.KEY_DIGITAL_ADD_ANALOG, false)
-            .putBoolean(ClockPreset.KEY_DIGITAL_ADD_WEATHER, digitalDetail == "time_weather")
-            .putBoolean(ClockPreset.KEY_WEATHER_ADD_ANALOG, false)
-            .putBoolean(ClockPreset.KEY_WEATHER_ADD_DIGITAL, weatherDetail == "with_time")
-            .putBoolean(ClockPreset.KEY_SCHEMA_V11, true)
-            .apply()
+        if (prefs.getBoolean(MIGRATED, false)) return
+        val legacy = ClockPreset.fromId(prefs.getString("display_mode", null))
+        val family = ClockFamily.fromId(prefs.getString(ClockPreset.KEY_FAMILY, null))
+            ?: legacy.family
+        val weather = if (prefs.contains(ClockPreset.KEY_ADD_WEATHER))
+            prefs.getBoolean(ClockPreset.KEY_ADD_WEATHER, false)
+        else prefs.getBoolean("analog_add_weather", false) ||
+            prefs.getBoolean("digital_add_weather", false) ||
+            prefs.getString("analog_detail", null) in listOf("weather", "time_weather") ||
+            prefs.getString("digital_detail", null) == "time_weather" || legacy.usesWeather
+        prefs.edit().putString(ClockPreset.KEY_FAMILY, family.id)
+            .putBoolean(ClockPreset.KEY_ADD_WEATHER, weather)
+            .putBoolean(MIGRATED, true).apply()
     }
 
     fun weatherEnabled(prefs: SharedPreferences): Boolean =
@@ -101,24 +29,10 @@ object ClockSelectionStore {
             prefs.edit().putBoolean(ClockPreset.KEY_ADD_WEATHER, enabled).apply()
     }
 
-    fun current(prefs: SharedPreferences): ClockPreset {
-        val family = PlaybackDisplay.clockFamily(
-            ClockFamily.fromId(prefs.getString(ClockPreset.KEY_FAMILY, null))
-        )
-        return forFamily(prefs, family)
-    }
+    fun current(prefs: SharedPreferences): ClockPreset =
+        forFamily(prefs, PlaybackDisplay.clockFamily(
+            ClockFamily.fromId(prefs.getString(ClockPreset.KEY_FAMILY, null))))
 
     fun forFamily(prefs: SharedPreferences, family: ClockFamily): ClockPreset =
         PlaybackDisplay.forFamily(family, weatherEnabled(prefs))
-
-    fun choose(prefs: SharedPreferences, preset: ClockPreset) {
-        val editor = prefs.edit()
-            .putString(ClockPreset.KEY_FAMILY, preset.family.id)
-        if (preset.family != ClockFamily.WEATHER) {
-            editor.putBoolean(ClockPreset.KEY_ADD_WEATHER, preset.usesWeather)
-        } else {
-            editor.putBoolean(ClockPreset.KEY_WEATHER_ADD_DIGITAL, preset.hasDigitalTime)
-        }
-        editor.apply()
-    }
 }

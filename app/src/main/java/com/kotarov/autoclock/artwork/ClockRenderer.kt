@@ -3,7 +3,6 @@ package com.kotarov.autoclock.artwork
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Typeface
@@ -45,6 +44,10 @@ object ClockRenderer {
     private const val COMPACT_ANALOG_WEATHER_Y_OFFSET = 30f
     private const val STANDARD_ANALOG_WEATHER_Y_OFFSET = 34f
     private const val ANALOG_WEATHER_TEXT_SIZE = 29f
+    private val tickX = FloatArray(60) { cos(Math.toRadians(it * 6.0 - 90)).toFloat() }
+    private val tickY = FloatArray(60) { sin(Math.toRadians(it * 6.0 - 90)).toFloat() }
+    private fun themed(color: Int, theme: ClockTheme): Int =
+        if (theme == ClockTheme.DARK) color else color xor 0x00ffffff
     private val timeFormat = DateTimeFormatter.ofPattern("HH:mm")
     private val white = Color.rgb(255, 255, 255)
     private val pale = Color.rgb(224, 239, 247)
@@ -69,150 +72,32 @@ object ClockRenderer {
         val bitmap = Bitmap.createBitmap(outputSize, outputSize, Bitmap.Config.RGB_565)
         val canvas = Canvas(bitmap)
         canvas.scale(outputSize.toFloat() / SIZE, outputSize.toFloat() / SIZE)
-        canvas.drawColor(Color.rgb(2, 5, 11))
+        canvas.drawColor(themed(Color.rgb(2, 5, 11), theme))
 
         val preset = ClockPreset.fromId(presetId)
         val radius = if (compact) COMPACT_RADIUS else STANDARD_RADIUS
         val unit = radius / STANDARD_RADIUS
         val clockY = if (preset.hasAnalog) {
             if (compact) COMPACT_ANALOG_CENTER_Y else STANDARD_ANALOG_CENTER_Y
-        } else if (preset.family == ClockFamily.DIGITAL) {
-            CONTENT_CENTER_Y + DIGITAL_CENTER_DOWN
-        } else CONTENT_CENTER_Y
-        val forecastRing = preset.family == ClockFamily.ANALOG && preset.usesWeather
-        val digitalForecast = preset.family == ClockFamily.DIGITAL && !preset.hasAnalog && preset.usesWeather
+        } else CONTENT_CENTER_Y + DIGITAL_CENTER_DOWN
 
-        // The primary style establishes the visual hierarchy. Add-ons are
-        // independent: no checkboxes means no secondary information at all.
-        if (preset.hasAnalog) drawDial(canvas, time, radius, clockY)
-
-        when (preset.family) {
-            ClockFamily.ANALOG -> {
-                when {
-                    forecastRing -> drawForecastRing(canvas, time, radius, clockY,
-                        forecast, coloredWeatherIcons, theme)
-                    preset.hasDigitalTime ->
-                        drawText(canvas, time.format(timeFormat), CENTER_X,
-                            clockY, 46f * unit, white, unit)
-                    else -> Unit
-                }
-            }
-            ClockFamily.DIGITAL -> {
-                if (preset.hasAnalog) {
-                    if (preset.usesWeather) {
-                        drawText(canvas, time.format(timeFormat), CENTER_X,
-                            clockY - 24f * unit, 46f * unit, white, unit)
-                        drawWeatherRow(canvas, CENTER_X, clockY + 47f * unit,
-                            weatherCode, isDay, temperature, 29f * unit, unit,
-                            coloredWeatherIcons = coloredWeatherIcons, theme = theme)
-                    } else {
-                        drawText(canvas, time.format(timeFormat), CENTER_X,
-                            clockY, 46f * unit, white, unit)
-                    }
-                } else if (preset.usesWeather) {
-                    drawDigitalForecast(canvas, time, clockY, compact,
-                        forecast, coloredWeatherIcons, theme)
-                } else {
-                    // Pure digital: no dial, date or weather.
-                    drawText(canvas, time.format(timeFormat), CENTER_X,
-                        clockY, 96f * unit, white, unit)
-                }
-            }
-            ClockFamily.WEATHER -> {
-                val weatherSize = if (preset.hasAnalog) 61f * unit else 84f * unit
-                if (preset.hasDigitalTime) {
-                    drawWeatherRow(canvas, CENTER_X, clockY - 30f * unit,
-                        weatherCode, isDay, temperature, weatherSize, unit,
-                        if (preset.hasAnalog) radius * 2f - 14f else 345f,
-                        coloredWeatherIcons, theme)
-                    drawText(canvas, time.format(timeFormat), CENTER_X,
-                        clockY + 45f * unit, 37f * unit, pale, unit)
-                } else {
-                    drawWeatherRow(canvas, CENTER_X,
-                        clockY + (if (preset.hasAnalog) 18f else -9f) * unit,
-                        weatherCode, isDay, temperature, weatherSize, unit,
-                        if (preset.hasAnalog) radius * 2f - 14f else 345f,
-                        coloredWeatherIcons, theme)
-                    if (!preset.hasAnalog) {
-                        drawText(canvas, condition ?: "Няма данни", CENTER_X,
-                            clockY + 69f * unit, 27f * unit, pale, unit)
-                    }
-                }
-            }
+        if (preset.hasAnalog) {
+            drawDial(canvas, time, radius, clockY, theme)
+            if (preset.usesWeather) drawForecastRing(canvas, time, radius, clockY,
+                forecast, coloredWeatherIcons, theme)
+        } else if (preset.usesWeather) {
+            drawDigitalForecast(canvas, time, clockY, compact, forecast, coloredWeatherIcons, theme)
+        } else {
+            drawText(canvas, time.format(timeFormat), CENTER_X, clockY,
+                96f * unit, white, unit, theme)
         }
         if (preset.usesWeather && !sourceLabel.isNullOrBlank()) {
-            // Position the observation/source name immediately BELOW the ring.
-            // The baseline is computed from each dial's actual bottom edge,
-            // not from a fixed offset from the centre.
-            val sourceY = if (forecastRing) {
-                clockY + radius * 1.28f + 50f * unit
-            } else if (digitalForecast) {
-                clockY + 148f * (if (compact) 0.82f else 1f)
-            } else if (preset.hasAnalog) {
-                val gap = if (compact) 18f * unit else 16f * unit
-                clockY + radius + gap
-            } else clockY + 118f * unit
-
-            val maxWidth = if (preset.hasAnalog)
-                radius * 2f + 40f * unit
-            else 390f
-
-            drawSourceLabel(canvas, sourceLabel, CENTER_X, sourceY, unit, maxWidth)
+            val sourceY = if (preset.hasAnalog) clockY + radius * 1.28f + 50f * unit
+                else clockY + 148f * (if (compact) 0.82f else 1f)
+            val maxWidth = if (preset.hasAnalog) radius * 2f + 40f * unit else 390f
+            drawSourceLabel(canvas, sourceLabel, CENTER_X, sourceY, unit, maxWidth, theme)
         }
-        return applyTheme(bitmap, theme)
-    }
-
-    /** Distinct low-cost miniature for pressure and station terrain elevation. */
-    fun renderMiniMetrics(
-        theme: ClockTheme = ClockTheme.DARK, outputSize: Int = 160
-    ): Bitmap {
-        require(outputSize in 64..256)
-        val image = Bitmap.createBitmap(outputSize, outputSize, Bitmap.Config.RGB_565)
-        val canvas = Canvas(image)
-        canvas.scale(outputSize / 160f, outputSize / 160f)
-        val dark = theme == ClockTheme.DARK
-        val ink = if (dark) Color.rgb(227, 239, 248) else Color.rgb(17, 33, 51)
-        val accent = if (dark) Color.rgb(108, 218, 255) else Color.rgb(24, 95, 149)
-        canvas.drawColor(if (dark) Color.rgb(2, 5, 11) else Color.WHITE)
-        canvas.drawCircle(80f, 64f, 49f, stroke(ink, 4f))
-        canvas.drawArc(45f, 29f, 115f, 99f, 200f, 140f, false, stroke(accent, 6f))
-        drawMiniText(canvas, "hPa", 80f, 63f, 37f, ink, false)
-        val mountains = Path().apply {
-            moveTo(22f, 139f)
-            lineTo(49f, 112f)
-            lineTo(67f, 125f)
-            lineTo(93f, 101f)
-            lineTo(138f, 139f)
-        }
-        canvas.drawPath(mountains, stroke(accent, 6f))
-        return image
-    }
-
-    /** One icon and NO temperature or lettering, for 3-day forecast rows. */
-    fun renderForecastSymbol(
-        weatherCode: Int?,
-        theme: ClockTheme = ClockTheme.DARK,
-        coloredWeatherIcons: Boolean = true,
-        outputSize: Int = 160
-    ): Bitmap {
-        require(outputSize in 64..256)
-        val image = Bitmap.createBitmap(outputSize, outputSize, Bitmap.Config.RGB_565)
-        val canvas = Canvas(image)
-        canvas.scale(outputSize / 160f, outputSize / 160f)
-        canvas.drawColor(if (theme == ClockTheme.DARK)
-            Color.rgb(2, 5, 11) else Color.WHITE)
-        canvas.save()
-        canvas.translate(80f, 78f)
-        canvas.scale(1.15f, 1.15f)
-        if (weatherCode == null || weatherCode == -1) {
-            // Missing data must not be falsely displayed as cloudy weather.
-            drawMiniText(canvas, "?", 0f, 0f, 70f,
-                if (theme == ClockTheme.DARK) Color.WHITE else Color.BLACK, false)
-        } else {
-            drawWeatherIcon(canvas, weatherCode, true, coloredWeatherIcons, theme, false)
-        }
-        canvas.restore()
-        return image
+        return bitmap
     }
 
     /** Media quick-control graphic: always ONE primary family, never add-ons. */
@@ -241,9 +126,8 @@ object ClockRenderer {
                 canvas.drawCircle(cx, cy, 75f, stroke(ink, 4.5f))
                 val tick = stroke(ink, 4f)
                 repeat(12) { i ->
-                    val a = Math.toRadians(i * 30.0 - 90.0)
-                    val dx = cos(a).toFloat()
-                    val dy = sin(a).toFloat()
+                    val dx = tickX[i * 5]
+                    val dy = tickY[i * 5]
                     canvas.drawLine(cx + dx * 55f, cy + dy * 55f,
                         cx + dx * 67f, cy + dy * 67f, tick)
                 }
@@ -257,17 +141,7 @@ object ClockRenderer {
             }
             ClockFamily.DIGITAL ->
                 drawMiniText(canvas, time.format(timeFormat), 80f, 80f, 54f, ink, true)
-            ClockFamily.WEATHER -> {
-                // Contrast island lets existing icon drawing work on both themes.
-                canvas.drawCircle(80f, 52f, 35f, fill(Color.rgb(12, 23, 35)))
-                canvas.save()
-                canvas.translate(80f, 52f)
-                canvas.scale(0.55f, 0.55f)
-                drawWeatherIcon(canvas, weatherCode, isDay,
-                    coloredWeatherIcons, theme, false)
-                canvas.restore()
-                drawMiniText(canvas, temperature ?: "--°C", 80f, 119f, 54f, ink, false)
-            }
+
         }
         return image
     }
@@ -291,24 +165,6 @@ object ClockRenderer {
     }
 
     /** Reverse only the light main artwork; dark incurs no additional work. */
-    private fun applyTheme(original: Bitmap, theme: ClockTheme): Bitmap {
-        if (theme == ClockTheme.DARK) return original
-        val result = Bitmap.createBitmap(
-            original.width, original.height, Bitmap.Config.RGB_565
-        )
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            colorFilter = ColorMatrixColorFilter(floatArrayOf(
-                -1f, 0f, 0f, 0f, 255f,
-                0f, -1f, 0f, 0f, 255f,
-                0f, 0f, -1f, 0f, 255f,
-                0f, 0f, 0f, 1f, 0f
-            ))
-        }
-        Canvas(result).drawBitmap(original, 0f, 0f, paint)
-        original.recycle()
-        return result
-    }
-
     /** Eleven slots at their actual clock positions. The past slot fades
      * to 40%; current is opaque; the last two use 65% and 30%. Missing slots stay blank.
      * Draw each glyph into a small alpha layer so its overlapping strokes
@@ -328,9 +184,9 @@ object ClockRenderer {
             // Match real elapsed hourly slots; the dial uses the phone zone.
             val offset = ((hour.epochSeconds - currentSlot) / 3600L).toInt()
             if (offset !in -1..ForecastStore.RING_FUTURE_HOURS || hour.code < 0) continue
-            val a = Math.toRadians(local.hour % 12 * 30.0 - 90.0)
-            val x = CENTER_X + cos(a).toFloat() * ring
-            val y = centreY + sin(a).toFloat() * ring
+            val index = local.hour % 12 * 5
+            val x = CENTER_X + tickX[index] * ring
+            val y = centreY + tickY[index] * ring
             val alpha = ForecastStore.ringAlpha(offset)
             val bounds = 35f * unit
             val save = if (alpha < 255)
@@ -342,10 +198,10 @@ object ClockRenderer {
             canvas.translate(x, y - 8f * unit - geometry.visualCentreY * scale)
             canvas.scale(scale, scale)
             drawWeatherIcon(canvas, hour.code, hour.isDay, colored, theme,
-                theme == ClockTheme.LIGHT)
+                false)
             canvas.restore()
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = pale
+                color = themed(pale, theme)
                 textAlign = Paint.Align.CENTER
                 textSize = 15f * unit
                 typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
@@ -367,7 +223,7 @@ object ClockRenderer {
         canvas.scale(scale, scale)
 
         val timePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = white
+            color = themed(white, theme)
             textAlign = Paint.Align.CENTER
             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
             textSize = 132f
@@ -380,12 +236,12 @@ object ClockRenderer {
 
         val slots = ForecastStore.digitalSlots(forecast, now)
         val label = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = pale
+            color = themed(pale, theme)
             textAlign = Paint.Align.CENTER
             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
             textSize = 17f
         }
-        val temp = Paint(label).apply { color = white }
+        val temp = Paint(label).apply { color = themed(white, theme) }
         slots.forEachIndexed { index, slot ->
             val x = (index - 2.5f) * 73f
             val save = if (slot.alpha < 255)
@@ -401,7 +257,7 @@ object ClockRenderer {
                 canvas.translate(x, 59f - geometry.visualCentreY * iconScale)
                 canvas.scale(iconScale, iconScale)
                 drawWeatherIcon(canvas, hour.code, hour.isDay, colored, theme,
-                    theme == ClockTheme.LIGHT)
+                    false)
                 canvas.restore()
             }
             temp.textSize = if (index == 0) 32f else 25f
@@ -420,18 +276,19 @@ object ClockRenderer {
         x: Float,
         y: Float,
         unit: Float,
-        maxWidth: Float
+        maxWidth: Float,
+        theme: ClockTheme
     ) {
         val baseSize = 22f * unit
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = pale
+            color = themed(pale, theme)
             textAlign = Paint.Align.CENTER
             textSize = baseSize
             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
         }
         val width = paint.measureText(value)
         val scale = if (width > 0f) minOf(1f, maxWidth / width) else 1f
-        drawText(canvas, value, x, y, baseSize * scale, pale, unit)
+        drawText(canvas, value, x, y, baseSize * scale, pale, unit, theme)
     }
 
     private fun stroke(color: Int, thickness: Float): Paint =
@@ -449,20 +306,19 @@ object ClockRenderer {
             style = Paint.Style.FILL
         }
 
-    private fun drawDial(canvas: Canvas, now: LocalDateTime, radius: Float, centreY: Float) {
+    private fun drawDial(canvas: Canvas, now: LocalDateTime, radius: Float, centreY: Float, theme: ClockTheme) {
         val unit = radius / STANDARD_RADIUS
         val x = CENTER_X
         val y = centreY
-        canvas.drawCircle(x, y, radius + 1f, fill(Color.rgb(8, 17, 27)))
-        canvas.drawCircle(x, y, radius, stroke(pale, 4.8f * unit))
+        canvas.drawCircle(x, y, radius + 1f, fill(themed(Color.rgb(8, 17, 27), theme)))
+        canvas.drawCircle(x, y, radius, stroke(themed(pale, theme), 4.8f * unit))
         canvas.drawCircle(x, y, radius - 9f * unit,
-            stroke(Color.rgb(53, 92, 115), 1.8f * unit))
-        val major = stroke(white, 6.5f * unit)
-        val minor = stroke(Color.rgb(157, 193, 210), 2.3f * unit)
+            stroke(themed(Color.rgb(53, 92, 115), theme), 1.8f * unit))
+        val major = stroke(themed(white, theme), 6.5f * unit)
+        val minor = stroke(themed(Color.rgb(157, 193, 210), theme), 2.3f * unit)
         repeat(60) { index ->
-            val a = Math.toRadians((index * 6 - 90).toDouble())
-            val dx = cos(a).toFloat()
-            val dy = sin(a).toFloat()
+            val dx = tickX[index]
+            val dy = tickY[index]
             val inner = radius - if (index % 5 == 0) 26f * unit else 17f * unit
             val outer = radius - 7f * unit
             canvas.drawLine(x + dx * inner, y + dy * inner,
@@ -476,11 +332,11 @@ object ClockRenderer {
         canvas.drawLine(x, y,
             x + cos(hourAngle).toFloat() * radius * 0.68f,
             y + sin(hourAngle).toFloat() * radius * 0.68f,
-            stroke(white, 10f * unit))
+            stroke(themed(white, theme), 10f * unit))
         canvas.drawLine(x, y,
             x + cos(minuteAngle).toFloat() * radius * 0.83f,
             y + sin(minuteAngle).toFloat() * radius * 0.83f,
-            stroke(cyan, 6.5f * unit))
+            stroke(themed(cyan, theme), 6.5f * unit))
     }
 
     /** Actual icon bounds, not a constant empty slot around every symbol.
@@ -505,48 +361,6 @@ object ClockRenderer {
         else -> IconGeometry(98f, 65f, -6f)
     }
 
-    private fun drawWeatherRow(
-        canvas: Canvas,
-        cx: Float,
-        cy: Float,
-        code: Int?,
-        isDay: Boolean,
-        temperature: String?,
-        textSize: Float,
-        unit: Float,
-        maxWidth: Float = 2f * STANDARD_RADIUS * unit - 8f,
-        coloredWeatherIcons: Boolean = true,
-        theme: ClockTheme = ClockTheme.DARK
-    ) {
-        val shown = temperature ?: "--°C"
-        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            this.textSize = textSize
-            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-        }
-        val textWidth = textPaint.measureText(shown)
-        val geometry = if (code != null && code >= 0) iconGeometry(code, isDay) else null
-        // Use actual artwork width and keep the icon about as tall as the text.
-        val iconScale = if (geometry == null) 0f else
-            textSize * 1.12f / geometry.height
-        val iconWidth = if (geometry == null) 0f else geometry.width * iconScale
-        val gap = if (geometry == null) 0f else textSize * 0.065f
-        val totalWidth = textWidth + iconWidth + gap
-        val fit = minOf(1f, maxWidth / totalWidth)
-        val left = cx - totalWidth * fit / 2f
-        if (geometry != null && code != null) {
-            val scaled = iconScale * fit
-            val iconX = left + iconWidth * fit / 2f
-            canvas.save()
-            canvas.translate(iconX, cy - geometry.visualCentreY * scaled)
-            canvas.scale(scaled, scaled)
-            drawWeatherIcon(canvas, code, isDay,
-                coloredWeatherIcons, theme, theme == ClockTheme.LIGHT)
-            canvas.restore()
-        }
-        val textX = left + (iconWidth + gap + textWidth / 2f) * fit
-        drawText(canvas, shown, textX, cy, textSize * fit, white, unit)
-    }
-
     private fun drawText(
         canvas: Canvas,
         value: String,
@@ -554,10 +368,11 @@ object ClockRenderer {
         centreY: Float,
         size: Float,
         color: Int,
-        unit: Float
+        unit: Float,
+        theme: ClockTheme
     ) {
         val face = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            this.color = color
+            this.color = themed(color, theme)
             textAlign = Paint.Align.CENTER
             textSize = size
             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
@@ -571,13 +386,13 @@ object ClockRenderer {
             style = Paint.Style.STROKE
             strokeWidth = 10f * unit
             strokeJoin = Paint.Join.ROUND
-            this.color = Color.argb(85, 106, 202, 255)
+            this.color = themed(Color.argb(85, 106, 202, 255), theme)
         }
         val reverseOutline = Paint(face).apply {
             style = Paint.Style.STROKE
             strokeWidth = 6.5f * unit
             strokeJoin = Paint.Join.ROUND
-            this.color = Color.rgb(3, 9, 17)
+            this.color = themed(Color.rgb(3, 9, 17), theme)
         }
         canvas.drawText(value, x, baseline, distantHalo)
         canvas.drawText(value, x, baseline, reverseOutline)

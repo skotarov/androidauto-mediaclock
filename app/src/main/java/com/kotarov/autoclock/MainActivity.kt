@@ -21,9 +21,8 @@ import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.ScrollView
 import android.widget.TextView
-import androidx.appcompat.app.AppCompatActivity
-import androidx.appcompat.widget.SwitchCompat
-import androidx.core.app.ActivityCompat
+import android.app.Activity
+import android.widget.Switch
 import com.kotarov.autoclock.artwork.ClockRenderer
 import com.kotarov.autoclock.media.AutoClockMediaService
 import com.kotarov.autoclock.media.ClockFamily
@@ -39,14 +38,14 @@ import java.time.LocalDateTime
  * Compact phone settings. Each selectable card is a LIVE preview of that
  * clock family's saved add-ons; both cards always render in the chosen theme.
  */
-class MainActivity : AppCompatActivity() {
+class MainActivity : Activity() {
     private lateinit var analogCard: LinearLayout
     private lateinit var digitalCard: LinearLayout
     private lateinit var analogImage: ImageView
     private lateinit var digitalImage: ImageView
     private lateinit var analogLabel: TextView
     private lateinit var digitalLabel: TextView
-    private lateinit var weatherToggle: SwitchCompat
+    private lateinit var weatherToggle: Switch
     private var syncingWeatherToggle = false
     private val weatherPreferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == ClockPreset.KEY_ADD_WEATHER) syncWeatherToggle()
@@ -284,7 +283,7 @@ class MainActivity : AppCompatActivity() {
                 outputSize = 256, condition = weather?.description,
                 sourceLabel = weather?.artworkSource,
                 theme = theme,
-                forecast = if (family != ClockFamily.WEATHER && preset.usesWeather)
+                forecast = if (preset.usesWeather)
                     ForecastStore.currentRing(this,
                         now.atZone(java.time.ZoneId.systemDefault()).toEpochSecond(), weather) else emptyList()
             )
@@ -319,7 +318,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun requestLocation() {
         if (!WeatherLocation.permitted(this)) {
-            ActivityCompat.requestPermissions(this,
+            requestPermissions(
                 arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION),
                 LOCATION_REQUEST)
         } else {
@@ -346,10 +345,10 @@ class MainActivity : AppCompatActivity() {
      */
     private fun checkOption(
         title: String, checked: Boolean,
-        captureToggle: ((SwitchCompat) -> Unit)? = null,
+        captureToggle: ((Switch) -> Unit)? = null,
         onChange: (Boolean) -> Unit
     ): LinearLayout {
-        val toggle = SwitchCompat(this).apply {
+        val toggle = Switch(this).apply {
             showText = false
             isChecked = checked
             contentDescription = title

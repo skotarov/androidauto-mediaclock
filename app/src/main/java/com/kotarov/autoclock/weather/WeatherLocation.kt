@@ -8,7 +8,6 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Handler
 import android.os.Looper
-import androidx.core.content.ContextCompat
 
 /**
  * One-shot approximate position, only when Auto weather is selected.
@@ -20,9 +19,7 @@ object WeatherLocation {
     private const val FIX_TIMEOUT_MS = 8000L
 
     fun permitted(context: Context): Boolean =
-        ContextCompat.checkSelfPermission(
-            context, Manifest.permission.ACCESS_COARSE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
+        context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
     fun requestOnce(context: Context, done: (Location?) -> Unit) {
         val app = context.applicationContext

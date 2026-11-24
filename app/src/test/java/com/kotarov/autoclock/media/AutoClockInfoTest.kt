@@ -12,7 +12,6 @@ class AutoClockInfoTest {
     }
 
     @Test fun informationIsNotAPlaybackItem() {
-        assertNotEquals(ClockLibraryRows.CLOCK_ID, AutoClockInfo.ID)
-        assertNotEquals(ClockLibraryRows.WEATHER_ID, AutoClockInfo.ID)
+        assertNotEquals(AutoClockMediaService.CLOCK_ID, AutoClockInfo.ID)
     }
 }

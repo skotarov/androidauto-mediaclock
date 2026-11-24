@@ -27,7 +27,6 @@ class PlaybackDisplayTest {
         ClockPreset.entries.forEach { selected ->
             listOf(true, false).forEach { playing ->
                 val visible = PlaybackDisplay.visiblePreset(selected, playing)
-                assertNotEquals(ClockFamily.WEATHER, visible.family)
                 assertEquals(playing, visible.usesWeather)
                 assertEquals(PlaybackDisplay.clockFamily(selected.family), visible.family)
             }
@@ -35,7 +34,7 @@ class PlaybackDisplayTest {
     }
 
     @Test fun legacyWeatherSelectionRevertsToAnalog() {
-        assertEquals(ClockFamily.ANALOG, PlaybackDisplay.clockFamily(ClockFamily.WEATHER))
+        assertEquals(ClockFamily.ANALOG, PlaybackDisplay.clockFamily(ClockFamily.fromId("weather")))
         assertEquals(ClockFamily.ANALOG, PlaybackDisplay.clockFamily(null))
     }
 }

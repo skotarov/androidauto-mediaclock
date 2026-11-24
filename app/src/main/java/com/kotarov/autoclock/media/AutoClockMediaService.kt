@@ -104,11 +104,11 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             setFlags(MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS)
             setCallback(object : MediaSessionCompat.Callback() {
                 override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
-                    if (mediaId == ClockLibraryRows.CLOCK_ID) setWeatherEnabled(true)
+                    if (mediaId == CLOCK_ID) setWeatherEnabled(true)
                 }
 
                 override fun onPrepareFromMediaId(mediaId: String?, extras: Bundle?) {
-                    if (mediaId == ClockLibraryRows.CLOCK_ID) {
+                    if (mediaId == CLOCK_ID) {
                         publishClock()
                         publishPlaybackState()
                     }
@@ -273,7 +273,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val description = weather?.description ?: "Няма данни"
         val theme = selectedTheme()
         val colored = coloredWeatherIcons()
-        val showClockForecast = visible.family != ClockFamily.WEATHER && visible.usesWeather
+        val showClockForecast = visible.usesWeather
         val revision = if (showClockForecast) prefs.getLong(ForecastStore.KEY_SAVED_AT, 0L) +
             (weather?.observedAtMs ?: 0L) else weather?.observedAtMs ?: 0L
         val artwork = ClockArtworkProvider.artworkUri(
@@ -282,8 +282,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         )
         val miniArtwork = ClockArtworkProvider.miniArtworkUri(
             visible.family, now,
-            if (visible.family == ClockFamily.WEATHER)
-                weather?.observedAtMs ?: 0L else 0L,
+            0L,
             theme, colored
         )
         val tick = SystemClock.elapsedRealtime()
@@ -304,7 +303,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             }
         }
         val temporaryTitle = cityAnnouncement.title(tick) ?: INVISIBLE_TEXT
-        val activeId = ClockLibraryRows.CLOCK_ID
+        val activeId = CLOCK_ID
 
         // Keep both a direct reduced-size bitmap and an artwork URI to cope
         // with Android Auto implementations that cache either representation.
@@ -370,7 +369,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         private const val KEY_TEST_DIRECT_BROWSE = "try_media_host_browse_link_v37"
         private const val KEY_TEST_STATE_NONE = "try_playback_state_none_v37"
         private const val KEY_TEST_STATE_STOPPED = "try_playback_state_stopped_v39"
-        private const val INVISIBLE_TEXT = ClockMediaLabels.EMPTY
+        private const val INVISIBLE_TEXT = "\u00A0"
+        const val CLOCK_ID = "autoclock_clock"
         const val ROOT_ID = "auto_clock_root"
     }
 }

@@ -58,28 +58,15 @@ class ClockArtworkProvider : ContentProvider() {
         val layout = if (compact) "compact" else "standard"
         val generation = uri.getQueryParameter("generation")?.toLongOrNull() ?: 0L
         val destination = File(directory,
-            "v47-$layout-${theme.id}-${if (coloredWeatherIcons) "color" else "mono"}-$clockMode-$key-$weatherRevision-$generation.png")
+            "v52-$layout-${theme.id}-${if (coloredWeatherIcons) "color" else "mono"}-$clockMode-$key-$weatherRevision-$generation.png")
 
         synchronized(lock) {
             if (!destination.isFile || destination.length() == 0L) {
                 val temp = File(directory, "inflight-${System.nanoTime()}.tmp")
                 val mini = miniFamily(clockMode)
-                val bitmap = if (clockMode == "mini_forecast") {
-                    // Forecast library icons are weather symbols ONLY.
-                    // Temperatures live in the text, never baked into artwork.
-                    ClockRenderer.renderForecastSymbol(
-                        uri.getQueryParameter("code")?.toIntOrNull(),
-                        theme = theme,
-                        coloredWeatherIcons = coloredWeatherIcons
-                    )
-                } else if (clockMode == "mini_metrics") {
-                    ClockRenderer.renderMiniMetrics(theme)
-                } else if (mini != null) {
-                    val weather = if (mini == ClockFamily.WEATHER)
-                        WeatherStore.current(appContext) else null
+                val bitmap = if (mini != null) {
                     ClockRenderer.renderMini(
-                        mini, requestedMinute, weather?.weatherCode,
-                        weather?.isDay ?: true, weather?.formattedTemperature, theme,
+                        mini, requestedMinute, theme = theme,
                         coloredWeatherIcons = coloredWeatherIcons
                     )
                 } else {
@@ -96,8 +83,7 @@ class ClockArtworkProvider : ContentProvider() {
                         sourceLabel = weather?.artworkSource,
                         theme = theme,
                         coloredWeatherIcons = coloredWeatherIcons,
-                        forecast = if (ClockPreset.fromId(clockMode).family != ClockFamily.WEATHER &&
-                            ClockPreset.fromId(clockMode).usesWeather)
+                        forecast = if (ClockPreset.fromId(clockMode).usesWeather)
                             ForecastStore.currentRing(appContext,
                                 requestedMinute.atZone(ZoneId.systemDefault()).toEpochSecond(), weather)
                             else emptyList()
@@ -123,11 +109,9 @@ class ClockArtworkProvider : ContentProvider() {
     }
 
     private fun pruneCache(directory: File) {
-        directory.listFiles()
-            ?.filter { it.isFile && it.extension == "png" }
-            ?.sortedByDescending { it.lastModified() }
-            ?.drop(MAX_FILES)
-            ?.forEach { it.delete() }
+        val files = directory.listFiles()?.filter { it.isFile && it.extension == "png" } ?: return
+        if (files.size > MAX_FILES)
+            files.sortedByDescending { it.lastModified() }.drop(MAX_FILES).forEach { it.delete() }
     }
 
     override fun getType(uri: Uri): String = "image/png"
@@ -148,7 +132,7 @@ class ClockArtworkProvider : ContentProvider() {
         const val AUTHORITY = "com.kotarov.autoclock2.artwork"
         private const val MAX_FILES = 6
         private val VALID_MODES = ClockPreset.entries.map { it.id }.toSet() +
-            setOf("clock", "analog", "weather", "both", "mini_metrics", "mini_forecast")
+            setOf("clock", "analog", "both")
         private val KEY_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd_HHmm")
 
         private fun miniFamily(id: String): ClockFamily? =
@@ -162,34 +146,6 @@ class ClockArtworkProvider : ContentProvider() {
             coloredWeatherIcons: Boolean = true
         ): Uri = artworkUri("mini_${family.id}", now, weatherRevision,
             theme = theme, coloredWeatherIcons = coloredWeatherIcons)
-
-        /** Hour-specific symbol-only forecast art, cached by model revision
-         * and predicted hour (not minute ticks). Temperature stays in row text.
-         */
-        fun forecastArtworkUri(
-            epochSeconds: Long,
-            forecast: com.kotarov.autoclock.weather.ForecastStore.Hour?,
-            revision: Long,
-            theme: ClockTheme = ClockTheme.DARK,
-            coloredWeatherIcons: Boolean = true
-        ): Uri = artworkUri(
-            "mini_forecast",
-            java.time.LocalDateTime.ofInstant(
-                java.time.Instant.ofEpochSecond(epochSeconds),
-                java.time.ZoneOffset.UTC
-            ),
-            revision,
-            theme = theme, coloredWeatherIcons = coloredWeatherIcons
-        ).buildUpon()
-            .appendQueryParameter("code", (forecast?.code ?: -1).toString())
-            .build()
-
-        fun metricsArtworkUri(
-            now: LocalDateTime,
-            weatherRevision: Long = 0L,
-            theme: ClockTheme = ClockTheme.DARK
-        ): Uri = artworkUri("mini_metrics", now, weatherRevision,
-            theme = theme)
 
         fun artworkUri(
             mode: String,
@@ -205,7 +161,7 @@ class ClockArtworkProvider : ContentProvider() {
             .appendPath(mode)
             .appendPath("clock_${now.format(KEY_FORMAT)}.png")
             .appendQueryParameter("rev", weatherRevision.coerceAtLeast(0L).toString())
-            .appendQueryParameter("style", "v47")
+            .appendQueryParameter("style", "v52")
             .appendQueryParameter("weather_color", coloredWeatherIcons.toString())
             .appendQueryParameter("theme", theme.id)
             .appendQueryParameter("generation", generation.toString())
