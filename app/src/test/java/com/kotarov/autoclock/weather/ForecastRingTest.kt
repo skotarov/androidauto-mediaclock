@@ -113,6 +113,33 @@ class ForecastRingTest {
             ForecastStore.ringIconEpochs(data, start))
     }
 
+    @Test fun iconAndRoundedTemperatureChangesAreIndependent() {
+        val data = hours.filter { it.epochSeconds in (start - 3600L)..(start + 5 * 3600L) }
+            .map { h ->
+                val offset = ((h.epochSeconds - start) / 3600L).toInt()
+                h.copy(code = if (offset < 2) 3 else 61,
+                    temperatureC = when (offset) {
+                        -1, 0 -> 9.0
+                        1, 2 -> 10.0
+                        3 -> 10.4
+                        else -> 11.0
+                    }, isDay = true)
+            }
+        val changes = ForecastStore.ringChanges(data, start)
+        assertEquals(setOf(start - 3600L, start, start + 2 * 3600L), changes.iconEpochs)
+        assertEquals(setOf(start - 3600L, start, start + 3600L, start + 4 * 3600L),
+            changes.temperatureEpochs)
+    }
+
+    @Test fun aMissingHourRestartsBothIndependentValues() {
+        val data = hours.filter { it.epochSeconds != start + 2 * 3600L }
+            .map { it.copy(code = 3, temperatureC = 9.0, isDay = true) }
+        val changes = ForecastStore.ringChanges(data, start)
+        val expected = setOf(start - 3600L, start, start + 3 * 3600L)
+        assertEquals(expected, changes.iconEpochs)
+        assertEquals(expected, changes.temperatureEpochs)
+    }
+
     @Test fun pauseListRemainsSixFutureHours() {
         assertEquals((9..14).toList(), ForecastStore.nextSixHours(hours, start + 60)
             .map { it.localDateTime.hour })
