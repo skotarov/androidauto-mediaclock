@@ -141,7 +141,7 @@ object ForecastStore {
             "latitude=${String.format(Locale.US, "%.4f", latitude)}&" +
             "longitude=${String.format(Locale.US, "%.4f", longitude)}&" +
             "hourly=temperature_2m,weather_code,precipitation_probability,is_day&" +
-            "timezone=auto&timeformat=unixtime&forecast_days=2"
+            "timezone=auto&timeformat=unixtime&past_days=1&forecast_days=2"
         val connection = try {
             (URL(url).openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
