@@ -118,6 +118,10 @@ object WeatherStore {
     ) {
         val app = context.applicationContext
         val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (!WeatherLocation.permitted(app)) {
+            callback(false)
+            return
+        }
         val now = System.currentTimeMillis()
         val lastAttempt = prefs.getLong("weather_attempt_at", 0L)
         if (inFlight || (now >= lastAttempt && now - lastAttempt < MIN_RETRY_MS)) {
@@ -150,10 +154,13 @@ object WeatherStore {
         request: () -> Reading?
     ) {
         Thread({
+            var saved = false
+            try {
             val observed = try { request() } catch (_: Exception) { null }
             val forecast = try { ForecastStore.fetchOnWorker(latitude, longitude) }
                 catch (_: Exception) { null }
-            val result = observed ?: ForecastStore.currentModel(forecast)?.let {
+            val model = ForecastStore.currentModel(forecast)
+            val result = observed ?: model?.let {
                 Reading(it.temperature, it.code, it.isDay, "Текущо местоположение",
                     "Open-Meteo · модел", System.currentTimeMillis())
             }
@@ -166,8 +173,7 @@ object WeatherStore {
             val reuseLocality = near && known != null
             val locality = if (reuseLocality) known else resolveLocality(app, latitude, longitude)
             val warning = ForecastStore.warning(forecast, System.currentTimeMillis() / 1000L,
-                result?.code)
-            var saved = false
+                model?.code ?: result?.code)
             if (result != null &&
                 prefs.getLong("weather_attempt_at", 0L) == requestAt
             ) {
@@ -193,9 +199,11 @@ object WeatherStore {
                 editor.apply()
                 saved = true
             }
-            Handler(Looper.getMainLooper()).post {
-                inFlight = false
-                callback(saved)
+            } finally {
+                Handler(Looper.getMainLooper()).post {
+                    inFlight = false
+                    callback(saved)
+                }
             }
         }, "AutoClockWeather").apply { isDaemon = true }.start()
     }

@@ -213,10 +213,7 @@ class MainActivity : Activity() {
         if (::analogImage.isInitialized) updatePreviewTiles()
         // Every opening of settings starts a current observation refresh.
         if (WeatherLocation.permitted(this)) {
-            WeatherStore.refreshIfDue(this) {
-                if (!isFinishing && !isDestroyed && ::analogImage.isInitialized)
-                    updatePreviewTiles()
-            }
+            WeatherStore.refreshIfDue(this)
         } else if (!hasRequestedLocation) {
             hasRequestedLocation = true
             requestLocation()
@@ -319,9 +316,7 @@ class MainActivity : Activity() {
                 arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION),
                 LOCATION_REQUEST)
         } else {
-            WeatherStore.refreshIfDue(this) {
-                if (!isFinishing && !isDestroyed) updatePreviewTiles()
-            }
+            WeatherStore.refreshIfDue(this)
         }
     }
 

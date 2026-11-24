@@ -32,6 +32,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private var queuedWarning: String? = null
     private var baseMetadata: MediaMetadataCompat? = null
     private var artKey: String? = null
+    private var miniKey: String? = null
     private val hideCityTitle = Runnable {
         if (clientActive) {
             val next = queuedWarning
@@ -187,6 +188,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         queuedWarning = null
         baseMetadata = null
         artKey = null
+        miniKey = null
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
@@ -202,9 +204,6 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     override fun onDestroy() {
         suspendClientWork()
         // Service shutdown must not change the saved weather preference.
-        handler.removeCallbacks(minuteTick)
-        handler.removeCallbacks(settingsRefresh)
-        handler.removeCallbacks(hideCityTitle)
         prefs.unregisterOnSharedPreferenceChangeListener(prefsListener)
         session.isActive = false
         session.release()
@@ -305,9 +304,12 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             outputSize = 320, sourceLabel = weather?.artworkSource,
             theme = theme, forecast = forecast
         )
-        val miniBitmap = ClockRenderer.renderMini(
-            visible.family, now, theme
-        )
+        val currentMiniKey = miniArtwork.toString()
+        val miniBitmap = if (miniKey == currentMiniKey)
+            baseMetadata?.getBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON)
+                ?: ClockRenderer.renderMini(visible.family, now, theme)
+            else ClockRenderer.renderMini(visible.family, now, theme)
+        miniKey = currentMiniKey
         baseMetadata = MediaMetadataCompat.Builder()
             .putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, miniBitmap)
             .putBitmap(MediaMetadataCompat.METADATA_KEY_ART, art)

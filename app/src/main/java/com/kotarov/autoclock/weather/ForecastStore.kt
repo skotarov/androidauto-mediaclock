@@ -15,7 +15,6 @@ import kotlin.math.roundToInt
  * Six NEXT whole hours from an Open-Meteo modeled forecast, separate from
  * current METAR weather. The existing weather worker reuses its coordinates:
  * no extra GPS fix or service; normal HTTP reads cap at 5 minutes.
- * Explicit settings-open refreshes may bypass this cap.
  */
 object ForecastStore {
     // Fresh cache keys: never read the older v0.35 daily forecast as hourly.
