@@ -184,6 +184,22 @@ object WeatherStore {
         app = null
     }
 
+    /** A manual request bypasses the ordinary retry interval, but never
+     * starts a second worker or a second concurrent location request. */
+    fun refreshLocality(context: Context) {
+        if (!WeatherLocation.permitted(context)) return
+        lastLocalityAttempt = null
+        lastFallback = null
+        start(context, Client.PHONE)
+    }
+
+    fun localityFailure(context: Context): String = when {
+        !WeatherLocation.permitted(context) -> "Location permission required"
+        !WeatherLocation.enabled(context) -> "Turn on phone location"
+        latest != null -> "Coordinates found; place name unavailable"
+        else -> "No location fix; check location services"
+    }
+
     private fun checkLocation() {
         val context = app ?: return
         if (!WeatherLocation.permitted(context)) {
@@ -366,9 +382,11 @@ object WeatherStore {
     private fun resolveLocality(context: Context, latitude: Double, longitude: Double): String? {
         return try {
             if (!Geocoder.isPresent()) return null
-            val address = Geocoder(context, Locale.ENGLISH)
-                .getFromLocation(latitude, longitude, 1)?.firstOrNull()
-            address?.locality?.trim()?.takeIf { it.isNotEmpty() }
+            val addresses = Geocoder(context, Locale.ENGLISH)
+                .getFromLocation(latitude, longitude, 3).orEmpty()
+            // Some providers omit locality on the first address.
+            addresses.firstNotNullOfOrNull { it.locality?.trim()?.takeIf(String::isNotEmpty) }
+                ?: addresses.firstNotNullOfOrNull { it.subLocality?.trim()?.takeIf(String::isNotEmpty) }
         } catch (_: Exception) { null }
     }
 

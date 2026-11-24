@@ -54,7 +54,12 @@ class MainActivity : Activity() {
     private val soundPreview by lazy { NoticeSoundPlayer() }
     private val weatherPreferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == ClockPreset.KEY_ADD_WEATHER) syncWeatherToggle()
-        else if (key == "weather_fetched_at" || key == WeatherStore.KEY_LOCALITY) updatePreviewTiles()
+        else if (key == "weather_fetched_at" || key == WeatherStore.KEY_LOCALITY) {
+            updatePreviewTiles()
+            if (key == WeatherStore.KEY_LOCALITY && awaitingLocation) {
+                WeatherStore.locality(this)?.let { finishLocation(it, true) }
+            }
+        }
     }
     private var analogBitmap: Bitmap? = null
     private var digitalBitmap: Bitmap? = null
@@ -72,6 +77,14 @@ class MainActivity : Activity() {
     private val previewWorker = ArtworkWorkers.create<PreviewImages> { it.discard() }
     private val messageHandler = Handler(Looper.getMainLooper())
     private lateinit var locationMessage: TextView
+    private var awaitingLocation = false
+    private var showLocationAfterPermission = false
+    private val locationTimeout = Runnable {
+        if (awaitingLocation) {
+            val city = WeatherStore.locality(this)
+            finishLocation(city ?: WeatherStore.localityFailure(this), city != null)
+        }
+    }
     private val hideLocationMessage = Runnable {
         if (::locationMessage.isInitialized) locationMessage.visibility = View.GONE
     }
@@ -183,17 +196,7 @@ class MainActivity : Activity() {
         root.addView(Button(this).apply {
             text = "Location"
             isAllCaps = false
-            setOnClickListener {
-                val city = WeatherStore.locality(this@MainActivity)
-                locationMessage.text = city ?: "Location unavailable"
-                locationMessage.visibility = View.VISIBLE
-                messageHandler.removeCallbacks(hideLocationMessage)
-                messageHandler.postDelayed(hideLocationMessage, CityAnnouncement.DURATION_MS)
-                // The already connected media service receives the same
-                // request; no playback change or new GPS/network request.
-                prefs.edit().putLong(AutoClockMediaService.KEY_SHOW_LOCATION,
-                    SystemClock.elapsedRealtimeNanos()).apply()
-            }
+            setOnClickListener { showLocation() }
         }, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
@@ -265,6 +268,10 @@ class MainActivity : Activity() {
     }
 
     override fun onStop() {
+        awaitingLocation = false
+        messageHandler.removeCallbacks(locationTimeout)
+        messageHandler.removeCallbacks(hideLocationMessage)
+        if (::locationMessage.isInitialized) locationMessage.visibility = View.GONE
         WeatherStore.stop(WeatherStore.Client.PHONE)
         settings().unregisterOnSharedPreferenceChangeListener(weatherPreferenceListener)
         soundPreview.stop()
@@ -407,6 +414,42 @@ class MainActivity : Activity() {
         title.setTextColor(if (selected) accent else ink)
     }
 
+    private fun showLocation() {
+        if (!WeatherLocation.permitted(this)) {
+            finishLocation("Location permission required", false)
+            showLocationAfterPermission = true
+            requestLocation()
+            return
+        }
+        if (!WeatherLocation.enabled(this)) {
+            finishLocation("Turn on phone location", false)
+            return
+        }
+        WeatherStore.locality(this)?.let {
+            finishLocation(it, true)
+            return
+        }
+        if (awaitingLocation) return
+        awaitingLocation = true
+        locationMessage.text = "Finding location…"
+        locationMessage.visibility = View.VISIBLE
+        messageHandler.removeCallbacks(hideLocationMessage)
+        messageHandler.removeCallbacks(locationTimeout)
+        messageHandler.postDelayed(locationTimeout, 30_000L)
+        WeatherStore.refreshLocality(this)
+    }
+
+    private fun finishLocation(message: String, announce: Boolean) {
+        awaitingLocation = false
+        messageHandler.removeCallbacks(locationTimeout)
+        locationMessage.text = message
+        locationMessage.visibility = View.VISIBLE
+        messageHandler.removeCallbacks(hideLocationMessage)
+        messageHandler.postDelayed(hideLocationMessage, CityAnnouncement.DURATION_MS)
+        if (announce) settings().edit().putLong(AutoClockMediaService.KEY_SHOW_LOCATION,
+            SystemClock.elapsedRealtimeNanos()).apply()
+    }
+
     private fun requestLocation() {
         if (!WeatherLocation.permitted(this)) {
             requestPermissions(
@@ -422,9 +465,14 @@ class MainActivity : Activity() {
         requestCode: Int, permissions: Array<out String>, grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == LOCATION_REQUEST &&
-            grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+        if (requestCode != LOCATION_REQUEST) return
+        val manual = showLocationAfterPermission
+        showLocationAfterPermission = false
+        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
             requestLocation()
+            if (manual) showLocation()
+        } else if (manual) {
+            finishLocation("Location permission required", false)
         }
     }
 
