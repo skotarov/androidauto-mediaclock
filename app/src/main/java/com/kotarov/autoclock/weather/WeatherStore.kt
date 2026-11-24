@@ -235,11 +235,14 @@ object WeatherStore {
                         localityFailed = name == null
                         if (name != null) {
                             lastLocalityPoint = point
-                            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                                .putString(KEY_LOCALITY, name)
-                                .putLong("weather_locality_revision_v68", System.currentTimeMillis())
-                                .putLong(KEY_LAT, point.lat.toBits())
-                                .putLong(KEY_LON, point.lon.toBits()).apply()
+                            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                            val edit = prefs.edit().putLong(KEY_LAT, point.lat.toBits())
+                                .putLong(KEY_LON, point.lon.toBits())
+                            if (name != prefs.getString(KEY_LOCALITY, null)) {
+                                edit.putString(KEY_LOCALITY, name)
+                                    .putLong("weather_locality_revision_v68", System.currentTimeMillis())
+                            }
+                            edit.apply()
                         }
                     }
                 }

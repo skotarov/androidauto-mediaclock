@@ -57,6 +57,13 @@ class MainActivity : Activity() {
     }
     private var analogBitmap: Bitmap? = null
     private var digitalBitmap: Bitmap? = null
+    private data class PreviewKey(
+        val minute: LocalDateTime, val theme: ClockTheme, val compact: Boolean,
+        val analogPreset: String, val digitalPreset: String,
+        val weather: WeatherStore.Snapshot?, val locality: String?,
+        val forecast: List<ForecastStore.Hour>
+    )
+    private var previewKey: PreviewKey? = null
     private val messageHandler = Handler(Looper.getMainLooper())
     private lateinit var locationMessage: TextView
     private val hideLocationMessage = Runnable {
@@ -227,6 +234,7 @@ class MainActivity : Activity() {
         WeatherStore.stop(WeatherStore.Client.PHONE)
         settings().unregisterOnSharedPreferenceChangeListener(weatherPreferenceListener)
         soundPreview.stop()
+        releasePreviews()
         super.onStop()
     }
 
@@ -301,28 +309,30 @@ class MainActivity : Activity() {
         val prefs = settings()
         val theme = ClockTheme.fromId(prefs.getString(ClockTheme.KEY, null))
         val compact = prefs.getString(AutoClockMediaService.KEY_LAYOUT, "standard") == "compact"
-        val now = LocalDateTime.now()
-        val weather = WeatherStore.current(this)
-        fun make(family: ClockFamily): Bitmap {
-            val preset = ClockSelectionStore.forFamily(prefs, family)
-            return ClockRenderer.render(
-                preset.id, now, compact,
-                outputSize = 256,
-                sourceLabel = if (preset.usesWeather) WeatherStore.locality(this) ?: weather?.artworkSource else null,
-                theme = theme,
-                forecast = if (preset.usesWeather)
-                    ForecastStore.currentRing(this,
-                        now.atZone(java.time.ZoneId.systemDefault()).toEpochSecond(), weather) else emptyList()
-            )
+        val now = LocalDateTime.now().withSecond(0).withNano(0)
+        val analog = ClockSelectionStore.forFamily(prefs, ClockFamily.ANALOG)
+        val digital = ClockSelectionStore.forFamily(prefs, ClockFamily.DIGITAL)
+        val hasWeather = analog.usesWeather || digital.usesWeather
+        val weather = if (hasWeather) WeatherStore.current(this) else null
+        val locality = if (hasWeather) WeatherStore.locality(this) ?: weather?.artworkSource else null
+        val forecast = if (hasWeather) ForecastStore.currentRing(this,
+            now.atZone(java.time.ZoneId.systemDefault()).toEpochSecond(), weather) else emptyList()
+        val next = PreviewKey(now, theme, compact, analog.id, digital.id, weather, locality, forecast)
+        if (previewKey != next || analogBitmap == null || digitalBitmap == null) {
+            fun make(preset: ClockPreset): Bitmap = ClockRenderer.render(
+                preset.id, now, compact, outputSize = 256,
+                sourceLabel = if (preset.usesWeather) locality else null,
+                theme = theme, forecast = if (preset.usesWeather) forecast else emptyList())
+            val newAnalog = make(analog)
+            val newDigital = make(digital)
+            analogImage.setImageBitmap(newAnalog)
+            digitalImage.setImageBitmap(newDigital)
+            analogBitmap?.recycle()
+            digitalBitmap?.recycle()
+            analogBitmap = newAnalog
+            digitalBitmap = newDigital
+            previewKey = next
         }
-        val newAnalog = make(ClockFamily.ANALOG)
-        val newDigital = make(ClockFamily.DIGITAL)
-        analogImage.setImageBitmap(newAnalog)
-        digitalImage.setImageBitmap(newDigital)
-        analogBitmap?.recycle()
-        digitalBitmap?.recycle()
-        analogBitmap = newAnalog
-        digitalBitmap = newDigital
 
         val selected = ClockSelectionStore.current(prefs).family
         updateSelectionStyle(analogCard, analogLabel, selected == ClockFamily.ANALOG)
@@ -434,13 +444,18 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         messageHandler.removeCallbacks(hideLocationMessage)
+        releasePreviews()
+        super.onDestroy()
+    }
+
+    private fun releasePreviews() {
         if (::analogImage.isInitialized) analogImage.setImageDrawable(null)
         if (::digitalImage.isInitialized) digitalImage.setImageDrawable(null)
         analogBitmap?.recycle()
         digitalBitmap?.recycle()
         analogBitmap = null
         digitalBitmap = null
-        super.onDestroy()
+        previewKey = null
     }
 
     private fun dp(value: Int): Int =

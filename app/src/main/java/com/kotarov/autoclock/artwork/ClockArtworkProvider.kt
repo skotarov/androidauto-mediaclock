@@ -57,13 +57,18 @@ class ClockArtworkProvider : ContentProvider() {
         val layout = if (compact) "compact" else "standard"
         val generation = uri.getQueryParameter("generation")?.toLongOrNull() ?: 0L
         val destination = File(directory,
-            "v68-$layout-${theme.id}-$clockMode-$key-$weatherRevision-$generation.png")
+            "v69-$layout-${theme.id}-$clockMode-$key-$weatherRevision-$generation.png")
 
         synchronized(lock) {
             if (!destination.isFile || destination.length() == 0L) {
                 val temp = File(directory, "inflight-${System.nanoTime()}.tmp")
                 val mini = miniFamily(clockMode)
-                val bitmap = if (mini != null) {
+                val outputSize = if (mini != null) 160
+                    else if (ClockPreset.fromId(clockMode).hasAnalog ||
+                        ClockPreset.fromId(clockMode).usesWeather) ClockRenderer.SIZE
+                    else ClockRenderer.MEDIA_BITMAP_SIZE
+                val borrowed = PublishedArtwork.borrow(uri.toString(), outputSize, mini != null)
+                val bitmap = borrowed ?: if (mini != null) {
                     ClockRenderer.renderMini(
                         mini, requestedMinute, theme = theme
                     )
@@ -74,9 +79,7 @@ class ClockArtworkProvider : ContentProvider() {
                     ClockRenderer.render(
                         clockMode, requestedMinute,
                         compact,
-                        outputSize = if (ClockPreset.fromId(clockMode).hasAnalog ||
-                            ClockPreset.fromId(clockMode).usesWeather)
-                            ClockRenderer.SIZE else ClockRenderer.MEDIA_BITMAP_SIZE,
+                        outputSize = outputSize,
                         sourceLabel = if (ClockPreset.fromId(clockMode).usesWeather)
                             WeatherStore.locality(appContext) ?: weather?.artworkSource else null,
                         theme = theme,
@@ -97,7 +100,7 @@ class ClockArtworkProvider : ContentProvider() {
                     }
                     pruneCache(directory)
                 } finally {
-                    bitmap.recycle()
+                    if (borrowed == null) bitmap.recycle()
                     temp.delete()
                 }
             }
@@ -156,7 +159,7 @@ class ClockArtworkProvider : ContentProvider() {
             .appendPath(mode)
             .appendPath("clock_${now.format(KEY_FORMAT)}.png")
             .appendQueryParameter("rev", weatherRevision.coerceAtLeast(0L).toString())
-            .appendQueryParameter("style", "v68")
+            .appendQueryParameter("style", "v69")
             .appendQueryParameter("theme", theme.id)
             .appendQueryParameter("generation", generation.toString())
             .appendQueryParameter("layout", if (compact) "compact" else "standard")

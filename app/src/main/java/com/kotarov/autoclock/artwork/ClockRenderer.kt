@@ -62,6 +62,31 @@ object ClockRenderer {
     private fun themed(color: Int, theme: ClockTheme): Int =
         if (theme == ClockTheme.DARK) color else color xor 0x00ffffff
     private val timeFormat = DateTimeFormatter.ofPattern("HH:mm")
+    private val boldFace by lazy { Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD) }
+    private val condensedBoldFace by lazy { Typeface.create("sans-serif-condensed", Typeface.BOLD) }
+    private data class DialLines(val major: FloatArray, val minor: FloatArray)
+    private fun dialLines(radius: Float, centreY: Float): DialLines {
+        val unit = radius / STANDARD_RADIUS
+        val major = FloatArray(12 * 4)
+        val minor = FloatArray(48 * 4)
+        var majorIndex = 0
+        var minorIndex = 0
+        repeat(60) { index ->
+            val isMajor = index % 5 == 0
+            val inner = radius - if (isMajor) 26f * unit else 17f * unit
+            val outer = radius - 7f * unit
+            val array = if (isMajor) major else minor
+            val at = if (isMajor) majorIndex else minorIndex
+            array[at] = CENTER_X + tickX[index] * inner
+            array[at + 1] = centreY + tickY[index] * inner
+            array[at + 2] = CENTER_X + tickX[index] * outer
+            array[at + 3] = centreY + tickY[index] * outer
+            if (isMajor) majorIndex += 4 else minorIndex += 4
+        }
+        return DialLines(major, minor)
+    }
+    private val standardLines by lazy { dialLines(STANDARD_RADIUS, STANDARD_ANALOG_CENTER_Y) }
+    private val compactLines by lazy { dialLines(COMPACT_RADIUS, COMPACT_ANALOG_CENTER_Y) }
     private val white = Color.rgb(255, 255, 255)
     private val pale = Color.rgb(224, 239, 247)
     private val cyan = Color.rgb(108, 218, 255)
@@ -191,6 +216,13 @@ object ClockRenderer {
         // Keep the guide line out of the weather glyphs and text. These
         // exclusions are used only when drawing the arc, not the dial.
         val arcExclusions = Path()
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = themed(pale, theme)
+            textAlign = Paint.Align.CENTER
+            textSize = 20f * unit
+            typeface = boldFace
+        }
+        val fm = paint.fontMetrics
         for (hour in forecast) {
             val local = LocalDateTime.ofInstant(Instant.ofEpochSecond(hour.epochSeconds), zone)
             // Match real elapsed hourly slots; the dial uses the phone zone.
@@ -207,15 +239,8 @@ object ClockRenderer {
             val scale = iconSize * unit / maxOf(geometry.width, geometry.height)
             val lift = 16f * unit
             val temperature = "${hour.temperatureC.roundToInt()}°"
-            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = themed(pale, theme)
-                textAlign = Paint.Align.CENTER
-                textSize = 20f * unit
-                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-            }
             // Project the glyph and text bounding boxes onto the outward
             // radial direction. Move only as far as necessary for clearance.
-            val fm = paint.fontMetrics
             // Temperature-only slots sit centred on a common circular path,
             // rather than leaving an empty icon-sized gap above the text.
             val baseline = if (hasIcon) 21f * unit else -(fm.ascent + fm.descent) / 2f
@@ -311,7 +336,7 @@ object ClockRenderer {
         val label = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
             color = themed(pale, theme)
             textAlign = Paint.Align.CENTER
-            typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD)
+            typeface = condensedBoldFace
             textSize = 20f * unit
         }
         // Keep all seven HH:mm boundary labels equally sized and separated.
@@ -323,7 +348,7 @@ object ClockRenderer {
         val temp = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
             color = themed(white, theme)
             textAlign = Paint.Align.CENTER
-            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            typeface = boldFace
             textSize = 22f * unit
         }
         labels.forEachIndexed { index, value ->
@@ -371,7 +396,7 @@ object ClockRenderer {
             color = themed(pale, theme)
             textAlign = Paint.Align.CENTER
             textSize = baseSize
-            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            typeface = boldFace
         }
         val width = paint.measureText(value)
         val scale = if (width > 0f) minOf(1f, maxWidth / width) else 1f
@@ -405,15 +430,9 @@ object ClockRenderer {
             stroke(themed(Color.rgb(53, 92, 115), theme), 1.8f * unit))
         val major = stroke(themed(white, theme), 6.5f * unit)
         val minor = stroke(themed(Color.rgb(157, 193, 210), theme), 2.3f * unit)
-        repeat(60) { index ->
-            val dx = tickX[index]
-            val dy = tickY[index]
-            val inner = radius - if (index % 5 == 0) 26f * unit else 17f * unit
-            val outer = radius - 7f * unit
-            canvas.drawLine(x + dx * inner, y + dy * inner,
-                x + dx * outer, y + dy * outer,
-                if (index % 5 == 0) major else minor)
-        }
+        val lines = if (radius == COMPACT_RADIUS) compactLines else standardLines
+        canvas.drawLines(lines.major, major)
+        canvas.drawLines(lines.minor, minor)
         val hourAngle = Math.toRadians(
             (now.hour % 12) * 30.0 + now.minute * 0.5 - 90.0
         )
@@ -468,7 +487,7 @@ object ClockRenderer {
             this.color = themed(color, theme)
             textAlign = Paint.Align.CENTER
             textSize = size
-            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            typeface = boldFace
             style = Paint.Style.FILL
         }
         val baseline = centreY - (face.fontMetrics.ascent + face.fontMetrics.descent) / 2f

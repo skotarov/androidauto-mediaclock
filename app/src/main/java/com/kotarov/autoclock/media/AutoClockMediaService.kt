@@ -14,6 +14,7 @@ import android.support.v4.media.session.PlaybackStateCompat
 import androidx.media.MediaBrowserServiceCompat
 import com.kotarov.autoclock.artwork.ClockArtworkProvider
 import com.kotarov.autoclock.artwork.ClockRenderer
+import com.kotarov.autoclock.artwork.PublishedArtwork
 import com.kotarov.autoclock.weather.WeatherStore
 import com.kotarov.autoclock.weather.ForecastStore
 import java.time.LocalDateTime
@@ -35,6 +36,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private var baseMetadata: MediaMetadataCompat? = null
     private var artKey: String? = null
     private var miniKey: String? = null
+    private var lastPublished: MediaPublicationKey? = null
+    private var lastPlayback: Boolean? = null
     private val hideCityTitle = Runnable {
         if (clientActive) {
             val next = queuedWarning
@@ -194,6 +197,10 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         baseMetadata = null
         artKey = null
         miniKey = null
+        lastPublished = null
+        lastPlayback = null
+        PublishedArtwork.clear()
+        session.setMetadata(null)
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
@@ -313,6 +320,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 ?: ClockRenderer.renderMini(visible.family, now, theme)
             else ClockRenderer.renderMini(visible.family, now, theme)
         miniKey = currentMiniKey
+        PublishedArtwork.publish(artwork.toString(), art, false)
+        PublishedArtwork.publish(currentMiniKey, miniBitmap, true)
         baseMetadata = MediaMetadataCompat.Builder()
             .putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, miniBitmap)
             .putBitmap(MediaMetadataCompat.METADATA_KEY_ART, art)
@@ -326,7 +335,10 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             .build()
         artKey = key
         }
-        // A title change does not allocate or redraw any artwork.
+        // Skip identical host IPC updates while retaining the separate notice
+        // sound handling (an identical title can still be a new notice).
+        val publication = MediaPublicationKey(key, temporaryTitle, temporarySubtitle)
+        if (publication != lastPublished) {
         session.setMetadata(MediaMetadataCompat.Builder(baseMetadata!!)
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, temporaryTitle)
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, temporarySubtitle)
@@ -334,6 +346,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, temporaryTitle)
             .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, temporarySubtitle)
             .build())
+        lastPublished = publication
+        }
         // Each newly created notice is a distinct object, even if the same
         // warning appears again at a later refresh. Never sound on redraw.
         if (notice != null && notice !== lastSoundNotice) {
@@ -343,6 +357,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private fun publishPlaybackState() {
+        val isRunning = running
+        if (lastPlayback == isRunning) return
         val actions = PlaybackStateCompat.ACTION_PLAY or
             PlaybackStateCompat.ACTION_PAUSE or PlaybackStateCompat.ACTION_STOP or
             PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID or
@@ -350,13 +366,14 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         session.setPlaybackState(
             PlaybackStateCompat.Builder()
                 .setState(
-                    ClockPlaybackState.forRunning(running),
+                    ClockPlaybackState.forRunning(isRunning),
                     PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN,
                     0f
                 )
                 .setActions(actions)
                 .build()
         )
+        lastPlayback = isRunning
     }
 
     companion object {
