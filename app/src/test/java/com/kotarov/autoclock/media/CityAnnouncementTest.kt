@@ -34,6 +34,15 @@ class CityAnnouncementTest {
         assertNull(city.title(9000L))
     }
 
+    @Test fun locationAndWarningHaveDifferentHeadingsAndTheSameTimeout() {
+        val city = CityAnnouncement()
+        city.show("София", 1000L)
+        assertEquals(CityAnnouncement.Notice("Информация", "София"), city.notice(1000L))
+        city.showWarning("Мъгла", 9000L)
+        assertEquals(CityAnnouncement.Notice("Внимание", "Мъгла"), city.notice(16999L))
+        assertNull(city.notice(17000L))
+    }
+
     @Test fun newCityReplacesAnActiveTitleAndRestartsEightSeconds() {
         val city = CityAnnouncement()
         city.update("София", 0L)
