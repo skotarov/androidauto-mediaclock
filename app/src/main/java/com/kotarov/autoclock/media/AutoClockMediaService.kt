@@ -32,6 +32,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private val cityAnnouncement = CityAnnouncement()
     private val noticeAudio by lazy { NoticeAudio(this) }
     private val streamPlayer by lazy { CustomStreamPlayer(this) }
+    private val continuousPhoneAudio by lazy { ContinuousPhoneAudio(this) }
+    private val phoneMode: PhoneAudioMode get() = PhoneAudioMode.read(prefs)
     private var noticePlaying = false
     private var testNotice: CityAnnouncement.Notice? = null
     private val hideTestNotice = Runnable {
@@ -87,9 +89,15 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (!clientActive) return@OnSharedPreferenceChangeListener
-        if ((key == ClockPreset.KEY_ADD_WEATHER && !running) ||
-            key == NoticeAudio.KEY_PHONE_CHANNEL) stopNoticeAudio()
-        if (key == ClockPreset.KEY_ADD_WEATHER || key == NoticeAudio.KEY_PHONE_CHANNEL ||
+        if (key == PhoneAudioMode.KEY || key == NoticeAudio.KEY_PHONE_CHANNEL) {
+            stopNoticeAudio()
+            streamPlayer.stop()
+            continuousPhoneAudio.stop()
+            syncPhoneMode()
+            syncStream()
+        }
+        if (key == ClockPreset.KEY_ADD_WEATHER && !running) stopNoticeAudio()
+        if (key == ClockPreset.KEY_ADD_WEATHER ||
             key == CustomStreamPlayer.KEY_ENABLED || key == CustomStreamPlayer.KEY_URL) syncStream()
         if (key == KEY_SHOW_LOCATION) {
             val city = WeatherStore.locality(this)
@@ -216,6 +224,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         if (clientActive) return
         clientActive = true
         NoticeTest.receiver = receiveTest
+        syncPhoneMode()
         syncStream()
         lastWarningRevision = prefs.getLong(WeatherStore.KEY_WARNING_REV, 0L)
         WeatherStore.start(this, WeatherStore.Client.CAR)
@@ -237,6 +246,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         queuedWarning = null
         stopNoticeAudio()
         streamPlayer.stop()
+        continuousPhoneAudio.stop()
+        prefs.edit().remove(ContinuousPhoneAudio.KEY_STATUS).apply()
         artworkWorker.cancel()
         requestedArtKey = null
         baseMetadata = null
@@ -456,11 +467,29 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         }
     }
 
+    private fun syncPhoneMode() {
+        if (clientActive && phoneMode == PhoneAudioMode.CONTINUOUS) {
+            continuousPhoneAudio.start { active, status ->
+                prefs.edit().putString(ContinuousPhoneAudio.KEY_STATUS, status).apply()
+                if (!active) {
+                    stopNoticeAudio()
+                    streamPlayer.stop()
+                }
+                syncStream()
+            }
+        } else {
+            continuousPhoneAudio.stop()
+            prefs.edit().remove(ContinuousPhoneAudio.KEY_STATUS).apply()
+        }
+    }
+
     private fun syncStream() {
+        val shared = phoneMode == PhoneAudioMode.CONTINUOUS && continuousPhoneAudio.active
         val url = if (clientActive && running && !noticePlaying &&
+            (phoneMode != PhoneAudioMode.CONTINUOUS || shared) &&
             prefs.getBoolean(CustomStreamPlayer.KEY_ENABLED, false))
             prefs.getString(CustomStreamPlayer.KEY_URL, null) else null
-        streamPlayer.sync(url, prefs.getBoolean(NoticeAudio.KEY_PHONE_CHANNEL, false)) { error ->
+        streamPlayer.sync(url, shared, shared) { error ->
             if (clientActive && !noticePlaying && testNotice == null) {
                 testNotice = CityAnnouncement.Notice("ℹ️", error)
                 handler.removeCallbacks(hideTestNotice)
@@ -475,7 +504,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         // Release the stream's HFP route before the short alert claims it.
         streamPlayer.stop()
         val sound = NoticeSound.fromId(prefs.getString(NoticeSound.KEY, null))
-        noticeAudio.play(sound, body, prefs.getBoolean(NoticeAudio.KEY_PHONE_CHANNEL, false)) {
+        val shared = phoneMode == PhoneAudioMode.CONTINUOUS && continuousPhoneAudio.active
+        noticeAudio.play(sound, body, phoneMode == PhoneAudioMode.ALERTS || shared, shared) {
             noticePlaying = false
             syncStream()
         }
