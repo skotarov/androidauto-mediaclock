@@ -160,7 +160,7 @@ class MainActivity : Activity() {
         })
 
         root.addView(checkOption(
-            "Weather",
+            "Weather + voice alerts",
             ClockSelectionStore.weatherEnabled(prefs),
             captureToggle = { weatherToggle = it }
         ) { checked ->
@@ -219,17 +219,17 @@ class MainActivity : Activity() {
 
         val soundButton = Button(this).apply {
             isAllCaps = false
-            text = "Sound: " + NoticeSound.fromId(prefs.getString(NoticeSound.KEY, null)).label
+            text = "Chime: " + NoticeSound.fromId(prefs.getString(NoticeSound.KEY, null)).label
             setOnClickListener {
                 val options = NoticeSound.entries
                 val selected = NoticeSound.fromId(prefs.getString(NoticeSound.KEY, null))
                 AlertDialog.Builder(this@MainActivity)
-                    .setTitle("Alert sound")
+                    .setTitle("Alert chime (voice remains enabled)")
                     .setSingleChoiceItems(options.map { it.label }.toTypedArray(),
                         options.indexOf(selected)) { dialog, index ->
                         val sound = options[index]
                         prefs.edit().putString(NoticeSound.KEY, sound.id).apply()
-                        text = "Sound: " + sound.label
+                        text = "Chime: " + sound.label
                         soundPreview.play(sound)
                         dialog.dismiss()
                     }
