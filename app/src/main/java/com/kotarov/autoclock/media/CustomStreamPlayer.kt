@@ -15,6 +15,7 @@ import java.net.URI
 /** One user-selected direct HTTPS stream. No idle player or persistent audio route. */
 class CustomStreamPlayer(context: Context) {
     private val app = context.applicationContext
+    private val localBookmarks = app.getSharedPreferences("audio_bookmarks", Context.MODE_PRIVATE)
     private val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val handler = Handler(Looper.getMainLooper())
     private var player: MediaPlayer? = null
@@ -62,7 +63,10 @@ class CustomStreamPlayer(context: Context) {
         if (prepared && seekable && requested?.first == url && media != null) {
             if (runCatching { media.seekTo(target) }.isFailure) return false
         }
-        if (url != null) savedSeek = url to current.copy(position = target)
+        if (url != null) {
+            savedSeek = url to current.copy(position = target)
+            if (validLocal(url)) localBookmarks.edit().putInt(url, target).apply()
+        }
         return true
     }
 
@@ -200,7 +204,8 @@ class CustomStreamPlayer(context: Context) {
                     runCatching {
                         prepared = true
                         seekable = it.duration > 0
-                        val position = savedSeek?.takeIf { p -> p.first == url }?.second?.position ?: 0
+                        val position = savedSeek?.takeIf { p -> p.first == url }?.second?.position
+                            ?: if (validLocal(url)) localBookmarks.getInt(url, 0) else 0
                         if (seekable && position > 0 && position < it.duration) it.seekTo(position)
                         it.start()
                         changed()
@@ -223,6 +228,7 @@ class CustomStreamPlayer(context: Context) {
             media.setOnCompletionListener {
                 if (token == generation && (validLocal(url) || seekable)) {
                     savedSeek = null
+                    if (validLocal(url)) localBookmarks.edit().remove(url).apply()
                     requested = null
                     stop()
                     onError("Media ended")
@@ -286,7 +292,11 @@ class CustomStreamPlayer(context: Context) {
         val old = player
         if (old != null && previous != null && prepared && seekable) {
             runCatching { SeekState(old.currentPosition, old.duration) }.getOrNull()
-                ?.takeIf { it.duration > 0 }?.let { savedSeek = previous.first to it }
+                ?.takeIf { it.duration > 0 }?.let {
+                    savedSeek = previous.first to it
+                    if (validLocal(previous.first)) localBookmarks.edit().putInt(previous.first,
+                        it.position.takeIf { pos -> pos < it.duration } ?: 0).apply()
+                }
         }
         prepared = false
         seekable = false

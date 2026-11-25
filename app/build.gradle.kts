@@ -21,8 +21,8 @@ android {
         applicationId = "com.kotarov.autoclock2"
         minSdk = 23
         targetSdk = 36
-        versionCode = 95
-        versionName = "0.95.0-beta"
+        versionCode = 96
+        versionName = "0.96.0-beta"
     }
 
     // The public beta workflow supplies its permanent signing identity.
@@ -66,6 +66,7 @@ android {
 
 dependencies {
     implementation("androidx.media:media:1.7.0")
+    implementation("androidx.car.app:app:1.4.0")
     testImplementation("junit:junit:4.13.2")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.2")
 }

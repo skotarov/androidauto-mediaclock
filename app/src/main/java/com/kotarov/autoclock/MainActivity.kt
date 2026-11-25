@@ -43,6 +43,7 @@ import android.widget.Switch
 import com.kotarov.autoclock.artwork.ClockRenderer
 import com.kotarov.autoclock.artwork.ArtworkWorkers
 import com.kotarov.autoclock.media.AutoClockMediaService
+import com.kotarov.autoclock.media.CarProjectionMonitor
 import com.kotarov.autoclock.media.ClockFamily
 import com.kotarov.autoclock.media.ClockPreset
 import com.kotarov.autoclock.media.ClockSelectionStore
@@ -62,6 +63,7 @@ class MainActivity : Activity() {
     private lateinit var analogImage: ImageView
     private lateinit var digitalImage: ImageView
     private lateinit var weatherButton: android.widget.ImageButton
+    private var removeProjectionListener: (() -> Unit)? = null
     private var phoneBrowser: MediaBrowserCompat? = null
     private var phoneController: MediaControllerCompat? = null
     private lateinit var carAudioButton: ImageButton
@@ -138,6 +140,10 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Observe even while the phone panel is in the background, until destroyed.
+        removeProjectionListener = CarProjectionMonitor.subscribe(this) { connected ->
+            if (!connected && !isFinishing && !isDestroyed) finishAndRemoveTask()
+        }
         val prefs = settings()
         // This is now an auto-location-only product, including old installs.
         ClockSelectionStore.migrateSimplifiedIfNeeded(prefs)
@@ -988,6 +994,8 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        removeProjectionListener?.invoke()
+        removeProjectionListener = null
         messageHandler.removeCallbacks(hideLocationMessage)
         releasePreviews()
         super.onDestroy()

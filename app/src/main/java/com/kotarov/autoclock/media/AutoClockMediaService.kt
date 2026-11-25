@@ -50,6 +50,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
     private var lastSoundNotice: CityAnnouncement.Notice? = null
     private var clientActive = false
+    private var removeProjectionListener: (() -> Unit)? = null
+    private var suspendedForProjection = false
     private var lastWarningRevision = 0L
     private var queuedWarning: String? = null
     private var baseMetadata: MediaMetadataCompat? = null
@@ -195,6 +197,16 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         // Restore the last explicit phone/car choice. Do not overwrite it.
         publishPlaybackState()
         // Do not start periodic work until an accepted media client connects.
+        removeProjectionListener = CarProjectionMonitor.subscribe(this) { connected ->
+            if (!connected) {
+                suspendedForProjection = clientActive
+                if (clientActive) suspendClientWork()
+                stopSelf()
+            } else if (suspendedForProjection) {
+                suspendedForProjection = false
+                resumeClientWork()
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int =
@@ -260,6 +272,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     private fun resumeClientWork() {
         if (clientActive) return
+        suspendedForProjection = false
         clientActive = true
         activeSource = StreamLibrary.selected(prefs)
         NoticeTest.receiver = receiveTest
@@ -302,6 +315,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
+        suspendedForProjection = false
         suspendClientWork()
         return true
     }
@@ -312,6 +326,9 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     override fun onDestroy() {
+        removeProjectionListener?.invoke()
+        removeProjectionListener = null
+        suspendedForProjection = false
         suspendClientWork()
         streamPlayer.close()
         // Service shutdown must not change the saved weather preference.
