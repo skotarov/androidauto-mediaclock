@@ -201,7 +201,7 @@ object ForecastStore {
      * committed together in one SharedPreferences transaction. */
     fun fetchOnWorker(latitude: Double, longitude: Double): String? {
         val now = System.currentTimeMillis()
-        val url = "https://api.open-meteo.com/v1/forecast?" +
+        val url = com.kotarov.autoclock.BuildConfig.FORECAST_ENDPOINT + "?" +
             "latitude=${String.format(Locale.US, "%.4f", latitude)}&" +
             "longitude=${String.format(Locale.US, "%.4f", longitude)}&" +
             "hourly=temperature_2m,weather_code,precipitation_probability,is_day&" +
