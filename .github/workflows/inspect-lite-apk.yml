@@ -1,0 +1,40 @@
+name: Inspect published Lite and Universal APKs
+on:
+  push:
+    branches: [diagnostics/lite-107-apk]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download published APKs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download v0.107.0-beta --repo "$GITHUB_REPOSITORY" --pattern '*.apk'
+      - name: Inspect APK contents and DEX strings
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import glob, zipfile, collections, os, hashlib
+          for path in sorted(glob.glob('*.apk')):
+              print('\nAPK', path, os.path.getsize(path), hashlib.sha256(open(path,'rb').read()).hexdigest())
+              with zipfile.ZipFile(path) as z:
+                  groups = collections.Counter()
+                  pdfassets = []
+                  for i in z.infolist():
+                      name = i.filename
+                      group = '/'.join(name.split('/')[:2]) if '/' in name else name
+                      groups[group] += i.compress_size
+                      if 'pdfbox' in name.lower() or 'fontbox' in name.lower():
+                          pdfassets.append(name)
+                  print('GROUPS compressed bytes:', groups.most_common(25))
+                  print('PDFBox/fontbox resources:', len(pdfassets))
+                  print('Examples:', pdfassets[:10])
+                  dex = [z.read(n) for n in z.namelist() if n.endswith('.dex')]
+                  for marker in [b'Lcom/tom_roush/pdfbox/', b'Lcom/tom_roush/fontbox/', b'com/tom_roush/pdfbox', b'org/jsoup/', b'org/bouncycastle/']:
+                      print(marker.decode(), 'occurrences:', sum(d.count(marker) for d in dex))
+                  print('Largest entries:')
+                  for i in sorted(z.infolist(), key=lambda i:i.compress_size, reverse=True)[:20]:
+                      print(i.compress_size, i.file_size, i.filename)
+          PY
