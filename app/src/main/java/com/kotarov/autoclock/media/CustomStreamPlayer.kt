@@ -29,6 +29,7 @@ class CustomStreamPlayer(context: Context) {
     private var textLanguage: String? = null
     private var reader: TextFileReader? = null
     private var failed = false
+    private var suspendedMedia = false
     private var reading = false
     private var prepared = false
     private var seekable = false
@@ -37,7 +38,7 @@ class CustomStreamPlayer(context: Context) {
     /** Never report a stale saved seek position as currently playing media. */
     fun activePositionMs(url: String?): Int? {
         val media = player ?: return null
-        if (url == null || requested?.first != url || !prepared || !seekable) return null
+        if (url == null || requested?.first != url || !prepared || !seekable || suspendedMedia) return null
         return runCatching { media.currentPosition }.getOrNull()?.takeIf { it >= 0 }
     }
 
@@ -69,7 +70,16 @@ class CustomStreamPlayer(context: Context) {
              textLanguage: String? = null, onChanged: () -> Unit = {}, onError: (String) -> Unit) {
         changed = onChanged
         val next = url?.takeIf { valid(it) || validLocal(it) }?.let { Triple(it, phone, sharedPhoneChannel) }
-        if (requested == next && this.textLanguage == textLanguage) return
+        if (requested == next && this.textLanguage == textLanguage) {
+            if (suspendedMedia && next != null) {
+                suspendedMedia = false
+                try {
+                    player?.start()
+                    changed()
+                } catch (_: Exception) { fail(generation, "Playback failed", onError) }
+            }
+            return
+        }
         val reuse = next != null && textLanguage != null && reader?.matches(next.first, textLanguage) == true
         stop(keepReader = reuse)
         if (next == null) return
@@ -244,7 +254,18 @@ class CustomStreamPlayer(context: Context) {
 
     fun retryFailed() { if (failed) stop() }
 
-    fun suspendForNotice() { stop(keepReader = true) }
+    fun suspendForNotice() {
+        if (failed || suspendedMedia) return
+        val media = player
+        // A normal media output can stay prepared while a short notice plays.
+        // HFP must be released before the notice can claim the phone route.
+        if (media != null && prepared && requested?.second == false &&
+            runCatching { media.pause() }.isSuccess) {
+            suspendedMedia = true
+            return
+        }
+        stop(keepReader = true)
+    }
 
     fun close() {
         stop()
@@ -257,6 +278,7 @@ class CustomStreamPlayer(context: Context) {
         handler.removeCallbacksAndMessages(null)
         if (keepReader) reader?.pause() else reader?.stop()
         failed = false
+        suspendedMedia = false
         reading = false
         textLanguage = null
         val previous = requested

@@ -3,95 +3,173 @@ package com.kotarov.autoclock.media
 import android.content.Context
 import android.media.AudioAttributes
 import android.net.Uri
+import android.os.CancellationSignal
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import java.io.File
 import java.io.PushbackInputStream
+import java.io.RandomAccessFile
+import java.nio.ByteBuffer
 import java.util.Locale
+import java.util.concurrent.Future
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 
-/** One active document, one utterance in flight. No audio files or network TTS. */
+/** One active document, bounded memory, one utterance in flight.
+ * A temporary UTF-16 cache provides character offsets without retaining a whole book in RAM.
+ * Short audio interruptions keep the prepared cache and engine; explicit Stop frees both. */
 internal class TextFileReader(context: Context) {
     private val app = context.applicationContext
     private val prefs = app.getSharedPreferences("text_bookmarks", Context.MODE_PRIVATE)
     private val handler = Handler(Looper.getMainLooper())
+    private val worker = ThreadPoolExecutor(0, 1, 15L, TimeUnit.SECONDS,
+        LinkedBlockingQueue<Runnable>()) { runnable ->
+        Thread(runnable, "AutoClockText").apply { isDaemon = true }
+    }
+    private data class Document(val file: File, val length: Int, val sample: String)
+    private data class Chunk(val start: Int, val end: Int, val body: String)
+    private var document: Document? = null
+    private var job: Future<*>? = null
+    private var loadSignal: CancellationSignal? = null
     private var engine: TextToSpeech? = null
-    private var worker: Thread? = null
+    private var ready = false
+    private var paused = false
     private var token = 0L
+    private var readSerial = 0L
     private var url: String? = null
-    private var text: String? = null
+    private var languageChoice: String? = null
     private var offset = 0
     private var utteranceStart = 0
     private var utteranceEnd = 0
     private var activeId: String? = null
     private var sequence = 0L
+    private var lastSaved = -1
+    private var lastCheckpoint = 0L
+    private var lastPercent = -1
     private var changed: () -> Unit = {}
     private var finished: ((String?) -> Unit)? = null
     private val timeout = Runnable { finish("Text-to-speech timed out") }
 
-    fun progress(): String? = text?.let { "${TextReading.percent(offset, it.length)}%" }
+    fun matches(source: String, language: String): Boolean =
+        ready && document != null && url == source && languageChoice == language
+
+    fun progress(): String? = document?.takeIf { ready && !paused }?.let {
+        "${TextReading.percent(offset, it.length)}%"
+    }
 
     fun start(source: String, language: String, phone: Boolean,
               onChanged: () -> Unit, onFinished: (String?) -> Unit) {
+        if (matches(source, language) && paused) {
+            changed = onChanged
+            finished = onFinished
+            paused = false
+            lastPercent = -1
+            val tts = engine ?: run { finish("Text-to-speech unavailable"); return }
+            try {
+                setRoute(tts, phone)
+                next()
+            } catch (_: Exception) { finish("Text-to-speech unavailable") }
+            return
+        }
         stop()
         url = source
+        languageChoice = language
         changed = onChanged
         finished = onFinished
         val generation = token
-        worker = Thread({
-            val result = runCatching { load(source) }
+        val signal = CancellationSignal()
+        loadSignal = signal
+        handler.postDelayed(timeout, 60_000L)
+        job = worker.submit {
+            val result = runCatching { prepare(source, signal) }
             handler.post {
-                if (generation == token) {
-                    worker = null
-                    val body = result.getOrNull()
-                    if (body == null) finish("TXT unavailable or too large (2 million characters max)")
-                    else if (body.isBlank()) finish("Text file is empty")
+                if (generation != token) {
+                    result.getOrNull()?.file?.delete()
+                } else {
+                    job = null
+                    loadSignal = null
+                    handler.removeCallbacks(timeout)
+                    val doc = result.getOrNull()
+                    if (doc == null) finish("TXT unavailable, too large or unreadable")
                     else {
-                        text = body
-                        offset = prefs.getInt(source, 0).coerceIn(0, body.length - 1)
-                        if (offset > 0 && Character.isLowSurrogate(body[offset])) offset--
-                        initialize(generation, TextReading.language(body, language, Locale.getDefault().language), phone)
+                        document = doc
+                        if (doc.length == 0) finish("Text file is empty")
+                        else {
+                            offset = prefs.getInt(source, 0).coerceIn(0, doc.length)
+                            lastSaved = offset
+                            lastCheckpoint = SystemClock.elapsedRealtime()
+                            initialize(generation,
+                                TextReading.language(doc.sample, language, Locale.getDefault().language), phone)
+                        }
                     }
                 }
-            }
-        }, "AutoClockText").apply { isDaemon = true; start() }
-    }
-
-    private fun load(source: String): String {
-        val input = app.contentResolver.openInputStream(Uri.parse(source)) ?: error("No file")
-        return PushbackInputStream(input, 3).use { stream ->
-            val prefix = ByteArray(3)
-            var n = 0
-            while (n < prefix.size) {
-                val read = stream.read(prefix, n, prefix.size - n)
-                if (read <= 0) break
-                n += read
-            }
-            val b = prefix.map { it.toInt() and 255 }
-            val (charset, skip) = when {
-                n >= 3 && b == listOf(239, 187, 191) -> Charsets.UTF_8 to 3
-                n >= 2 && b[0] == 255 && b[1] == 254 -> Charsets.UTF_16LE to 2
-                n >= 2 && b[0] == 254 && b[1] == 255 -> Charsets.UTF_16BE to 2
-                else -> Charsets.UTF_8 to 0
-            }
-            if (n > skip) stream.unread(prefix, skip, n - skip)
-            stream.reader(charset).use { reader ->
-                val body = StringBuilder()
-                val buffer = CharArray(4096)
-                while (true) {
-                    if (Thread.currentThread().isInterrupted) error("Cancelled")
-                    val count = reader.read(buffer)
-                    if (count < 0) break
-                    require(body.length + count <= TextReading.MAX_CHARS)
-                    body.append(buffer, 0, count)
-                }
-                body.toString()
             }
         }
     }
 
+    private fun prepare(source: String, signal: CancellationSignal): Document {
+        val dir = File(app.cacheDir, "text-reading").apply { mkdirs() }
+        // Remove orphaned caches after a process kill; never touch a fresh active cache.
+        val cutoff = System.currentTimeMillis() - 24 * 60 * 60_000L
+        dir.listFiles()?.filter { it.name.startsWith("book-") && it.lastModified() < cutoff }
+            ?.forEach { it.delete() }
+        val file = File.createTempFile("book-", ".utf16", dir)
+        try {
+            val afd = app.contentResolver.openAssetFileDescriptor(Uri.parse(source), "r", signal)
+                ?: error("No file")
+            var length = 0
+            val sample = StringBuilder(4000)
+            afd.use { descriptor ->
+                PushbackInputStream(descriptor.createInputStream(), 3).use { stream ->
+                    val prefix = ByteArray(3)
+                    var n = 0
+                    while (n < prefix.size) {
+                        val read = stream.read(prefix, n, prefix.size - n)
+                        if (read <= 0) break
+                        n += read
+                    }
+                    val b = prefix.map { it.toInt() and 255 }
+                    val (charset, skip) = when {
+                        n >= 3 && b == listOf(239, 187, 191) -> Charsets.UTF_8 to 3
+                        n >= 2 && b[0] == 255 && b[1] == 254 -> Charsets.UTF_16LE to 2
+                        n >= 2 && b[0] == 254 && b[1] == 255 -> Charsets.UTF_16BE to 2
+                        else -> Charsets.UTF_8 to 0
+                    }
+                    if (n > skip) stream.unread(prefix, skip, n - skip)
+                    stream.reader(charset).buffered().use { reader ->
+                        file.outputStream().buffered().writer(Charsets.UTF_16BE).use { output ->
+                            val buffer = CharArray(8192)
+                            while (true) {
+                                signal.throwIfCanceled()
+                                if (Thread.currentThread().isInterrupted) error("Cancelled")
+                                val count = reader.read(buffer)
+                                if (count < 0) break
+                                require(length.toLong() + count <= TextReading.MAX_CHARS)
+                                length += count
+                                if (sample.length < 4000)
+                                    sample.append(buffer, 0, minOf(count, 4000 - sample.length))
+                                output.write(buffer, 0, count)
+                            }
+                        }
+                    }
+                }
+            }
+            signal.throwIfCanceled()
+            // The cache is a fixed-width character index, not a synthesized audio file.
+            require(file.length() == length.toLong() * 2L)
+            return Document(file, length, sample.toString())
+        } catch (e: Throwable) {
+            file.delete()
+            throw e
+        }
+    }
+
     private fun initialize(generation: Long, language: String, phone: Boolean) {
-        handler.postDelayed(timeout, 15000)
+        handler.postDelayed(timeout, 15_000L)
         try {
             engine = TextToSpeech(app) { status ->
                 handler.post {
@@ -103,6 +181,12 @@ internal class TextFileReader(context: Context) {
                 }
             }
         } catch (_: Exception) { finish("Text-to-speech unavailable") }
+    }
+
+    private fun setRoute(tts: TextToSpeech, phone: Boolean) {
+        tts.setAudioAttributes(AudioAttributes.Builder()
+            .setUsage(if (phone) AudioAttributes.USAGE_VOICE_COMMUNICATION else AudioAttributes.USAGE_MEDIA)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
     }
 
     private fun configure(tts: TextToSpeech, generation: Long, language: String, phone: Boolean) {
@@ -118,23 +202,26 @@ internal class TextFileReader(context: Context) {
                 finish("Install an offline TTS voice for " + language)
                 return
             }
-            tts.setAudioAttributes(AudioAttributes.Builder()
-                .setUsage(if (phone) AudioAttributes.USAGE_VOICE_COMMUNICATION else AudioAttributes.USAGE_MEDIA)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+            setRoute(tts, phone)
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) = Unit
                 override fun onRangeStart(utteranceId: String?, start: Int, end: Int, frame: Int) {
                     handler.post {
-                        if (generation == token && activeId == utteranceId)
+                        if (generation == token && !paused && activeId == utteranceId) {
                             offset = (utteranceStart + start).coerceIn(utteranceStart, utteranceEnd)
+                            checkpoint()
+                            reportProgress()
+                        }
                     }
                 }
                 override fun onDone(utteranceId: String?) {
                     handler.post {
-                        if (generation == token && activeId == utteranceId) {
+                        if (generation == token && !paused && activeId == utteranceId) {
                             handler.removeCallbacks(timeout)
+                            activeId = null
                             offset = utteranceEnd
                             checkpoint()
+                            reportProgress()
                             next()
                         }
                     }
@@ -144,33 +231,120 @@ internal class TextFileReader(context: Context) {
                 override fun onError(utteranceId: String?, errorCode: Int) = failed(utteranceId)
                 private fun failed(id: String?) {
                     handler.post {
-                        if (generation == token && activeId == id) finish("Text-to-speech failed")
+                        if (generation == token && !paused && activeId == id) finish("Text-to-speech failed")
                     }
                 }
             })
+            ready = true
             next()
         } catch (_: Exception) { finish("Text-to-speech unavailable") }
     }
 
+    /** Read only a small window on a worker; skipped whitespace never fills RAM. */
+    private fun readChunk(doc: Document, position: Int): Chunk? =
+        RandomAccessFile(doc.file, "r").use { input ->
+            var start = position
+            while (start < doc.length) {
+                if (Thread.currentThread().isInterrupted) error("Cancelled")
+                input.seek(start.toLong() * 2L)
+                if (start > 0 && Character.isLowSurrogate(input.readChar())) start--
+                input.seek(start.toLong() * 2L)
+                val count = minOf(4096, doc.length - start)
+                val bytes = ByteArray(count * 2)
+                input.readFully(bytes)
+                val chars = CharArray(count)
+                ByteBuffer.wrap(bytes).asCharBuffer().get(chars)
+                val body = String(chars)
+                val first = body.indexOfFirst { !it.isWhitespace() }
+                if (first < 0) {
+                    start += count
+                    continue
+                }
+                val end = TextReading.chunkEnd(body, first)
+                return@use Chunk(start + first, start + end, body.substring(first, end))
+            }
+            null
+        }
+
     private fun next() {
-        val body = text ?: return
-        val tts = engine ?: return
-        while (offset < body.length && body[offset].isWhitespace()) offset++
-        if (offset >= body.length) { finish(null); return }
-        utteranceStart = offset
-        utteranceEnd = TextReading.chunkEnd(body, offset)
-        val id = "autoclock-text-$token-${++sequence}"
-        activeId = id
-        changed()
+        val doc = document ?: return
+        if (!ready || paused) return
+        if (offset >= doc.length) { finish(null); return }
+        val generation = token
+        val serial = ++readSerial
+        val position = offset
         handler.removeCallbacks(timeout)
-        handler.postDelayed(timeout, 120000)
-        if (tts.speak(body.substring(utteranceStart, utteranceEnd), TextToSpeech.QUEUE_FLUSH, null, id)
-            != TextToSpeech.SUCCESS) finish("Text-to-speech failed")
+        handler.postDelayed(timeout, 15_000L)
+        job = worker.submit {
+            val result = runCatching { readChunk(doc, position) }
+            handler.post {
+                if (generation == token && serial == readSerial && !paused) {
+                    job = null
+                    handler.removeCallbacks(timeout)
+                    if (result.isFailure) finish("TXT read failed")
+                    else {
+                        val chunk = result.getOrNull()
+                        if (chunk == null) finish(null)
+                        else speakChunk(chunk)
+                    }
+                }
+            }
+        }
     }
 
-    private fun checkpoint() {
+    private fun speakChunk(chunk: Chunk) {
+        val tts = engine ?: return
+        offset = chunk.start
+        utteranceStart = chunk.start
+        utteranceEnd = chunk.end
+        val id = "autoclock-text-$token-${++sequence}"
+        activeId = id
+        reportProgress()
+        handler.postDelayed(timeout, 120_000L)
+        try {
+            if (tts.speak(chunk.body, TextToSpeech.QUEUE_FLUSH, null, id) != TextToSpeech.SUCCESS)
+                finish("Text-to-speech failed")
+        } catch (_: Exception) { finish("Text-to-speech failed") }
+    }
+
+    private fun reportProgress() {
+        val doc = document ?: return
+        val percent = TextReading.percent(offset, doc.length)
+        if (percent == lastPercent) return
+        lastPercent = percent
+        changed()
+    }
+
+    private fun checkpoint(force: Boolean = false) {
         val source = url ?: return
-        if (text != null) prefs.edit().putInt(source, offset).apply()
+        if (document == null || offset == lastSaved) return
+        val now = SystemClock.elapsedRealtime()
+        if (!force && now - lastCheckpoint < 45_000L) return
+        prefs.edit().putInt(source, offset).apply()
+        lastSaved = offset
+        lastCheckpoint = now
+    }
+
+    private fun cancelJob() {
+        readSerial++
+        runCatching { loadSignal?.cancel() }
+        loadSignal = null
+        job?.cancel(true)
+        job = null
+        worker.purge()
+        handler.removeCallbacks(timeout)
+    }
+
+    fun pause() {
+        if (paused) return
+        if (!ready) { stop(); return }
+        checkpoint(force = true)
+        paused = true
+        activeId = null
+        cancelJob()
+        finished = null
+        changed = {}
+        runCatching { engine?.stop() }
     }
 
     private fun finish(error: String?) {
@@ -181,11 +355,9 @@ internal class TextFileReader(context: Context) {
     }
 
     fun stop() {
-        checkpoint()
+        checkpoint(force = true)
         token++
-        handler.removeCallbacksAndMessages(null)
-        worker?.interrupt()
-        worker = null
+        cancelJob()
         activeId = null
         finished = null
         changed = {}
@@ -195,8 +367,19 @@ internal class TextFileReader(context: Context) {
             runCatching { old.stop() }
             runCatching { old.shutdown() }
         }
+        document?.file?.delete()
+        document = null
+        ready = false
+        paused = false
         url = null
-        text = null
+        languageChoice = null
         offset = 0
+        lastSaved = -1
+        lastPercent = -1
+    }
+
+    fun close() {
+        stop()
+        worker.shutdownNow()
     }
 }

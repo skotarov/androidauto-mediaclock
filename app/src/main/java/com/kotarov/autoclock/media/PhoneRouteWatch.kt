@@ -21,6 +21,7 @@ internal object PhoneRouteWatch {
                 return null
             }
         } catch (_: Exception) { return null }
+        handler.post { changed() }
         return {
             runCatching { audio.removeOnCommunicationDeviceChangedListener(device) }
             runCatching { audio.removeOnModeChangedListener(mode) }

@@ -56,7 +56,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private var artKey: String? = null
     private var miniKey: String? = null
     private var lastPublished: MediaPublicationKey? = null
-    private data class PlaybackKey(val running: Boolean, val id: String, val seekable: Boolean)
+    private data class PlaybackKey(val running: Boolean, val id: String, val seekable: Boolean, val advancing: Boolean)
     private var lastPlayback: PlaybackKey? = null
     private data class WeatherArtwork(val locality: String?, val forecast: List<ForecastStore.Hour>)
     private var lastWeatherArtwork: WeatherArtwork? = null
@@ -536,6 +536,11 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private fun syncStream() {
+        if (noticePlaying && running) {
+            publishPlaybackState()
+            refreshPositionSubtitle()
+            return
+        }
         val station = if (clientActive && running && !noticePlaying)
             activeSource else null
         val url = station?.url
@@ -568,6 +573,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         handler.removeCallbacks(positionTick)
         // Release the HFP route, but retain an already prepared TXT reader.
         streamPlayer.suspendForNotice()
+        publishPlaybackState()
         noticeAudio.play(sound, body, phoneMode != PhoneAudioMode.OFF,
             speakEnabled = speak) {
             noticePlaying = false
@@ -579,7 +585,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val isRunning = running
         val station = activeSource
         val seek = if (station?.textFile == true) null else streamPlayer.seekState(station?.url)
-        val key = PlaybackKey(isRunning, station?.id ?: CLOCK_ID, seek != null)
+        val advancing = isRunning && seek != null && !noticePlaying
+        val key = PlaybackKey(isRunning, station?.id ?: CLOCK_ID, seek != null, advancing)
         if (lastPlayback == key) return
         val actions = PlaybackStateCompat.ACTION_PLAY or
             PlaybackStateCompat.ACTION_PAUSE or PlaybackStateCompat.ACTION_STOP or
@@ -588,7 +595,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val builder = PlaybackStateCompat.Builder()
             .setState(ClockPlaybackState.forRunning(isRunning),
                 seek?.position?.toLong() ?: PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN,
-                if (isRunning && seek != null && !noticePlaying) 1f else 0f)
+                if (advancing) 1f else 0f)
             .setActions(actions)
         // Leave next/previous slots free: Auto may place these custom actions there.
         if (seek != null) {

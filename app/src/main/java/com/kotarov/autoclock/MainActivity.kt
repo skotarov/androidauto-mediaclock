@@ -705,8 +705,8 @@ class MainActivity : Activity() {
     private fun highlightSelectedSource() {
         val selected = settings().getString(StreamLibrary.KEY_SELECTED, StreamLibrary.ALERT_ID)
         if (selected == highlightedSource) return
-        sourceTitles[highlightedSource]?.setTextColor(ink)
-        sourceTitles[selected]?.setTextColor(accent)
+        highlightedSource?.let { sourceTitles[it]?.setTextColor(ink) }
+        selected?.let { sourceTitles[it]?.setTextColor(accent) }
         highlightedSource = selected
     }
 
@@ -763,7 +763,7 @@ class MainActivity : Activity() {
     private fun editFileName(station: StreamLibrary.Station) {
         val field = android.widget.EditText(this).apply { setSingleLine(true); setText(station.name) }
         val languages = listOf("auto" to "Automatic", "bg" to "Bulgarian", "en" to "English",
-            "ru" to "Russian", "de" to "German", "fr" to "French", "es" to "Spanish")
+            "ru" to "Russian", "uk" to "Ukrainian", "de" to "German", "fr" to "French", "es" to "Spanish")
         val language = android.widget.Spinner(this).apply {
             adapter = android.widget.ArrayAdapter(this@MainActivity,
                 android.R.layout.simple_spinner_dropdown_item, languages.map { it.second })

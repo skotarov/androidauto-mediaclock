@@ -23,6 +23,16 @@ class TextReadingTest {
         assertEquals("en", TextReading.language("Hello", "auto", "bg"))
         assertEquals("fr", TextReading.language("Hello", "fr", "bg"))
     }
+    @Test fun languageUsesCommonWordsRatherThanPhoneLocale() {
+        assertEquals("ru", TextReading.language("Это было так, что никто не пришел.", "auto", "bg"))
+        assertEquals("bg", TextReading.language("Това е човек, който трябва да дойде.", "auto", "ru"))
+        assertEquals("uk", TextReading.language("Українська мова.", "auto", "bg"))
+    }
+    @Test fun chunkBoundaryPreservesSurrogatePairs() {
+        val text = "a".repeat(349) + "😀" + "b".repeat(400)
+        assertEquals(349, TextReading.chunkEnd(text, 0))
+        assertTrue(Character.isHighSurrogate(text[349]))
+    }
     @Test fun percentIsBounded() {
         assertEquals(50, TextReading.percent(10, 20))
         assertEquals(0, TextReading.percent(0, 0))

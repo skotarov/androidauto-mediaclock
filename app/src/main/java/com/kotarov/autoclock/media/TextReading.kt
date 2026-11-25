@@ -2,7 +2,7 @@ package com.kotarov.autoclock.media
 
 /** Small utterances limit repetitions after interruptions and TTS buffer size. */
 internal object TextReading {
-    const val MAX_CHARS = 2_000_000
+    const val MAX_CHARS = 50_000_000
     fun chunkEnd(text: String, start: Int, limit: Int = 350): Int {
         val end = (start + limit).coerceAtMost(text.length)
         if (end == text.length) return end
@@ -20,7 +20,12 @@ internal object TextReading {
         val cyrillic = sample.count { it in '\u0400'..'\u052f' }
         val latin = sample.count { it in 'a'..'z' }
         if (cyrillic > latin) {
+            if (sample.any { it in "іїєґ" }) return "uk"
             if (sample.any { it in "ыэё" }) return "ru"
+            val words = sample.split(Regex("[^\\p{L}]+")).toSet()
+            val bg = words.count { it in setOf("със", "във", "това", "които", "беше", "няма", "какво", "защото", "трябва", "съм") }
+            val ru = words.count { it in setOf("это", "который", "которые", "что", "было", "нет", "потому", "нужно", "если", "такой") }
+            if (bg != ru) return if (bg > ru) "bg" else "ru"
             return if (device in listOf("bg", "ru", "uk", "mk", "sr")) device else "bg"
         }
         return if (device in listOf("en", "de", "fr", "es", "it", "pt")) device else "en"
