@@ -31,6 +31,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         get() = ClockSelectionStore.weatherEnabled(prefs)
     private val cityAnnouncement = CityAnnouncement()
     private val noticeAudio by lazy { NoticeAudio(this) }
+    private val streamPlayer by lazy { CustomStreamPlayer(this) }
+    private var noticePlaying = false
     private var testNotice: CityAnnouncement.Notice? = null
     private val hideTestNotice = Runnable {
         testNotice = null
@@ -87,6 +89,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         if (!clientActive) return@OnSharedPreferenceChangeListener
         if ((key == ClockPreset.KEY_ADD_WEATHER && !running) ||
             key == NoticeAudio.KEY_PHONE_CHANNEL) stopNoticeAudio()
+        if (key == ClockPreset.KEY_ADD_WEATHER || key == NoticeAudio.KEY_PHONE_CHANNEL ||
+            key == CustomStreamPlayer.KEY_ENABLED || key == CustomStreamPlayer.KEY_URL) syncStream()
         if (key == KEY_SHOW_LOCATION) {
             val city = WeatherStore.locality(this)
             cityAnnouncement.show(city, SystemClock.elapsedRealtime())
@@ -212,6 +216,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         if (clientActive) return
         clientActive = true
         NoticeTest.receiver = receiveTest
+        syncStream()
         lastWarningRevision = prefs.getLong(WeatherStore.KEY_WARNING_REV, 0L)
         WeatherStore.start(this, WeatherStore.Client.CAR)
         publishClock()
@@ -231,6 +236,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         handler.removeCallbacks(hideCityTitle)
         queuedWarning = null
         stopNoticeAudio()
+        streamPlayer.stop()
         artworkWorker.cancel()
         requestedArtKey = null
         baseMetadata = null
@@ -281,16 +287,24 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private fun stopNoticeAudio() {
+        noticePlaying = false
         noticeAudio.stop()
     }
 
     private fun setWeatherEnabled(enabled: Boolean) {
-        if (!enabled) stopNoticeAudio()
+        if (!enabled) {
+            stopNoticeAudio()
+            streamPlayer.stop()
+        } else if (running && !noticePlaying) {
+            // Explicit Play retries an ended or failed stream.
+            streamPlayer.stop()
+        }
         ClockSelectionStore.setWeatherEnabled(prefs, enabled)
         // The same preference listener handles phone switches. Publish now
         // for car transport commands, avoiding duplicate queued artwork.
         handler.removeCallbacks(settingsRefresh)
         if (clientActive) {
+            syncStream()
             publishClock()
             publishPlaybackState()
 
@@ -442,9 +456,29 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         }
     }
 
+    private fun syncStream() {
+        val url = if (clientActive && running && !noticePlaying &&
+            prefs.getBoolean(CustomStreamPlayer.KEY_ENABLED, false))
+            prefs.getString(CustomStreamPlayer.KEY_URL, null) else null
+        streamPlayer.sync(url, prefs.getBoolean(NoticeAudio.KEY_PHONE_CHANNEL, false)) { error ->
+            if (clientActive && !noticePlaying && testNotice == null) {
+                testNotice = CityAnnouncement.Notice("ℹ️", error)
+                handler.removeCallbacks(hideTestNotice)
+                handler.postDelayed(hideTestNotice, CityAnnouncement.DURATION_MS)
+                publishClock()
+            }
+        }
+    }
+
     private fun playNotice(body: String) {
+        noticePlaying = true
+        // Release the stream's HFP route before the short alert claims it.
+        streamPlayer.stop()
         val sound = NoticeSound.fromId(prefs.getString(NoticeSound.KEY, null))
-        noticeAudio.play(sound, body, prefs.getBoolean(NoticeAudio.KEY_PHONE_CHANNEL, false))
+        noticeAudio.play(sound, body, prefs.getBoolean(NoticeAudio.KEY_PHONE_CHANNEL, false)) {
+            noticePlaying = false
+            syncStream()
+        }
     }
 
     private fun publishPlaybackState() {
