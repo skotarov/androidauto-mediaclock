@@ -1,0 +1,16 @@
+package com.kotarov.autoclock.media
+
+import android.content.SharedPreferences
+
+enum class PhoneAudioMode(val id: String, val label: String) {
+    OFF("off", "Off"),
+    ALERTS("alerts", "Alerts only"),
+    CONTINUOUS("continuous", "Continuous (test)");
+
+    companion object {
+        const val KEY = "bluetooth_phone_audio_mode"
+        fun read(prefs: SharedPreferences): PhoneAudioMode =
+            entries.firstOrNull { it.id == prefs.getString(KEY, null) }
+                ?: if (prefs.getBoolean(NoticeAudio.KEY_PHONE_CHANNEL, false)) ALERTS else OFF
+    }
+}
