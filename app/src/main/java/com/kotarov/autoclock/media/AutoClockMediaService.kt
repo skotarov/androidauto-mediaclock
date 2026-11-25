@@ -30,8 +30,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private val running: Boolean
         get() = ClockSelectionStore.weatherEnabled(prefs)
     private val cityAnnouncement = CityAnnouncement()
-    private val noticeSound = NoticeSoundPlayer()
-    private val noticeSpeech by lazy { NoticeSpeech(this) }
+    private val noticeAudio by lazy { NoticeAudio(this) }
     private var lastSoundNotice: CityAnnouncement.Notice? = null
     private var clientActive = false
     private var lastWarningRevision = 0L
@@ -74,7 +73,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (!clientActive) return@OnSharedPreferenceChangeListener
-        if (key == ClockPreset.KEY_ADD_WEATHER && !running) stopNoticeAudio()
+        if ((key == ClockPreset.KEY_ADD_WEATHER && !running) ||
+            key == NoticeAudio.KEY_PHONE_CHANNEL) stopNoticeAudio()
         if (key == KEY_SHOW_LOCATION) {
             val city = WeatherStore.locality(this)
             cityAnnouncement.show(city, SystemClock.elapsedRealtime())
@@ -265,8 +265,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private fun stopNoticeAudio() {
-        noticeSound.stop()
-        noticeSpeech.stop()
+        noticeAudio.stop()
     }
 
     private fun setWeatherEnabled(enabled: Boolean) {
@@ -423,9 +422,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             lastSoundNotice = notice
             if (running) {
                 val sound = NoticeSound.fromId(prefs.getString(NoticeSound.KEY, null))
-                noticeSound.play(sound)
-                noticeSpeech.speak(notice.body,
-                    if (sound == NoticeSound.SILENT) 0L else sound.durationMs.toLong() + 250L)
+                noticeAudio.play(sound, notice.body,
+                    prefs.getBoolean(NoticeAudio.KEY_PHONE_CHANNEL, false))
             }
         }
     }
