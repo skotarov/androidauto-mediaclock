@@ -29,6 +29,7 @@ class CustomStreamPlayer(context: Context) {
     private var savedSeek: Pair<String, SeekState>? = null
     private var textLanguage: String? = null
     private var reader: TextFileReader? = null
+    private var savedBookTimeline: Pair<String, TextReading.Timeline>? = null
     private var failed = false
     private var suspendedMedia = false
     private var reading = false
@@ -62,6 +63,18 @@ class CustomStreamPlayer(context: Context) {
 
     fun isPlaying(): Boolean = if (reading) reader?.progress() != null
         else runCatching { player?.isPlaying == true }.getOrDefault(false)
+
+    internal fun bookTimeline(url: String?): TextReading.Timeline? {
+        if (url == null) return null
+        val active = reader?.timeline(url)
+        if (active != null) return active
+        // During a fresh load, wait until the new document length is known.
+        if (requested?.first == url) return null
+        return savedBookTimeline?.takeIf { it.first == url }?.second
+    }
+
+    fun seekTextTo(url: String?, positionMs: Long): Boolean =
+        url != null && reader?.seekEstimatedTime(url, positionMs) == true
 
     fun canSkipText(url: String?): Boolean = url != null && reader?.canSkip(url) == true
 
@@ -201,6 +214,7 @@ class CustomStreamPlayer(context: Context) {
             currentReader.start(url, language, phone, changed) { error ->
                 if (token == generation) {
                     if (error == null) {
+                        savedBookTimeline = null
                         stop()
                         onError("Media ended")
                     } else fail(token, error, onError)
@@ -300,6 +314,9 @@ class CustomStreamPlayer(context: Context) {
     fun stop(keepReader: Boolean = false) {
         generation++
         handler.removeCallbacksAndMessages(null)
+        requested?.first?.let { source ->
+            reader?.timeline(source)?.let { savedBookTimeline = source to it }
+        }
         if (keepReader) reader?.pause() else reader?.stop()
         failed = false
         suspendedMedia = false

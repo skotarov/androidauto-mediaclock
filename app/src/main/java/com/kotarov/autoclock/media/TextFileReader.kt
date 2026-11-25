@@ -49,6 +49,7 @@ internal class TextFileReader(context: Context) {
     private var lastSaved = -1
     private var lastCheckpoint = 0L
     private var lastPercent = -1
+    private var lastProgressReport = Long.MIN_VALUE
     private var changed: () -> Unit = {}
     private var finished: ((String?) -> Unit)? = null
     private val timeout = Runnable { finish("Text-to-speech timed out") }
@@ -60,13 +61,25 @@ internal class TextFileReader(context: Context) {
         "${TextReading.percent(offset, it.length)}%"
     }
 
-    /** Relative speech seek uses text offsets, not a fabricated media duration. */
+    fun timeline(source: String): TextReading.Timeline? = document?.takeIf { ready && url == source }
+        ?.let { TextReading.timeline(offset, it.length) }
+
+    /** Relative speech seek uses text offsets. */
     fun canSkip(source: String): Boolean = ready && document != null && url == source
 
     fun skipBy(source: String, deltaMs: Int): Boolean {
         val doc = document ?: return false
         if (!canSkip(source)) return false
-        val target = TextReading.skipOffset(offset, doc.length, deltaMs)
+        return seekOffset(TextReading.skipOffset(offset, doc.length, deltaMs))
+    }
+
+    fun seekEstimatedTime(source: String, positionMs: Long): Boolean {
+        val doc = document ?: return false
+        if (!canSkip(source)) return false
+        return seekOffset(TextReading.offsetAtTime(positionMs, doc.length))
+    }
+
+    private fun seekOffset(target: Int): Boolean {
         if (target == offset) return true
         activeId = null
         cancelJob()
@@ -74,7 +87,7 @@ internal class TextFileReader(context: Context) {
         offset = target
         checkpoint(force = true)
         lastPercent = -1
-        reportProgress()
+        reportProgress(force = true)
         if (!paused) next(alignWord = true)
         return true
     }
@@ -242,6 +255,7 @@ internal class TextFileReader(context: Context) {
                 }
             })
             ready = true
+            reportProgress(force = true)
             next()
         } catch (_: Exception) { finish("Text-to-speech unavailable") }
     }
@@ -320,11 +334,15 @@ internal class TextFileReader(context: Context) {
         } catch (_: Exception) { finish("Text-to-speech failed") }
     }
 
-    private fun reportProgress() {
+    private fun reportProgress(force: Boolean = false) {
         val doc = document ?: return
         val percent = TextReading.percent(offset, doc.length)
-        if (percent == lastPercent) return
+        val now = SystemClock.elapsedRealtime()
+        // Event driven; do not start a periodic timer. At most one position
+        // callback per second, except explicit seek/start/end.
+        if (!force && lastProgressReport != Long.MIN_VALUE && now - lastProgressReport < 1000L && offset < doc.length) return
         lastPercent = percent
+        lastProgressReport = now
         changed()
     }
 
@@ -389,6 +407,7 @@ internal class TextFileReader(context: Context) {
         offset = 0
         lastSaved = -1
         lastPercent = -1
+        lastProgressReport = Long.MIN_VALUE
     }
 
     fun close() {

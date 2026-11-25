@@ -30,11 +30,28 @@ internal object TextReading {
         }
         return if (device in listOf("en", "de", "fr", "es", "it", "pt")) device else "en"
     }
-    /** About 150 characters per ten seconds at normal speech speed.
-     * Engines/languages vary; keep the native duration unknown. */
+    const val ESTIMATED_CHARS_PER_SECOND = 15L
+
+    /** Estimated speech time is a scale for the exact character fraction.
+     * Long arithmetic supports books exceeding 24 days of estimated speech. */
+    data class Timeline(val positionMs: Long, val durationMs: Long)
+    fun timeline(offset: Int, length: Int): Timeline? {
+        if (length <= 0) return null
+        return Timeline(offset.coerceIn(0, length).toLong() * 1000 / ESTIMATED_CHARS_PER_SECOND,
+            length.toLong() * 1000 / ESTIMATED_CHARS_PER_SECOND)
+    }
+    fun offsetAtTime(positionMs: Long, length: Int): Int {
+        if (length <= 0) return 0
+        val end = timeline(length, length)!!.durationMs
+        if (positionMs >= end) return length
+        return ((positionMs.coerceAtLeast(0) * ESTIMATED_CHARS_PER_SECOND + 500) / 1000)
+            .coerceIn(0, length.toLong()).toInt()
+    }
+
+    /** About 150 characters per ten seconds at normal speech speed. */
     fun skipOffset(offset: Int, length: Int, deltaMs: Int): Int {
         if (length <= 0) return 0
-        val delta = deltaMs.toLong() * 15L / 1000L
+        val delta = deltaMs.toLong() * ESTIMATED_CHARS_PER_SECOND / 1000L
         return (offset.toLong() + delta).coerceIn(0L, length.toLong()).toInt()
     }
 

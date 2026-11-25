@@ -65,7 +65,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private var artKey: String? = null
     private var miniKey: String? = null
     private var lastPublished: MediaPublicationKey? = null
-    private data class PlaybackKey(val running: Boolean, val id: String, val duration: Int?, val advancing: Boolean, val textSkip: Boolean)
+    private data class PlaybackKey(val running: Boolean, val id: String, val duration: Long?, val advancing: Boolean, val textSkip: Boolean, val textPosition: Long?)
     private var lastPlayback: PlaybackKey? = null
     private data class WeatherArtwork(val locality: String?, val forecast: List<ForecastStore.Hour>)
     private var lastWeatherArtwork: WeatherArtwork? = null
@@ -209,9 +209,13 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                     if (match != null && selectSource(match.id)) setWeatherEnabled(true)
                 }
                 override fun onSeekTo(pos: Long) {
-                    if (activeSource?.textFile != true && streamPlayer.seekTo(activeSource?.url, pos)) {
+                    val source = activeSource
+                    val moved = if (source?.textFile == true) streamPlayer.seekTextTo(source.url, pos)
+                        else streamPlayer.seekTo(source?.url, pos)
+                    if (moved) {
                         lastPlayback = null
                         publishPlaybackState()
+                        if (!playMode) refreshPositionSubtitle()
                     }
                 }
                 override fun onPlay() = setWeatherEnabled(true)
@@ -592,10 +596,11 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     private fun publishMediaSubtitle(key: String, caption: String?, position: Int?) {
         val base = baseMetadata ?: return
-        val textProgress = if (running && !noticePlaying && caption == null)
-            streamPlayer.readingProgress(activeSource?.url) else null
+        val book = bookTimeline()
+        val textProgress = if (caption == null && book != null)
+            "${(book.positionMs * 100 / book.durationMs).coerceIn(0, 100)}% · est. time" else null
         val subtitle = MediaPositionSubtitle.text(caption, position) ?: textProgress ?: INVISIBLE_TEXT
-        val duration = mediaSeek()?.duration
+        val duration = book?.durationMs ?: mediaSeek()?.duration?.toLong()
         val publication = MediaPublicationKey(key, INVISIBLE_TEXT, subtitle, activeSource?.id ?: CLOCK_ID, duration)
         if (publication == lastPublished) return
         session.setMetadata(MediaMetadataCompat.Builder(base)
@@ -664,7 +669,10 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         }
     }
 
-    /** TXT progress is measured in characters, not milliseconds. Never invent a duration. */
+    /** Audio has real milliseconds; book timeline uses a labelled speech-time estimate. */
+    private fun bookTimeline(): TextReading.Timeline? = activeSource?.takeIf { it.textFile }
+        ?.let { streamPlayer.bookTimeline(it.url) }
+
     private fun mediaSeek(): CustomStreamPlayer.SeekState? = activeSource?.takeUnless { it.textFile }
         ?.let { streamPlayer.seekState(it.url) }
 
@@ -675,16 +683,18 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val seek = mediaSeek()
         val advancing = isRunning && seek != null && !noticePlaying && streamPlayer.isPlaying()
         val textSkip = station?.textFile == true && streamPlayer.canSkipText(station.url)
-        val key = PlaybackKey(isRunning, station?.id ?: CLOCK_ID, seek?.duration, advancing, textSkip)
+        val book = bookTimeline()
+        val duration = book?.durationMs ?: seek?.duration?.toLong()
+        val key = PlaybackKey(isRunning, station?.id ?: CLOCK_ID, duration, advancing, textSkip, book?.positionMs)
         if (lastPlayback == key) return
         var actions = PlaybackStateCompat.ACTION_PLAY or
             PlaybackStateCompat.ACTION_PAUSE or PlaybackStateCompat.ACTION_STOP or
             PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID or
             PlaybackStateCompat.ACTION_PREPARE_FROM_MEDIA_ID
-        if (seek != null) actions = actions or PlaybackStateCompat.ACTION_SEEK_TO
+        if (seek != null || textSkip) actions = actions or PlaybackStateCompat.ACTION_SEEK_TO
         val builder = PlaybackStateCompat.Builder()
             .setState(ClockPlaybackState.forRunning(isRunning),
-                seek?.position?.toLong() ?: PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN,
+                book?.positionMs ?: seek?.position?.toLong() ?: PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN,
                 if (advancing) 1f else 0f)
             .setActions(actions)
         // Leave next/previous slots free: Auto may place these custom actions there.
@@ -697,10 +707,10 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private var playMetadataSource: StreamLibrary.Station? = null
-    private var playMetadataDuration: Int? = null
+    private var playMetadataDuration: Long? = null
     private fun publishPlayMetadata() {
         val source = activeSource
-        val duration = mediaSeek()?.duration
+        val duration = bookTimeline()?.durationMs ?: mediaSeek()?.duration?.toLong()
         if (source == playMetadataSource && duration == playMetadataDuration && session.controller.metadata != null) return
         playMetadataSource = source
         playMetadataDuration = duration
@@ -710,7 +720,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 .putString(MediaMetadataCompat.METADATA_KEY_TITLE, source.name)
                 .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, source.name)
                 .putString(MediaMetadataCompat.METADATA_KEY_ARTIST,
-                    if (source.textFile) "Text reading" else if (source.local) "Local audio" else "Audio stream")
+                    if (source.textFile) "Text reading · estimated time" else if (source.local) "Local audio" else "Audio stream")
                 .putBitmap(MediaMetadataCompat.METADATA_KEY_ART,
                     source.bitmap() ?: sourceIcon(if (source.textFile) R.drawable.ic_source_text
                         else if (source.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast))
@@ -814,9 +824,11 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         var actions = PlaybackStateCompat.ACTION_PLAY or PlaybackStateCompat.ACTION_PAUSE or
             PlaybackStateCompat.ACTION_STOP or PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID or
             PlaybackStateCompat.ACTION_PREPARE_FROM_MEDIA_ID or PlaybackStateCompat.ACTION_PLAY_FROM_SEARCH
-        if (seek != null) actions = actions or PlaybackStateCompat.ACTION_SEEK_TO
+        val book = bookTimeline()
+        val textSkip = source?.textFile == true && streamPlayer.canSkipText(source.url)
+        if (seek != null || textSkip) actions = actions or PlaybackStateCompat.ACTION_SEEK_TO
         val builder = PlaybackStateCompat.Builder().setActions(actions)
-            .setState(state, seek?.position?.toLong() ?: PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN,
+            .setState(state, book?.positionMs ?: seek?.position?.toLong() ?: PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN,
                 if (state == PlaybackStateCompat.STATE_PLAYING && seek != null) 1f else 0f)
         mediaError?.let { builder.setErrorMessage(PlaybackStateCompat.ERROR_CODE_APP_ERROR, it) }
         if (seek != null || (source?.textFile == true && streamPlayer.canSkipText(source.url))) {
