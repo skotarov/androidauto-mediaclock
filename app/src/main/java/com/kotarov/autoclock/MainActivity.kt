@@ -2,6 +2,12 @@ package com.kotarov.autoclock
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
+import android.content.ComponentName
+import android.content.ClipData
+import android.net.Uri
+import android.view.DragEvent
+import android.support.v4.media.MediaBrowserCompat
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -52,10 +58,14 @@ class MainActivity : Activity() {
     private lateinit var digitalCard: LinearLayout
     private lateinit var analogImage: ImageView
     private lateinit var digitalImage: ImageView
-    private lateinit var analogLabel: TextView
-    private lateinit var digitalLabel: TextView
-    private lateinit var weatherToggle: Switch
-    private var syncingWeatherToggle = false
+    private lateinit var weatherButton: android.widget.ImageButton
+    private var phoneBrowser: MediaBrowserCompat? = null
+    private val previewTick = object : Runnable {
+        override fun run() {
+            updatePreviewTiles()
+            messageHandler.postDelayed(this, 60000L - System.currentTimeMillis() % 60000L)
+        }
+    }
     private val soundPreview by lazy { NoticeSoundPlayer() }
     private val testAudio by lazy { NoticeAudio(this) }
     private lateinit var streamRows: LinearLayout
@@ -125,16 +135,14 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, 0, 0, dp(6))
         }
-        val (analog, analogPreview, analogTitle) =
+        val (analog, analogPreview) =
             createChoiceCard("Analog", ClockFamily.ANALOG)
-        val (digital, digitalPreview, digitalTitle) =
+        val (digital, digitalPreview) =
             createChoiceCard("Digital", ClockFamily.DIGITAL)
         analogCard = analog
         digitalCard = digital
         analogImage = analogPreview
         digitalImage = digitalPreview
-        analogLabel = analogTitle
-        digitalLabel = digitalTitle
         choices.addView(analogCard,
             LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
                 marginEnd = dp(6)
@@ -144,6 +152,30 @@ class MainActivity : Activity() {
                 marginStart = dp(6)
             })
         root.addView(choices)
+        val weatherRow = LinearLayout(this).apply {
+            gravity = android.view.Gravity.CENTER
+            orientation = LinearLayout.HORIZONTAL
+            addView(text("Weather", 17f, 0), LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { marginEnd = dp(12) })
+        }
+        weatherButton = android.widget.ImageButton(this).apply {
+            background = GradientDrawable().apply {
+                cornerRadius = dp(32).toFloat()
+                setColor(Color.rgb(225, 228, 232))
+                setStroke(dp(2), Color.rgb(120, 126, 135))
+            }
+            setColorFilter(Color.rgb(47, 52, 60))
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            setOnClickListener {
+                val p = settings()
+                ClockSelectionStore.setWeatherEnabled(p, !ClockSelectionStore.weatherEnabled(p))
+                syncWeatherToggle()
+            }
+        }
+        weatherRow.addView(weatherButton, LinearLayout.LayoutParams(dp(108), dp(52)))
+        addSpaced(root, weatherRow)
+        syncWeatherToggle()
 
         // Directly BELOW the two thumbnails, with no explanatory widgets.
         root.addView(checkOption(
@@ -157,16 +189,6 @@ class MainActivity : Activity() {
             updatePreviewTiles()
         })
 
-        root.addView(checkOption(
-            "Weather",
-            ClockSelectionStore.weatherEnabled(prefs),
-            captureToggle = { weatherToggle = it }
-        ) { checked ->
-            if (!syncingWeatherToggle) {
-                ClockSelectionStore.setWeatherEnabled(prefs, checked)
-                updatePreviewTiles()
-            }
-        })
         updatePreviewTiles()
 
         root.addView(text("Size", 18f, dp(5)))
@@ -205,8 +227,9 @@ class MainActivity : Activity() {
 
         if (android.os.Build.VERSION.SDK_INT >= 31) {
             root.addView(checkOption(
-                "Използвай телефона на колата",
-                PhoneAudioMode.read(prefs) != PhoneAudioMode.OFF
+                "Use car phone audio",
+                PhoneAudioMode.read(prefs) != PhoneAudioMode.OFF,
+                bluetoothIcon = true
             ) { checked ->
                 testAudio.stop()
                 prefs.edit().putString(PhoneAudioMode.KEY,
@@ -214,7 +237,7 @@ class MainActivity : Activity() {
             })
         }
 
-        val messages = settingsGroup(root, "Съобщения")
+        val messages = settingsGroup(root, "Messages")
         val soundButton = Button(this).apply {
             isAllCaps = false
             text = "Chime: " + NoticeSound.fromId(prefs.getString(NoticeSound.KEY, null)).label
@@ -236,13 +259,13 @@ class MainActivity : Activity() {
             }
         }
         addSpaced(messages, soundButton)
-        messages.addView(checkOption("Изговаряй съобщенията",
+        messages.addView(checkOption("Speak messages",
             prefs.getBoolean(NoticeAudio.KEY_SPEAK, true)) { checked ->
             testAudio.stop()
             prefs.edit().putBoolean(NoticeAudio.KEY_SPEAK, checked).apply()
         })
         addSpaced(messages, Button(this).apply {
-            text = "Тест"
+            text = "Test"
             isAllCaps = false
             setOnClickListener { showSoundTest() }
         })
@@ -252,12 +275,19 @@ class MainActivity : Activity() {
         }
         messages.addView(locationMessage)
 
-        val streams = settingsGroup(root, "Стрийм")
-        addSpaced(streams, Button(this).apply {
-            text = "+ Добави"
+        val streams = settingsGroup(root, "Streams")
+        val addRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        addRow.addView(Button(this).apply {
+            text = "Add stream"
             isAllCaps = false
             setOnClickListener { editStream(null) }
-        })
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        addRow.addView(Button(this).apply {
+            text = "Add file"
+            isAllCaps = false
+            setOnClickListener { pickFile() }
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(8) })
+        addSpaced(streams, addRow)
         streamRows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         streams.addView(streamRows)
         renderStreams()
@@ -297,10 +327,17 @@ class MainActivity : Activity() {
         settings().registerOnSharedPreferenceChangeListener(weatherPreferenceListener)
         syncWeatherToggle()
         renderStreams()
+        phoneBrowser = MediaBrowserCompat(this, ComponentName(this, AutoClockMediaService::class.java),
+            object : MediaBrowserCompat.ConnectionCallback() {}, null).also { it.connect() }
+        messageHandler.removeCallbacks(previewTick)
+        messageHandler.post(previewTick)
     }
 
     override fun onStop() {
         messageHandler.removeCallbacks(hideLocationMessage)
+        messageHandler.removeCallbacks(previewTick)
+        phoneBrowser?.disconnect()
+        phoneBrowser = null
         if (::locationMessage.isInitialized) locationMessage.visibility = View.GONE
         WeatherStore.stop(WeatherStore.Client.PHONE)
         settings().unregisterOnSharedPreferenceChangeListener(weatherPreferenceListener)
@@ -311,14 +348,12 @@ class MainActivity : Activity() {
     }
 
     private fun syncWeatherToggle() {
-        if (!::weatherToggle.isInitialized) return
-        val checked = ClockSelectionStore.weatherEnabled(settings())
-        if (weatherToggle.isChecked != checked) {
-            syncingWeatherToggle = true
-            weatherToggle.isChecked = checked
-            syncingWeatherToggle = false
-            updatePreviewTiles()
-        }
+        if (!::weatherButton.isInitialized) return
+        val playing = ClockSelectionStore.weatherEnabled(settings())
+        weatherButton.setImageResource(if (playing) android.R.drawable.ic_media_pause
+            else android.R.drawable.ic_media_play)
+        weatherButton.contentDescription = if (playing) "Pause" else "Play"
+        updatePreviewTiles()
     }
 
     override fun onResume() {
@@ -339,7 +374,7 @@ class MainActivity : Activity() {
         getSharedPreferences(AutoClockMediaService.PREFERENCES, Context.MODE_PRIVATE)
 
     private data class Choice(
-        val container: LinearLayout, val image: ImageView, val title: TextView
+        val container: LinearLayout, val image: ImageView
     )
 
     private fun createChoiceCard(label: String, family: ClockFamily): Choice {
@@ -355,10 +390,6 @@ class MainActivity : Activity() {
             setPadding(dp(4), dp(4), dp(4), dp(4))
             addView(image)
         }
-        val caption = text(label, 17f, 0).apply {
-            gravity = android.view.Gravity.CENTER
-            setPadding(0, dp(10), 0, dp(8))
-        }
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             isClickable = true
@@ -367,13 +398,12 @@ class MainActivity : Activity() {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ))
-            addView(caption)
             setOnClickListener {
                 settings().edit().putString(ClockPreset.KEY_FAMILY, family.id).apply()
                 updatePreviewTiles()
             }
         }
-        return Choice(card, image, caption)
+        return Choice(card, image)
     }
 
     private fun updatePreviewTiles() {
@@ -427,12 +457,12 @@ class MainActivity : Activity() {
         }
 
         val selected = ClockSelectionStore.current(prefs).family
-        updateSelectionStyle(analogCard, analogLabel, selected == ClockFamily.ANALOG)
-        updateSelectionStyle(digitalCard, digitalLabel, selected == ClockFamily.DIGITAL)
+        updateSelectionStyle(analogCard, selected == ClockFamily.ANALOG)
+        updateSelectionStyle(digitalCard, selected == ClockFamily.DIGITAL)
     }
 
     private fun updateSelectionStyle(
-        card: LinearLayout, title: TextView, selected: Boolean
+        card: LinearLayout, selected: Boolean
     ) {
         val square = card.getChildAt(0)
         square.background = GradientDrawable().apply {
@@ -442,7 +472,6 @@ class MainActivity : Activity() {
             setStroke(dp(if (selected) 3 else 1), if (selected) accent else faint)
         }
         card.isSelected = selected
-        title.setTextColor(if (selected) accent else ink)
     }
 
     private fun addSpaced(parent: LinearLayout, view: View) {
@@ -471,25 +500,71 @@ class MainActivity : Activity() {
     private fun renderStreams() {
         if (!::streamRows.isInitialized) return
         streamRows.removeAllViews()
-        StreamLibrary.list(settings()).forEach { station ->
+        val prefs = settings()
+        val selected = prefs.getString(StreamLibrary.KEY_SELECTED, StreamLibrary.ALERT_ID)
+        val alert = text("Alert only", 16f, dp(8)).apply {
+            setTextColor(if (selected == StreamLibrary.ALERT_ID) accent else ink)
+            setPadding(dp(8), dp(12), dp(8), dp(12))
+            setOnClickListener { selectPhoneSource(StreamLibrary.ALERT_ID) }
+        }
+        addSpaced(streamRows, alert)
+        StreamLibrary.list(prefs).forEach { station ->
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = android.view.Gravity.CENTER_VERTICAL
                 setPadding(0, dp(6), 0, dp(6))
+                setOnDragListener { view, event ->
+                    when (event.action) {
+                        DragEvent.ACTION_DRAG_STARTED -> event.localState is String
+                        DragEvent.ACTION_DRAG_ENTERED -> { view.alpha = 0.55f; true }
+                        DragEvent.ACTION_DRAG_EXITED -> { view.alpha = 1f; true }
+                        DragEvent.ACTION_DROP -> {
+                            view.alpha = 1f
+                            val source = event.localState as? String
+                            if (source != null) {
+                                val p = settings()
+                                val next = StreamLibrary.move(StreamLibrary.list(p), source, station.id,
+                                    event.y > view.height / 2f)
+                                // Delay the redraw until Android finishes drag dispatch.
+                                messageHandler.post { StreamLibrary.save(p, next); renderStreams() }
+                            }
+                            true
+                        }
+                        DragEvent.ACTION_DRAG_ENDED -> { view.alpha = 1f; true }
+                        else -> true
+                    }
+                }
             }
+            row.addView(text("☰", 23f, 0).apply {
+                gravity = android.view.Gravity.CENTER
+                contentDescription = "Drag to reorder " + station.name
+                setOnLongClickListener {
+                    val data = ClipData.newPlainText("source", "")
+                    if (android.os.Build.VERSION.SDK_INT >= 24)
+                        startDragAndDrop(data, View.DragShadowBuilder(row), station.id, 0)
+                    else {
+                        @Suppress("DEPRECATION")
+                        startDrag(data, View.DragShadowBuilder(row), station.id, 0)
+                    }
+                    true
+                }
+            }, LinearLayout.LayoutParams(dp(34), dp(48)))
             row.addView(ImageView(this).apply {
                 val icon = station.bitmap()
                 if (icon != null) setImageBitmap(icon)
                 else setImageResource(android.R.drawable.ic_media_play)
                 contentDescription = station.name
             }, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginEnd = dp(8) })
-            row.addView(text(station.name, 16f, 0), LinearLayout.LayoutParams(
+            row.addView(text(station.name, 16f, 0).apply {
+                setTextColor(if (selected == station.id) accent else ink)
+                setOnClickListener { selectPhoneSource(station.id) }
+            }, LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             row.addView(Button(this).apply {
                 text = "Edit"
                 isAllCaps = false
                 minWidth = 0; minimumWidth = 0
-                setOnClickListener { editStream(station) }
+                setOnClickListener { if (station.local) editFileName(station) else editStream(station) }
             })
             row.addView(Button(this).apply {
                 text = "Delete"
@@ -497,17 +572,83 @@ class MainActivity : Activity() {
                 minWidth = 0; minimumWidth = 0
                 setOnClickListener {
                     AlertDialog.Builder(this@MainActivity).setTitle(station.name)
-                        .setMessage("Delete stream?")
+                        .setMessage(if (station.local) "Remove file from list?" else "Delete stream?")
                         .setNegativeButton("Cancel", null)
                         .setPositiveButton("Delete") { _, _ ->
                             val prefs = settings()
-                            StreamLibrary.save(prefs, StreamLibrary.list(prefs).filterNot { it.id == station.id })
+                            val remaining = StreamLibrary.list(prefs).filterNot { it.id == station.id }
+                            StreamLibrary.save(prefs, remaining)
+                            if (station.local && remaining.none { it.url == station.url }) {
+                                runCatching { contentResolver.releasePersistableUriPermission(Uri.parse(station.url), Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                            }
                             renderStreams()
                         }.show()
                 }
             })
             addSpaced(streamRows, row)
         }
+    }
+
+    private fun selectPhoneSource(id: String) {
+        val prefs = settings()
+        prefs.edit().putString(StreamLibrary.KEY_SELECTED, id).apply()
+        ClockSelectionStore.setWeatherEnabled(prefs, true)
+        syncWeatherToggle()
+        renderStreams()
+    }
+
+    private fun pickFile() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("audio/*", "video/*"))
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        }
+        runCatching { startActivityForResult(intent, FILE_REQUEST) }.onFailure {
+            android.widget.Toast.makeText(this, "File picker unavailable", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    @Deprecated("Android document picker callback")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != FILE_REQUEST || resultCode != RESULT_OK) return
+        val uri = data?.data ?: return
+        if (!CustomStreamPlayer.validLocal(uri.toString())) return
+        val mime = contentResolver.getType(uri)
+        if (mime != null && !mime.startsWith("audio/") && !mime.startsWith("video/") &&
+            mime != "application/octet-stream") {
+            android.widget.Toast.makeText(this, "Select an audio or video file", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        val granted = runCatching {
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }.isSuccess
+        if (!granted) {
+            android.widget.Toast.makeText(this, "Persistent file access unavailable", android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
+        val name = runCatching {
+            contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
+                null, null, null)?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+        }.getOrNull() ?: "Local file"
+        val prefs = settings()
+        val station = StreamLibrary.newFile(uri.toString(), name)
+        StreamLibrary.save(prefs, StreamLibrary.list(prefs) + station)
+        renderStreams()
+    }
+
+    private fun editFileName(station: StreamLibrary.Station) {
+        val field = android.widget.EditText(this).apply { setSingleLine(true); setText(station.name) }
+        AlertDialog.Builder(this).setTitle("Edit file").setView(field)
+            .setNegativeButton("Cancel", null).setPositiveButton("Save") { _, _ ->
+                val name = field.text.toString().trim().take(128).ifBlank { station.name }
+                val prefs = settings()
+                StreamLibrary.save(prefs, StreamLibrary.list(prefs).map {
+                    if (it.id == station.id) it.copy(name = name) else it
+                })
+                renderStreams()
+            }.show()
     }
 
     private fun editStream(existing: StreamLibrary.Station?) {
@@ -528,7 +669,7 @@ class MainActivity : Activity() {
         }
         fields.addView(url)
         fields.addView(name)
-        val dialog = AlertDialog.Builder(this).setTitle(if (existing == null) "Добави стрийм" else "Edit stream")
+        val dialog = AlertDialog.Builder(this).setTitle(if (existing == null) "Add stream" else "Edit stream")
             .setView(fields).setNegativeButton("Cancel", null).setPositiveButton("Save", null).create()
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
@@ -624,6 +765,7 @@ class MainActivity : Activity() {
     private fun checkOption(
         title: String, checked: Boolean,
         captureToggle: ((Switch) -> Unit)? = null,
+        bluetoothIcon: Boolean = false,
         onChange: (Boolean) -> Unit
     ): LinearLayout {
         val toggle = Switch(this).apply {
@@ -648,6 +790,10 @@ class MainActivity : Activity() {
             gravity = android.view.Gravity.CENTER_VERTICAL
             minimumHeight = dp(60)
             setPadding(0, dp(10), 0, dp(10))
+            if (bluetoothIcon) addView(ImageView(this@MainActivity).apply {
+                setImageResource(com.kotarov.autoclock.R.drawable.ic_bluetooth_audio)
+                contentDescription = null
+            }, LinearLayout.LayoutParams(dp(24), dp(24)).apply { marginEnd = dp(10) })
             val label = text(title, 16f, 0).apply {
                 gravity = android.view.Gravity.CENTER_VERTICAL
                 setPadding(0, 0, dp(12), 0)
@@ -706,5 +852,8 @@ class MainActivity : Activity() {
     private fun dp(value: Int): Int =
         (value * resources.displayMetrics.density).toInt()
 
-    companion object { private const val LOCATION_REQUEST = 7401 }
+    companion object {
+        private const val LOCATION_REQUEST = 7401
+        private const val FILE_REQUEST = 7402
+    }
 }
