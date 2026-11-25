@@ -11,6 +11,11 @@ object WeatherWarning {
         else -> null
     }
 
+    fun testMessages(): List<String> {
+        val types = listOf(95, 66, 75, 65, 45).mapNotNull { anomaly(it) }
+        return types + types.map { "Within 1h: $it" } + "Precipitation: 80%"
+    }
+
     fun message(hours: List<ForecastStore.Hour>, now: Long, currentCode: Int?): String? {
         anomaly(currentCode)?.let { return it }
         // Open-Meteo precipitation probability describes the preceding hour.
