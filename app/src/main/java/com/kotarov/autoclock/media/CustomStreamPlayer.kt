@@ -14,6 +14,7 @@ import java.net.URI
 
 /** One user-selected direct HTTPS stream. No idle player or persistent audio route. */
 class CustomStreamPlayer(context: Context) {
+    private val app = context.applicationContext
     private val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val handler = Handler(Looper.getMainLooper())
     private var player: MediaPlayer? = null
@@ -22,10 +23,11 @@ class CustomStreamPlayer(context: Context) {
     private var ownsMode = false
     private var ownsDevice = false
     private var requested: Triple<String, Boolean, Boolean>? = null
+    private var localResume: Pair<String, Int>? = null
 
     fun sync(url: String?, phone: Boolean, sharedPhoneChannel: Boolean = false,
              onError: (String) -> Unit) {
-        val next = url?.takeIf { valid(it) }?.let { Triple(it, phone, sharedPhoneChannel) }
+        val next = url?.takeIf { valid(it) || validLocal(it) }?.let { Triple(it, phone, sharedPhoneChannel) }
         if (requested == next) return
         stop()
         if (next == null) return
@@ -120,15 +122,27 @@ class CustomStreamPlayer(context: Context) {
             media.setOnPreparedListener {
                 if (token == generation && player === it) {
                     handler.removeCallbacks(timeout)
-                    runCatching { it.start() }.onFailure { fail(token, "Stream playback failed", onError) }
+                    runCatching {
+                        val position = localResume?.takeIf { p -> p.first == url }?.second ?: 0
+                        if (validLocal(url) && position > 0 && position < it.duration) it.seekTo(position)
+                        it.start()
+                    }.onFailure { fail(token, "Playback failed", onError) }
                 }
             }
             media.setOnErrorListener { _, _, _ ->
                 fail(token, "Stream unavailable", onError)
                 true
             }
-            media.setOnCompletionListener { fail(token, "Stream ended", onError) }
-            media.setDataSource(url)
+            media.setOnCompletionListener {
+                if (token == generation && validLocal(url)) {
+                    localResume = null
+                    requested = null
+                    stop()
+                    onError("File ended")
+                } else fail(token, "Stream ended", onError)
+            }
+            if (validLocal(url)) media.setDataSource(app, android.net.Uri.parse(url))
+            else media.setDataSource(url)
             handler.postDelayed(timeout, 20000L)
             media.prepareAsync()
         } catch (e: Exception) {
@@ -151,8 +165,14 @@ class CustomStreamPlayer(context: Context) {
     fun stop() {
         generation++
         handler.removeCallbacksAndMessages(null)
+        val previous = requested
         requested = null
         val old = player
+        if (old != null && previous != null && validLocal(previous.first)) {
+            runCatching { old.currentPosition }.getOrNull()?.takeIf { it > 0 }?.let {
+                localResume = previous.first to it
+            }
+        }
         player = null
         if (old != null) runCatching { old.release() }
         releaseRoute()
@@ -169,6 +189,10 @@ class CustomStreamPlayer(context: Context) {
     companion object {
         const val KEY_ENABLED = "custom_stream_enabled"
         const val KEY_URL = "custom_stream_url"
+        fun validLocal(url: String): Boolean = runCatching {
+            val uri = android.net.Uri.parse(url)
+            uri.scheme == "content" && !uri.authority.isNullOrBlank()
+        }.getOrDefault(false)
         fun valid(url: String): Boolean = runCatching {
             val uri = URI(url)
             uri.scheme.equals("https", true) && !uri.host.isNullOrBlank() &&
