@@ -1,0 +1,7 @@
+# Play release prerequisites
+
+- API 36, AGP 8.10.1, Gradle 8.11.1. Verify physical Android Auto and Android 16 phone settings.
+- The debug beta is non-commercial only. Release builds require `AUTO_CLOCK_FORECAST_ENDPOINT` (or Gradle property `autoClockForecastEndpoint`) containing a licensed HTTPS gateway URL, with no query string. It must return the Open-Meteo-compatible JSON used by ForecastStore, including current and hourly data and unix timestamps. Keep commercial API credentials on the gateway server, not in the APK. Provisioning and licensing the gateway is not completed. No free API fallback is provided for release.
+- Finalize PRIVACY.md with direct developer privacy contact, actual gateway operator, logging/retention, and confirm the publicly accessible link in Play Console.
+- Data safety preparation: approximate location is transmitted off device for functionality when authorized; answer collection yes, optional, encrypted in transit. Determine sharing and ephemeral processing after confirming actual provider terms, retention and service-provider relationship. Review IP logs and system geocoding. No accounts or advertising/analytics SDK in current code. Local cache can be removed by clearing app storage. Do not claim no data collected.
+- Confirm Play signing, release AAB, and Android Auto category eligibility separately. The current media architecture is unchanged and does not guarantee Play approval.
