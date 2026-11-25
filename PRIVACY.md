@@ -20,6 +20,8 @@ An optional car phone audio setting selects a connected hands-free output during
 
 Custom streams are optional. Entered HTTPS audio URLs, station names and small icons are stored locally. On saving a station, the app attempts to read its stream name and same-host icon. The phone connects directly to the selected provider, which receives normal network information such as IP address. Audio is not relayed through an Auto Clock server. When using Bluetooth phone audio, an on-device silent PCM audio buffer is looped to keep the route active during alerts or active phone-channel stream playback. Speech is synthesized directly without temporary audio files. The silent buffer does not contain recorded audio.
 
+User-selected local audio/video documents are opened through Android's system document picker. The app stores the selected document URI, display name and read permission locally, without copying or uploading the file. Removing the last list entry for a document releases its saved access permission. The phone settings can connect to the same playback service while open.
+
 ## Controls and retention
 
 Revoke location permission in Android Settings to stop new location access. Previously cached data may remain until refreshed or deleted. Clear app storage or uninstall to delete local settings and cached data. Android cloud backup is disabled for this app version. HTTPS is used for weather requests. Third-party retention is governed by provider policies.
