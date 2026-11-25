@@ -33,6 +33,23 @@ object TravelRefreshPolicy {
     fun localityCheckpointDue(nameChanged: Boolean, distanceKm: Double): Boolean =
         nameChanged || distanceKm >= WEATHER_DISTANCE_KM
 
+    /** Keep the first valid name, but confirm a changed name on a second lookup.
+     * One inconsistent coarse-location/geocoder result is not a move. */
+    class LocalityConfirmation {
+        private var candidate: String? = null
+        val pending: Boolean get() = candidate != null
+        fun reset() { candidate = null }
+        fun accept(saved: String?, next: String): Boolean {
+            if (saved == null || next.equals(saved, ignoreCase = true) ||
+                next.equals(candidate, ignoreCase = true)) {
+                reset()
+                return true
+            }
+            candidate = next
+            return false
+        }
+    }
+
     fun localityDue(now: Long, lastAttempt: Long?, distanceKm: Double,
                     hasName: Boolean, lastFailed: Boolean): Boolean {
         if (lastAttempt != null && now - lastAttempt <

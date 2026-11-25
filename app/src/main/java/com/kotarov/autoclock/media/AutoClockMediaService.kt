@@ -104,12 +104,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             publishClock()
         }
         if (key == NoticeAudio.KEY_SPEAK) { stopNoticeAudio(); syncStream() }
-        if (key == KEY_SHOW_LOCATION) {
-            val city = WeatherStore.locality(this)
-            cityAnnouncement.show(city, SystemClock.elapsedRealtime())
-            scheduleCityTitleHide()
-            publishClock()
-        } else if (key == ClockPreset.KEY_FAMILY ||
+        if (key == ClockPreset.KEY_FAMILY ||
             key == ClockPreset.KEY_ADD_WEATHER ||
             key == KEY_LAYOUT || key == ClockTheme.KEY ||
             key == "weather_cached_mode" || key == "weather_station_label" ||
@@ -260,6 +255,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         NoticeTest.receiver = receiveTest
         syncStream()
         lastWarningRevision = prefs.getLong(WeatherStore.KEY_WARNING_REV, 0L)
+        cityAnnouncement.reset(WeatherStore.locality(this))
         WeatherStore.start(this, WeatherStore.Client.CAR)
         publishClock()
         publishPlaybackState()

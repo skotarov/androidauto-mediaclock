@@ -49,6 +49,7 @@ object WeatherStore {
     private var lastLocalityAttempt: Long? = null
     private var lastLocalityPoint: TravelRefreshPolicy.Point? = null
     private var localityFailed = false
+    private val localityConfirmation = TravelRefreshPolicy.LocalityConfirmation()
     private var stationReportsAt: Long? = null
     private var stationReports: String? = null
 
@@ -155,6 +156,7 @@ object WeatherStore {
         if (first) {
             generation++
             latest = null
+            localityConfirmation.reset()
             lastFallback = null
             val prefs = app!!.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             val lat = Double.fromBits(prefs.getLong(KEY_LAT, Double.NaN.toBits()))
@@ -252,7 +254,7 @@ object WeatherStore {
         val now = SystemClock.elapsedRealtime()
         if (localityThread == null && TravelRefreshPolicy.localityDue(now,
                 lastLocalityAttempt, point.distanceFrom(lastLocalityPoint),
-                locality(context) != null, localityFailed)) {
+                locality(context) != null && !localityConfirmation.pending, localityFailed)) {
             lastLocalityAttempt = now
             val token = generation
             localityThread = Thread({
@@ -262,22 +264,26 @@ object WeatherStore {
                     if (token == generation && clients.isNotEmpty() &&
                         WeatherLocation.permitted(context)) {
                         localityFailed = name == null
+                        if (name == null) localityConfirmation.reset()
                         if (name != null) {
-                            lastLocalityPoint = point
                             val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                            val changed = name != prefs.getString(KEY_LOCALITY, null)
-                            val savedLat = Double.fromBits(prefs.getLong(KEY_LAT, Double.NaN.toBits()))
-                            val savedLon = Double.fromBits(prefs.getLong(KEY_LON, Double.NaN.toBits()))
-                            val savedPoint = if (savedLat.isFinite() && savedLon.isFinite())
-                                TravelRefreshPolicy.Point(savedLat, savedLon) else null
-                            if (TravelRefreshPolicy.localityCheckpointDue(changed, point.distanceFrom(savedPoint))) {
-                                val edit = prefs.edit().putLong(KEY_LAT, point.lat.toBits())
-                                    .putLong(KEY_LON, point.lon.toBits())
-                                if (changed) {
-                                    edit.putString(KEY_LOCALITY, name)
-                                        .putLong("weather_locality_revision_v68", System.currentTimeMillis())
+                            val savedName = prefs.getString(KEY_LOCALITY, null)
+                            val changed = !name.equals(savedName, ignoreCase = true)
+                            if (localityConfirmation.accept(savedName, name)) {
+                                lastLocalityPoint = point
+                                val savedLat = Double.fromBits(prefs.getLong(KEY_LAT, Double.NaN.toBits()))
+                                val savedLon = Double.fromBits(prefs.getLong(KEY_LON, Double.NaN.toBits()))
+                                val savedPoint = if (savedLat.isFinite() && savedLon.isFinite())
+                                    TravelRefreshPolicy.Point(savedLat, savedLon) else null
+                                if (TravelRefreshPolicy.localityCheckpointDue(changed, point.distanceFrom(savedPoint))) {
+                                    val edit = prefs.edit().putLong(KEY_LAT, point.lat.toBits())
+                                        .putLong(KEY_LON, point.lon.toBits())
+                                    if (changed) {
+                                        edit.putString(KEY_LOCALITY, name)
+                                            .putLong("weather_locality_revision_v68", System.currentTimeMillis())
+                                    }
+                                    edit.apply()
                                 }
-                                edit.apply()
                             }
                         }
                     }

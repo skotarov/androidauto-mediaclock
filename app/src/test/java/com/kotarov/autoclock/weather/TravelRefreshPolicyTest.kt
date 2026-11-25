@@ -4,6 +4,18 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class TravelRefreshPolicyTest {
+    @Test fun changedLocalityNeedsTwoMatchingLookups() {
+        val confirmation = TravelRefreshPolicy.LocalityConfirmation()
+        org.junit.Assert.assertTrue(confirmation.accept(null, "Sofia"))
+        org.junit.Assert.assertFalse(confirmation.accept("Sofia", "Bankya"))
+        org.junit.Assert.assertTrue(confirmation.pending)
+        org.junit.Assert.assertTrue(confirmation.accept("Sofia", "Sofia"))
+        org.junit.Assert.assertFalse(confirmation.pending)
+        org.junit.Assert.assertFalse(confirmation.accept("Sofia", "Bankya"))
+        org.junit.Assert.assertTrue(confirmation.accept("Sofia", "BANKYA"))
+        org.junit.Assert.assertFalse(confirmation.pending)
+    }
+
     @Test fun stationaryWeatherRefreshesAfterFifteenMinutes() {
         assertFalse(TravelRefreshPolicy.weatherDue(899_999L, 0, 0.0, 0, 0))
         assertTrue(TravelRefreshPolicy.weatherDue(900_000L, 0, 0.0, 0, 0))

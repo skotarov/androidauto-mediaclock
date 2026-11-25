@@ -4,6 +4,17 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CityAnnouncementTest {
+    @Test fun reconnectionAndSameCityRefreshAreSilent() {
+        val city = CityAnnouncement()
+        city.reset("Sofia")
+        assertFalse(city.update("SOFIA", 100L))
+        assertFalse(city.update(null, 200L))
+        assertTrue(city.update("Bankya", 300L))
+        city.reset("Bankya")
+        assertFalse(city.update("Bankya", 400L))
+        assertNull(city.notice(400L))
+    }
+
     @Test fun changedCityShowsForFifteenSecondsWithoutRepeating() {
         val city = CityAnnouncement()
         assertFalse(city.update("Sofia", 100L))

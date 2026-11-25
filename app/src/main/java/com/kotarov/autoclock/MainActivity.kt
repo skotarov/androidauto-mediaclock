@@ -219,7 +219,10 @@ class MainActivity : Activity() {
             syncQuickButtons()
             updatePreviewTiles()
         }
-        listOf(carAudioButton, sizeButton, speakButton, testButton, themeButton).forEach { button ->
+        val chimeButton = quickButton(R.drawable.ic_setting_chime, "Alert chime") {
+            showChimePicker()
+        }
+        listOf(carAudioButton, sizeButton, themeButton, speakButton, chimeButton, testButton).forEach { button ->
             quickRow.addView(FrameLayout(this).apply {
                 addView(button, FrameLayout.LayoutParams(dp(48), dp(48), android.view.Gravity.CENTER))
             }, LinearLayout.LayoutParams(0, dp(52), 1f))
@@ -259,33 +262,11 @@ class MainActivity : Activity() {
         syncTransportButtons(null)
         syncWeatherToggle()
 
-        val messages = settingsGroup(root, "Messages")
-        val soundButton = Button(this).apply {
-            isAllCaps = false
-            text = "Chime: " + NoticeSound.fromId(prefs.getString(NoticeSound.KEY, null)).label
-            setOnClickListener {
-                val options = NoticeSound.entries
-                val selected = NoticeSound.fromId(prefs.getString(NoticeSound.KEY, null))
-                AlertDialog.Builder(this@MainActivity)
-                    .setTitle("Alert chime")
-                    .setSingleChoiceItems(options.map { it.label }.toTypedArray(),
-                        options.indexOf(selected)) { dialog, index ->
-                        val sound = options[index]
-                        prefs.edit().putString(NoticeSound.KEY, sound.id).apply()
-                        text = "Chime: " + sound.label
-                        soundPreview.play(sound)
-                        dialog.dismiss()
-                    }
-                    .setNegativeButton("Cancel", null)
-                    .show()
-            }
-        }
-        addSpaced(messages, soundButton)
         locationMessage = text("", 18f, dp(4)).apply {
             gravity = android.view.Gravity.CENTER
             visibility = View.GONE
         }
-        messages.addView(locationMessage)
+        root.addView(locationMessage)
 
         val streams = settingsGroup(root, "Streams")
         val addRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -805,6 +786,23 @@ class MainActivity : Activity() {
             }
         }
         dialog.show()
+    }
+
+    private fun showChimePicker() {
+        val prefs = settings()
+        val options = NoticeSound.entries
+        val selected = NoticeSound.fromId(prefs.getString(NoticeSound.KEY, null))
+        AlertDialog.Builder(this)
+            .setTitle("Alert chime")
+            .setSingleChoiceItems(options.map { it.label }.toTypedArray(),
+                options.indexOf(selected)) { dialog, index ->
+                val sound = options[index]
+                prefs.edit().putString(NoticeSound.KEY, sound.id).apply()
+                soundPreview.play(sound)
+                dialog.dismiss()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun showSoundTest() {

@@ -10,6 +10,13 @@ class CityAnnouncement {
     }
     private var message: Notice? = null
 
+    /** Starting or reconnecting is not a location change. */
+    fun reset(city: String?) {
+        lastCity = city?.trim()?.takeIf { it.isNotBlank() }
+        message = null
+        until = 0L
+    }
+
     fun update(city: String?, now: Long): Boolean {
         val next = city?.trim()?.takeIf { it.isNotBlank() } ?: return false
         val previous = lastCity
