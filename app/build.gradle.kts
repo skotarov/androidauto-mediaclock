@@ -1,3 +1,5 @@
+import java.net.URI
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -70,7 +72,7 @@ dependencies {
 
 tasks.matching { it.name == "preReleaseBuild" }.configureEach {
     doFirst {
-        val uri = runCatching { java.net.URI(commercialForecastEndpoint) }.getOrNull()
+        val uri = runCatching { URI(commercialForecastEndpoint) }.getOrNull()
         require(uri != null && uri.scheme == "https" && !uri.host.isNullOrBlank() &&
             !uri.host.equals("api.open-meteo.com", ignoreCase = true) &&
             uri.rawQuery == null && uri.rawFragment == null && uri.userInfo == null &&
