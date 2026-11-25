@@ -65,7 +65,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private var artKey: String? = null
     private var miniKey: String? = null
     private var lastPublished: MediaPublicationKey? = null
-    private data class PlaybackKey(val running: Boolean, val id: String, val duration: Long?, val advancing: Boolean, val textSkip: Boolean, val textPosition: Long?)
+    private data class PlaybackKey(val running: Boolean, val id: String, val duration: Long?, val advancing: Boolean, val textSkip: Boolean, val textPosition: Long?, val speed: Float)
     private var lastPlayback: PlaybackKey? = null
     private data class WeatherArtwork(val locality: String?, val forecast: List<ForecastStore.Hour>)
     private var lastWeatherArtwork: WeatherArtwork? = null
@@ -103,6 +103,13 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (!clientActive) return@OnSharedPreferenceChangeListener
+        if (key == PlaybackSpeed.KEY) {
+            streamPlayer.setSpeed(PlaybackSpeed.read(prefs))
+            lastPlayback = null
+            publishPlaybackState()
+            refreshPositionSubtitle()
+            return@OnSharedPreferenceChangeListener
+        }
         if (key == StreamLibrary.KEY_LIST || key == StreamLibrary.KEY_SELECTED) {
             activeSource = StreamLibrary.selected(prefs)
         }
@@ -199,7 +206,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                     if (moved) {
                         lastPlayback = null
                         publishPlaybackState()
-                        if (!playMode) refreshPositionSubtitle()
+                        refreshPositionSubtitle()
                     }
                 }
                 override fun onPlayFromSearch(query: String?, extras: Bundle?) {
@@ -215,7 +222,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                     if (moved) {
                         lastPlayback = null
                         publishPlaybackState()
-                        if (!playMode) refreshPositionSubtitle()
+                        refreshPositionSubtitle()
                     }
                 }
                 override fun onPlay() = setWeatherEnabled(true)
@@ -501,7 +508,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val notice = cityAnnouncement.notice(tick)
         val caption = (testNotice ?: notice)?.subtitle
         val position = if (caption == null) currentMediaPosition() else null
-        NoticeTest.publishCaption(caption)
+        NoticeTest.publishCaption(informationText(caption, position))
         val key = artwork.toString() + "|" + miniArtwork.toString()
         if (artKey != key || baseMetadata == null) {
             if (requestedArtKey != key) {
@@ -587,19 +594,25 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private fun refreshPositionSubtitle() {
-        if (!clientActive || playMode) return
-        val caption = (testNotice ?: cityAnnouncement.notice(SystemClock.elapsedRealtime()))?.subtitle
+        if (!clientActive) return
+        val caption = if (playMode) null else (testNotice ?: cityAnnouncement.notice(SystemClock.elapsedRealtime()))?.subtitle
         val position = if (caption == null) currentMediaPosition() else null
-        artKey?.let { publishMediaSubtitle(it, caption, position) }
+        NoticeTest.publishCaption(informationText(caption, position))
+        if (playMode) publishPlayMetadata() else artKey?.let { publishMediaSubtitle(it, caption, position) }
         schedulePositionTick(caption, position)
+    }
+
+    private fun informationText(caption: String?, position: Int?): String? {
+        if (!caption.isNullOrBlank()) return caption
+        val book = bookTimeline()
+        if (book != null) return MediaPositionSubtitle.book(book.positionMs, book.durationMs)
+        return MediaPositionSubtitle.text(null, position ?: mediaSeek()?.position)
     }
 
     private fun publishMediaSubtitle(key: String, caption: String?, position: Int?) {
         val base = baseMetadata ?: return
         val book = bookTimeline()
-        val textProgress = if (caption == null && book != null)
-            "${(book.positionMs * 100 / book.durationMs).coerceIn(0, 100)}% · est. time" else null
-        val subtitle = MediaPositionSubtitle.text(caption, position) ?: textProgress ?: INVISIBLE_TEXT
+        val subtitle = informationText(caption, position) ?: INVISIBLE_TEXT
         val duration = book?.durationMs ?: mediaSeek()?.duration?.toLong()
         val publication = MediaPublicationKey(key, INVISIBLE_TEXT, subtitle, activeSource?.id ?: CLOCK_ID, duration)
         if (publication == lastPublished) return
@@ -624,11 +637,12 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val station = if (clientActive && running && !noticePlaying)
             activeSource else null
         val url = station?.url
+        streamPlayer.setSpeed(PlaybackSpeed.read(prefs))
         streamPlayer.sync(url, !playMode && phoneMode != PhoneAudioMode.OFF,
             textLanguage = station?.takeIf { it.textFile }?.language, onChanged = {
             if (playMode || station?.textFile != true) lastPlayback = null
             publishPlaybackState()
-            if (playMode) publishPlayMetadata() else refreshPositionSubtitle()
+            refreshPositionSubtitle()
         }) { error ->
             if (playMode) {
                 setPlayRequested(false)
@@ -648,7 +662,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             }
         }
         publishPlaybackState()
-        if (playMode) publishPlayMetadata() else refreshPositionSubtitle()
+        refreshPositionSubtitle()
     }
 
     private fun playNotice(body: String) {
@@ -685,7 +699,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val textSkip = station?.textFile == true && streamPlayer.canSkipText(station.url)
         val book = bookTimeline()
         val duration = book?.durationMs ?: seek?.duration?.toLong()
-        val key = PlaybackKey(isRunning, station?.id ?: CLOCK_ID, duration, advancing, textSkip, book?.positionMs)
+        val speed = if (advancing) streamPlayer.actualMediaSpeed() else 0f
+        val key = PlaybackKey(isRunning, station?.id ?: CLOCK_ID, duration, advancing, textSkip, book?.positionMs, speed)
         if (lastPlayback == key) return
         var actions = PlaybackStateCompat.ACTION_PLAY or
             PlaybackStateCompat.ACTION_PAUSE or PlaybackStateCompat.ACTION_STOP or
@@ -695,7 +710,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val builder = PlaybackStateCompat.Builder()
             .setState(ClockPlaybackState.forRunning(isRunning),
                 book?.positionMs ?: seek?.position?.toLong() ?: PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN,
-                if (advancing) 1f else 0f)
+                speed)
             .setActions(actions)
         // Leave next/previous slots free: Auto may place these custom actions there.
         if (seek != null || textSkip) {
@@ -708,12 +723,17 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     private var playMetadataSource: StreamLibrary.Station? = null
     private var playMetadataDuration: Long? = null
+    private var playMetadataSubtitle: String? = null
     private fun publishPlayMetadata() {
         val source = activeSource
         val duration = bookTimeline()?.durationMs ?: mediaSeek()?.duration?.toLong()
-        if (source == playMetadataSource && duration == playMetadataDuration && session.controller.metadata != null) return
+        val subtitle = informationText(null, currentMediaPosition())
+        val previous = session.controller.metadata
+        if (source == playMetadataSource && duration == playMetadataDuration && subtitle == playMetadataSubtitle && previous != null) return
+        val previousArt = if (source == playMetadataSource) previous?.getBitmap(MediaMetadataCompat.METADATA_KEY_ART) else null
         playMetadataSource = source
         playMetadataDuration = duration
+        playMetadataSubtitle = subtitle
         val builder = MediaMetadataCompat.Builder()
         if (source != null) {
             builder.putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, source.id)
@@ -721,8 +741,9 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, source.name)
                 .putString(MediaMetadataCompat.METADATA_KEY_ARTIST,
                     if (source.textFile) "Text reading · estimated time" else if (source.local) "Local audio" else "Audio stream")
+                .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, subtitle ?: if (source.textFile) "Text reading" else "Audio")
                 .putBitmap(MediaMetadataCompat.METADATA_KEY_ART,
-                    source.bitmap() ?: sourceIcon(if (source.textFile) R.drawable.ic_source_text
+                    previousArt ?: source.bitmap() ?: sourceIcon(if (source.textFile) R.drawable.ic_source_text
                         else if (source.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast))
         } else builder.putString(MediaMetadataCompat.METADATA_KEY_TITLE, "Select audio")
         duration?.let { builder.putLong(MediaMetadataCompat.METADATA_KEY_DURATION, it.toLong()) }
@@ -829,7 +850,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         if (seek != null || textSkip) actions = actions or PlaybackStateCompat.ACTION_SEEK_TO
         val builder = PlaybackStateCompat.Builder().setActions(actions)
             .setState(state, book?.positionMs ?: seek?.position?.toLong() ?: PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN,
-                if (state == PlaybackStateCompat.STATE_PLAYING && seek != null) 1f else 0f)
+                if (state == PlaybackStateCompat.STATE_PLAYING && seek != null) streamPlayer.actualMediaSpeed() else 0f)
         mediaError?.let { builder.setErrorMessage(PlaybackStateCompat.ERROR_CODE_APP_ERROR, it) }
         if (seek != null || (source?.textFile == true && streamPlayer.canSkipText(source.url))) {
             builder.addCustomAction(ACTION_BACK_10, "Back 10 seconds", R.drawable.ic_replay_10)

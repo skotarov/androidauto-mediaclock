@@ -35,6 +35,7 @@ internal class TextFileReader(context: Context) {
     private var job: Future<*>? = null
     private var loadSignal: CancellationSignal? = null
     private var engine: TextToSpeech? = null
+    private var speechSpeed = 1f
     private var ready = false
     private var paused = false
     private var token = 0L
@@ -90,6 +91,22 @@ internal class TextFileReader(context: Context) {
         reportProgress(force = true)
         if (!paused) next(alignWord = true)
         return true
+    }
+
+    fun setSpeed(value: Float) {
+        val speed = PlaybackSpeed.normalize(value)
+        if (speed == speechSpeed) return
+        speechSpeed = speed
+        val tts = engine ?: return
+        if (!ready) return
+        if (tts.setSpeechRate(speed) != TextToSpeech.SUCCESS) return
+        if (!paused) {
+            activeId = null
+            cancelJob()
+            runCatching { tts.stop() }
+            checkpoint(force = true)
+            next(alignWord = true)
+        }
     }
 
     fun start(source: String, language: String, phone: Boolean,
@@ -222,6 +239,7 @@ internal class TextFileReader(context: Context) {
                 return
             }
             setRoute(tts, phone)
+            tts.setSpeechRate(speechSpeed)
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) = Unit
                 override fun onRangeStart(utteranceId: String?, start: Int, end: Int, frame: Int) {

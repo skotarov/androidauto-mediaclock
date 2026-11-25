@@ -72,6 +72,10 @@ class MainActivity : Activity() {
     private lateinit var themeButton: ImageButton
     private lateinit var backButton: ImageButton
     private lateinit var forwardButton: ImageButton
+    private lateinit var speedRow: LinearLayout
+    private lateinit var speedValue: TextView
+    private lateinit var slowerButton: Button
+    private lateinit var fasterButton: Button
     private val playbackCallback = object : MediaControllerCompat.Callback() {
         override fun onPlaybackStateChanged(state: PlaybackStateCompat?) {
             syncTransportButtons(state)
@@ -103,6 +107,7 @@ class MainActivity : Activity() {
             syncQuickButtons()
             updatePreviewTiles()
         }
+        if (key == com.kotarov.autoclock.media.PlaybackSpeed.KEY) syncSpeedControls(phoneController?.playbackState)
         if (key == ClockPreset.KEY_ADD_WEATHER) syncWeatherToggle()
         else if (key == "weather_fetched_at" || key == WeatherStore.KEY_LOCALITY) {
             updatePreviewTiles()
@@ -303,6 +308,30 @@ class MainActivity : Activity() {
         }
         root.addView(locationMessage)
 
+        speedRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER
+        }
+        fun speedButton(label: String, description: String, action: () -> Unit) = Button(this).apply {
+            text = label
+            contentDescription = description
+            isAllCaps = false
+            textSize = 19f
+            setOnClickListener { action() }
+        }
+        slowerButton = speedButton("−", "Decrease playback speed") { changeSpeed(-1) }
+        fasterButton = speedButton("+", "Increase playback speed") { changeSpeed(1) }
+        speedValue = text("1.0×", 17f, dp(4)).apply {
+            gravity = android.view.Gravity.CENTER
+            contentDescription = "Playback speed; tap to reset"
+            setOnClickListener { settings().edit().putFloat(com.kotarov.autoclock.media.PlaybackSpeed.KEY, 1f).apply() }
+        }
+        speedRow.addView(slowerButton, LinearLayout.LayoutParams(dp(64), dp(48)))
+        speedRow.addView(speedValue, LinearLayout.LayoutParams(dp(100), dp(48)))
+        speedRow.addView(fasterButton, LinearLayout.LayoutParams(dp(64), dp(48)))
+        root.addView(speedRow)
+        syncSpeedControls(null)
+
         val streams = settingsGroup(root, if (BuildConfig.PLAY_MEDIA_MODE) "Audio library" else "Streams")
         val addRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         addRow.addView(Button(this).apply {
@@ -440,6 +469,26 @@ class MainActivity : Activity() {
         forwardButton.isEnabled = !alertOnly && actions.any { it.action == AutoClockMediaService.ACTION_FORWARD_10 }
         paintQuickButton(backButton, false)
         paintQuickButton(forwardButton, false)
+        syncSpeedControls(state)
+    }
+
+    private fun changeSpeed(direction: Int) {
+        val p = settings()
+        val speed = com.kotarov.autoclock.media.PlaybackSpeed.read(p)
+        p.edit().putFloat(com.kotarov.autoclock.media.PlaybackSpeed.KEY,
+            com.kotarov.autoclock.media.PlaybackSpeed.step(speed, direction)).apply()
+    }
+
+    private fun syncSpeedControls(state: PlaybackStateCompat?) {
+        if (!::speedRow.isInitialized) return
+        val selected = StreamLibrary.selected(settings())
+        val known = state?.customActions.orEmpty().any { it.action == AutoClockMediaService.ACTION_BACK_10 }
+        val visible = selected != null && (selected.textFile || selected.local || known)
+        speedRow.visibility = if (visible) View.VISIBLE else View.GONE
+        val speed = com.kotarov.autoclock.media.PlaybackSpeed.read(settings())
+        speedValue.text = String.format(java.util.Locale.ROOT, "%.1f×", speed)
+        slowerButton.isEnabled = speed > com.kotarov.autoclock.media.PlaybackSpeed.MIN
+        fasterButton.isEnabled = speed < com.kotarov.autoclock.media.PlaybackSpeed.MAX
     }
 
     private fun detachPhoneController() {

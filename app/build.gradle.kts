@@ -21,8 +21,8 @@ android {
         applicationId = "com.kotarov.autoclock2"
         minSdk = 23
         targetSdk = 36
-        versionCode = 104
-        versionName = "0.104.0"
+        versionCode = 105
+        versionName = "0.105.0"
     }
 
     // The public beta workflow supplies its permanent signing identity.

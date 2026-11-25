@@ -33,6 +33,7 @@ class CustomStreamPlayer(context: Context) {
     private var failed = false
     private var suspendedMedia = false
     private var reading = false
+    private var speed = 1f
     private var prepared = false
     private var seekable = false
     private var changed: () -> Unit = {}
@@ -76,6 +77,21 @@ class CustomStreamPlayer(context: Context) {
     fun seekTextTo(url: String?, positionMs: Long): Boolean =
         url != null && reader?.seekEstimatedTime(url, positionMs) == true
 
+    fun setSpeed(value: Float) {
+        speed = PlaybackSpeed.normalize(value)
+        reader?.setSpeed(speed)
+        val media = player
+        if (media != null && prepared && seekable && !suspendedMedia && isPlaying()) applyMediaSpeed(media)
+    }
+
+    fun actualMediaSpeed(): Float = if (seekable) runCatching { player?.playbackParams?.speed ?: 1f }.getOrDefault(1f) else 1f
+
+    private fun applyMediaSpeed(media: MediaPlayer) {
+        runCatching {
+            if (seekable) media.playbackParams = media.playbackParams.setSpeed(speed).setPitch(1f)
+        }.onFailure { Log.w("AutoClock", "Playback speed unavailable") }
+    }
+
     fun canSkipText(url: String?): Boolean = url != null && reader?.canSkip(url) == true
 
     fun skipText(url: String?, deltaMs: Int): Boolean =
@@ -108,7 +124,7 @@ class CustomStreamPlayer(context: Context) {
             if (suspendedMedia && next != null) {
                 suspendedMedia = false
                 try {
-                    player?.start()
+                    player?.let { it.start(); applyMediaSpeed(it) }
                     changed()
                 } catch (_: Exception) { fail(generation, "Playback failed", onError) }
             }
@@ -211,6 +227,7 @@ class CustomStreamPlayer(context: Context) {
         if (language != null) {
             reading = true
             val currentReader = reader ?: TextFileReader(app).also { reader = it }
+            currentReader.setSpeed(speed)
             currentReader.start(url, language, phone, changed) { error ->
                 if (token == generation) {
                     if (error == null) {
@@ -240,6 +257,7 @@ class CustomStreamPlayer(context: Context) {
                             ?: if (validLocal(url)) localBookmarks.getInt(url, 0) else 0
                         if (seekable && position > 0 && position < it.duration) it.seekTo(position)
                         it.start()
+                        if (speed != 1f) applyMediaSpeed(it)
                         changed()
                     }.onFailure { fail(token, "Playback failed", onError) }
                 }
