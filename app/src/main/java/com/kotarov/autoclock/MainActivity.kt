@@ -11,7 +11,6 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 import android.view.View
 import com.kotarov.autoclock.media.CityAnnouncement
 import android.widget.Button
@@ -25,6 +24,7 @@ import android.app.Activity
 import android.app.AlertDialog
 import com.kotarov.autoclock.media.NoticeSound
 import com.kotarov.autoclock.media.NoticeAudio
+import com.kotarov.autoclock.media.NoticeTest
 import com.kotarov.autoclock.media.NoticeSoundPlayer
 import android.widget.Switch
 import com.kotarov.autoclock.artwork.ClockRenderer
@@ -53,13 +53,11 @@ class MainActivity : Activity() {
     private lateinit var weatherToggle: Switch
     private var syncingWeatherToggle = false
     private val soundPreview by lazy { NoticeSoundPlayer() }
+    private val testAudio by lazy { NoticeAudio(this) }
     private val weatherPreferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == ClockPreset.KEY_ADD_WEATHER) syncWeatherToggle()
         else if (key == "weather_fetched_at" || key == WeatherStore.KEY_LOCALITY) {
             updatePreviewTiles()
-            if (key == WeatherStore.KEY_LOCALITY && awaitingLocation) {
-                WeatherStore.locality(this)?.let { finishLocation(it, true) }
-            }
         }
     }
     private var analogBitmap: Bitmap? = null
@@ -78,14 +76,6 @@ class MainActivity : Activity() {
     private val previewWorker = ArtworkWorkers.create<PreviewImages> { it.discard() }
     private val messageHandler = Handler(Looper.getMainLooper())
     private lateinit var locationMessage: TextView
-    private var awaitingLocation = false
-    private var showLocationAfterPermission = false
-    private val locationTimeout = Runnable {
-        if (awaitingLocation) {
-            val city = WeatherStore.locality(this)
-            finishLocation(city ?: WeatherStore.localityFailure(this), city != null)
-        }
-    }
     private val hideLocationMessage = Runnable {
         if (::locationMessage.isInitialized) locationMessage.visibility = View.GONE
     }
@@ -205,9 +195,9 @@ class MainActivity : Activity() {
         root.addView(sizeRow)
 
         root.addView(Button(this).apply {
-            text = "Location"
+            text = "Test sound"
             isAllCaps = false
-            setOnClickListener { showLocation() }
+            setOnClickListener { showSoundTest() }
         }, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
@@ -248,6 +238,7 @@ class MainActivity : Activity() {
                 "Bluetooth phone audio",
                 prefs.getBoolean(NoticeAudio.KEY_PHONE_CHANNEL, false)
             ) { checked ->
+                testAudio.stop()
                 prefs.edit().putBoolean(NoticeAudio.KEY_PHONE_CHANNEL, checked).apply()
             })
         }
@@ -289,13 +280,12 @@ class MainActivity : Activity() {
     }
 
     override fun onStop() {
-        awaitingLocation = false
-        messageHandler.removeCallbacks(locationTimeout)
         messageHandler.removeCallbacks(hideLocationMessage)
         if (::locationMessage.isInitialized) locationMessage.visibility = View.GONE
         WeatherStore.stop(WeatherStore.Client.PHONE)
         settings().unregisterOnSharedPreferenceChangeListener(weatherPreferenceListener)
         soundPreview.stop()
+        testAudio.stop()
         releasePreviews()
         super.onStop()
     }
@@ -435,40 +425,29 @@ class MainActivity : Activity() {
         title.setTextColor(if (selected) accent else ink)
     }
 
-    private fun showLocation() {
-        if (!WeatherLocation.permitted(this)) {
-            finishLocation("Location permission required", false)
-            showLocationAfterPermission = true
-            requestLocation()
-            return
-        }
-        if (!WeatherLocation.enabled(this)) {
-            finishLocation("Turn on phone location", false)
-            return
-        }
-        WeatherStore.locality(this)?.let {
-            finishLocation(it, true)
-            return
-        }
-        if (awaitingLocation) return
-        awaitingLocation = true
-        locationMessage.text = "Finding location…"
-        locationMessage.visibility = View.VISIBLE
-        messageHandler.removeCallbacks(hideLocationMessage)
-        messageHandler.removeCallbacks(locationTimeout)
-        messageHandler.postDelayed(locationTimeout, 30_000L)
-        WeatherStore.refreshLocality(this)
-    }
-
-    private fun finishLocation(message: String, announce: Boolean) {
-        awaitingLocation = false
-        messageHandler.removeCallbacks(locationTimeout)
-        locationMessage.text = message
-        locationMessage.visibility = View.VISIBLE
-        messageHandler.removeCallbacks(hideLocationMessage)
-        messageHandler.postDelayed(hideLocationMessage, CityAnnouncement.DURATION_MS)
-        if (announce) settings().edit().putLong(AutoClockMediaService.KEY_SHOW_LOCATION,
-            SystemClock.elapsedRealtimeNanos()).apply()
+    private fun showSoundTest() {
+        val samples = NoticeTest.samples(WeatherStore.locality(this))
+        AlertDialog.Builder(this)
+            .setTitle("Test sound")
+            .setItems(samples.map { it.subtitle }.toTypedArray()) { _, index ->
+                val sample = samples[index]
+                val preview = NoticeTest.marked(sample)
+                locationMessage.text = preview.subtitle
+                locationMessage.visibility = View.VISIBLE
+                messageHandler.removeCallbacks(hideLocationMessage)
+                messageHandler.postDelayed(hideLocationMessage, CityAnnouncement.DURATION_MS)
+                soundPreview.stop()
+                testAudio.stop()
+                // Use the active car service to avoid two simultaneous audio routes.
+                if (!NoticeTest.send(sample)) {
+                    val prefs = settings()
+                    testAudio.play(NoticeSound.fromId(prefs.getString(NoticeSound.KEY, null)),
+                        NoticeTest.spoken(sample),
+                        prefs.getBoolean(NoticeAudio.KEY_PHONE_CHANNEL, false))
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun requestLocation() {
@@ -487,13 +466,8 @@ class MainActivity : Activity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode != LOCATION_REQUEST) return
-        val manual = showLocationAfterPermission
-        showLocationAfterPermission = false
         if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
             requestLocation()
-            if (manual) showLocation()
-        } else if (manual) {
-            finishLocation("Location permission required", false)
         }
     }
 
