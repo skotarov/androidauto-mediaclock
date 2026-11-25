@@ -25,8 +25,9 @@ import android.app.AlertDialog
 import com.kotarov.autoclock.media.NoticeSound
 import com.kotarov.autoclock.media.NoticeAudio
 import com.kotarov.autoclock.media.PhoneAudioMode
-import com.kotarov.autoclock.media.ContinuousPhoneAudio
 import com.kotarov.autoclock.media.CustomStreamPlayer
+import com.kotarov.autoclock.media.StreamLibrary
+import com.kotarov.autoclock.media.StreamMetadata
 import com.kotarov.autoclock.media.NoticeTest
 import com.kotarov.autoclock.media.NoticeSoundPlayer
 import android.widget.Switch
@@ -57,17 +58,9 @@ class MainActivity : Activity() {
     private var syncingWeatherToggle = false
     private val soundPreview by lazy { NoticeSoundPlayer() }
     private val testAudio by lazy { NoticeAudio(this) }
-    private var phoneAudioButton: Button? = null
-    private fun updatePhoneAudioButton() {
-        val prefs = settings()
-        val mode = PhoneAudioMode.read(prefs)
-        val status = if (mode == PhoneAudioMode.CONTINUOUS)
-            " · " + (if (NoticeTest.receiver == null) "Waiting for Android Auto"
-                else prefs.getString(ContinuousPhoneAudio.KEY_STATUS, null) ?: "Connecting…") else ""
-        phoneAudioButton?.text = "Bluetooth phone audio: " + mode.label + status
-    }
+    private lateinit var streamRows: LinearLayout
     private val weatherPreferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == ContinuousPhoneAudio.KEY_STATUS || key == PhoneAudioMode.KEY) updatePhoneAudioButton()
+        if (key == StreamLibrary.KEY_LIST || key == StreamLibrary.KEY_SELECTED) renderStreams()
         if (key == ClockPreset.KEY_ADD_WEATHER) syncWeatherToggle()
         else if (key == "weather_fetched_at" || key == WeatherStore.KEY_LOCALITY) {
             updatePreviewTiles()
@@ -103,6 +96,7 @@ class MainActivity : Activity() {
         val prefs = settings()
         // This is now an auto-location-only product, including old installs.
         ClockSelectionStore.migrateSimplifiedIfNeeded(prefs)
+        StreamLibrary.migrate(prefs)
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -205,22 +199,22 @@ class MainActivity : Activity() {
         sizeRow.addView(sizeSlider,
             LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         sizeRow.addView(text("A", 28f, 0))
-        root.addView(sizeRow)
+        root.addView(sizeRow, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { bottomMargin = dp(24) })
 
-        root.addView(Button(this).apply {
-            text = "Test sound"
-            isAllCaps = false
-            setOnClickListener { showSoundTest() }
-        }, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply { topMargin = dp(32) })
-        locationMessage = text("", 18f, dp(4)).apply {
-            gravity = android.view.Gravity.CENTER
-            visibility = View.GONE
+        if (android.os.Build.VERSION.SDK_INT >= 31) {
+            root.addView(checkOption(
+                "Използвай телефона на колата",
+                PhoneAudioMode.read(prefs) != PhoneAudioMode.OFF
+            ) { checked ->
+                testAudio.stop()
+                prefs.edit().putString(PhoneAudioMode.KEY,
+                    if (checked) PhoneAudioMode.ALERTS.id else PhoneAudioMode.OFF.id).apply()
+            })
         }
-        root.addView(locationMessage)
 
+        val messages = settingsGroup(root, "Съобщения")
         val soundButton = Button(this).apply {
             isAllCaps = false
             text = "Chime: " + NoticeSound.fromId(prefs.getString(NoticeSound.KEY, null)).label
@@ -228,7 +222,7 @@ class MainActivity : Activity() {
                 val options = NoticeSound.entries
                 val selected = NoticeSound.fromId(prefs.getString(NoticeSound.KEY, null))
                 AlertDialog.Builder(this@MainActivity)
-                    .setTitle("Alert chime (voice remains enabled)")
+                    .setTitle("Alert chime")
                     .setSingleChoiceItems(options.map { it.label }.toTypedArray(),
                         options.indexOf(selected)) { dialog, index ->
                         val sound = options[index]
@@ -241,82 +235,32 @@ class MainActivity : Activity() {
                     .show()
             }
         }
-        root.addView(soundButton, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply { topMargin = dp(16) })
-
-        if (android.os.Build.VERSION.SDK_INT >= 31) {
-            phoneAudioButton = Button(this).apply {
-                isAllCaps = false
-                setOnClickListener {
-                    val modes = PhoneAudioMode.entries
-                    AlertDialog.Builder(this@MainActivity)
-                        .setTitle("Bluetooth phone audio")
-                        .setSingleChoiceItems(modes.map { it.label }.toTypedArray(),
-                            modes.indexOf(PhoneAudioMode.read(prefs))) { dialog, index ->
-                            testAudio.stop()
-                            // Clear stale status when there is no connected media service.
-                            if (NoticeTest.receiver == null)
-                                prefs.edit().remove(ContinuousPhoneAudio.KEY_STATUS).apply()
-                            val selected = modes[index]
-                            // Also let the same mode be reselected to retry a failed route.
-                            if (selected == PhoneAudioMode.read(prefs) &&
-                                selected == PhoneAudioMode.CONTINUOUS) {
-                                prefs.edit().putString(PhoneAudioMode.KEY, PhoneAudioMode.OFF.id).apply()
-                            }
-                            prefs.edit().putString(PhoneAudioMode.KEY, selected.id).apply()
-                            updatePhoneAudioButton()
-                            dialog.dismiss()
-                        }
-                        .setNegativeButton("Cancel", null)
-                        .show()
-                }
-            }
-            root.addView(phoneAudioButton)
-            updatePhoneAudioButton()
-        }
-
-        root.addView(checkOption(
-            "Custom stream",
-            prefs.getBoolean(CustomStreamPlayer.KEY_ENABLED, false)
-        ) { checked ->
-            prefs.edit().putBoolean(CustomStreamPlayer.KEY_ENABLED, checked).apply()
+        addSpaced(messages, soundButton)
+        messages.addView(checkOption("Изговаряй съобщенията",
+            prefs.getBoolean(NoticeAudio.KEY_SPEAK, true)) { checked ->
+            testAudio.stop()
+            prefs.edit().putBoolean(NoticeAudio.KEY_SPEAK, checked).apply()
         })
-        root.addView(Button(this).apply {
+        addSpaced(messages, Button(this).apply {
+            text = "Тест"
             isAllCaps = false
-            text = "Stream URL"
-            setOnClickListener {
-                val field = android.widget.EditText(this@MainActivity).apply {
-                    inputType = android.text.InputType.TYPE_CLASS_TEXT or
-                        android.text.InputType.TYPE_TEXT_VARIATION_URI
-                    hint = "https://..."
-                    setSingleLine(true)
-                    setText(prefs.getString(CustomStreamPlayer.KEY_URL, ""))
-                }
-                val dialog = AlertDialog.Builder(this@MainActivity)
-                    .setTitle("Custom stream URL")
-                    .setView(field)
-                    .setNegativeButton("Cancel", null)
-                    .setPositiveButton("Save", null)
-                    .create()
-                dialog.setOnShowListener {
-                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                        val url = field.text.toString().trim()
-                        if (url.isNotEmpty() && !CustomStreamPlayer.valid(url)) {
-                            field.error = "Enter a direct HTTPS audio URL"
-                        } else {
-                            prefs.edit().putString(CustomStreamPlayer.KEY_URL, url).apply()
-                            dialog.dismiss()
-                        }
-                    }
-                }
-                dialog.show()
-            }
-        }, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
-        ))
+            setOnClickListener { showSoundTest() }
+        })
+        locationMessage = text("", 18f, dp(4)).apply {
+            gravity = android.view.Gravity.CENTER
+            visibility = View.GONE
+        }
+        messages.addView(locationMessage)
+
+        val streams = settingsGroup(root, "Стрийм")
+        addSpaced(streams, Button(this).apply {
+            text = "+ Добави"
+            isAllCaps = false
+            setOnClickListener { editStream(null) }
+        })
+        streamRows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        streams.addView(streamRows)
+        renderStreams()
 
         // Weather attribution stays at the bottom of the phone settings.
         root.addView(View(this), LinearLayout.LayoutParams(
@@ -352,7 +296,7 @@ class MainActivity : Activity() {
         super.onStart()
         settings().registerOnSharedPreferenceChangeListener(weatherPreferenceListener)
         syncWeatherToggle()
-        updatePhoneAudioButton()
+        renderStreams()
     }
 
     override fun onStop() {
@@ -501,6 +445,131 @@ class MainActivity : Activity() {
         title.setTextColor(if (selected) accent else ink)
     }
 
+    private fun addSpaced(parent: LinearLayout, view: View) {
+        parent.addView(view, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { bottomMargin = dp(16) })
+    }
+
+    private fun settingsGroup(root: LinearLayout, heading: String): LinearLayout {
+        val group = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(12), dp(12), dp(8))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(12).toFloat()
+                setStroke(dp(1), faint)
+                setColor(Color.rgb(18, 20, 27))
+            }
+            addView(text(heading, 20f, dp(12)))
+        }
+        root.addView(group, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = dp(12); bottomMargin = dp(24) })
+        return group
+    }
+
+    private fun renderStreams() {
+        if (!::streamRows.isInitialized) return
+        streamRows.removeAllViews()
+        StreamLibrary.list(settings()).forEach { station ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(0, dp(6), 0, dp(6))
+            }
+            row.addView(ImageView(this).apply {
+                val icon = station.bitmap()
+                if (icon != null) setImageBitmap(icon)
+                else setImageResource(android.R.drawable.ic_media_play)
+                contentDescription = station.name
+            }, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginEnd = dp(8) })
+            row.addView(text(station.name, 16f, 0), LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            row.addView(Button(this).apply {
+                text = "Edit"
+                isAllCaps = false
+                minWidth = 0; minimumWidth = 0
+                setOnClickListener { editStream(station) }
+            })
+            row.addView(Button(this).apply {
+                text = "Delete"
+                isAllCaps = false
+                minWidth = 0; minimumWidth = 0
+                setOnClickListener {
+                    AlertDialog.Builder(this@MainActivity).setTitle(station.name)
+                        .setMessage("Delete stream?")
+                        .setNegativeButton("Cancel", null)
+                        .setPositiveButton("Delete") { _, _ ->
+                            val prefs = settings()
+                            StreamLibrary.save(prefs, StreamLibrary.list(prefs).filterNot { it.id == station.id })
+                            renderStreams()
+                        }.show()
+                }
+            })
+            addSpaced(streamRows, row)
+        }
+    }
+
+    private fun editStream(existing: StreamLibrary.Station?) {
+        val fields = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(8))
+        }
+        val url = android.widget.EditText(this).apply {
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
+            hint = "https://..."
+            setSingleLine(true)
+            setText(existing?.url.orEmpty())
+        }
+        val name = android.widget.EditText(this).apply {
+            hint = "Name (automatic)"
+            setSingleLine(true)
+            setText(existing?.name.orEmpty())
+        }
+        fields.addView(url)
+        fields.addView(name)
+        val dialog = AlertDialog.Builder(this).setTitle(if (existing == null) "Добави стрийм" else "Edit stream")
+            .setView(fields).setNegativeButton("Cancel", null).setPositiveButton("Save", null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val address = url.text.toString().trim()
+                if (!CustomStreamPlayer.valid(address)) {
+                    url.error = "Enter a direct HTTPS audio URL"
+                    return@setOnClickListener
+                }
+                val entered = name.text.toString().trim().take(64)
+                val autoName = entered.isBlank()
+                val base = existing ?: StreamLibrary.newStation(address)
+                val saved = base.copy(url = address,
+                    name = entered.ifBlank { StreamLibrary.defaultName(address) },
+                    icon = if (existing?.url == address) base.icon else "")
+                val prefs = settings()
+                val current = StreamLibrary.list(prefs)
+                val next = if (existing == null) current + saved else current.map {
+                    if (it.id == existing.id) saved else it
+                }
+                StreamLibrary.save(prefs, next)
+                renderStreams()
+                dialog.dismiss()
+                // A single bounded metadata lookup per explicit save, not a background polling service.
+                Thread {
+                    val info = runCatching { StreamMetadata.lookup(address) }.getOrNull()
+                    if (info != null) messageHandler.post {
+                        val latest = StreamLibrary.list(prefs)
+                        val match = latest.firstOrNull { it.id == saved.id }
+                        if (match == saved) {
+                            val updated = saved.copy(name = if (autoName) info.name ?: saved.name else saved.name,
+                                icon = info.icon.ifBlank { saved.icon })
+                            StreamLibrary.save(prefs, latest.map { if (it.id == saved.id) updated else it })
+                            if (!isDestroyed) renderStreams()
+                        }
+                    }
+                }.start()
+            }
+        }
+        dialog.show()
+    }
+
     private fun showSoundTest() {
         val samples = NoticeTest.samples(WeatherStore.locality(this))
         AlertDialog.Builder(this)
@@ -519,7 +588,8 @@ class MainActivity : Activity() {
                     val prefs = settings()
                     testAudio.play(NoticeSound.fromId(prefs.getString(NoticeSound.KEY, null)),
                         NoticeTest.spoken(sample),
-                        PhoneAudioMode.read(prefs) != PhoneAudioMode.OFF)
+                        PhoneAudioMode.read(prefs) != PhoneAudioMode.OFF,
+                        speakEnabled = prefs.getBoolean(NoticeAudio.KEY_SPEAK, true))
                 }
             }
             .setNegativeButton("Cancel", null)
@@ -576,7 +646,7 @@ class MainActivity : Activity() {
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
-            minimumHeight = dp(52)
+            minimumHeight = dp(60)
             setPadding(0, dp(10), 0, dp(10))
             val label = text(title, 16f, 0).apply {
                 gravity = android.view.Gravity.CENTER_VERTICAL
@@ -593,7 +663,7 @@ class MainActivity : Activity() {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
-                bottomMargin = dp(16)
+                bottomMargin = dp(24)
             }
             setOnClickListener { toggle.isChecked = !toggle.isChecked }
         }
