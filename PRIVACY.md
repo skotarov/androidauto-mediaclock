@@ -16,6 +16,8 @@ The current beta has no accounts, advertising or analytics SDKs, or developer-op
 
 The app uses an installed offline English Android text-to-speech voice to read the displayed notice text while weather and voice alerts are enabled. It does not intentionally select a network voice or transmit notice text to a developer-operated speech service.
 
+An optional Bluetooth phone audio setting temporarily selects a connected hands-free audio output for alerts. The app does not place calls, read call history, record audio or request microphone access.
+
 ## Controls and retention
 
 Revoke location permission in Android Settings to stop new location access. Previously cached data may remain until refreshed or deleted. Clear app storage or uninstall to delete local settings and cached data. Android cloud backup is disabled for this app version. HTTPS is used for weather requests. Third-party retention is governed by provider policies.
