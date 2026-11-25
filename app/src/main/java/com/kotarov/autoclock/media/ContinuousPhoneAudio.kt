@@ -9,10 +9,11 @@ import android.os.Looper
 import android.util.Log
 
 /** Experimental hands-free connection, owned by the active car media session.
- * Never opens a microphone, plays silence or attempts to override a phone call. */
+ * Loops silent PCM; never opens a microphone or attempts to override a phone call. */
 class ContinuousPhoneAudio(context: Context) {
     private val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val handler = Handler(Looper.getMainLooper())
+    private val keepAlive = PhoneAudioKeepAlive()
     private var ownsMode = false
     private var ownsDevice = false
     private var targetId: Int? = null
@@ -71,6 +72,10 @@ class ContinuousPhoneAudio(context: Context) {
                 end("Phone channel unavailable")
                 return
             }
+            if (!keepAlive.start()) {
+                end("Phone audio keepalive unavailable")
+                return
+            }
             onChange(false, "Connecting…")
             handler.postDelayed({
                 if (enabled && !ready) {
@@ -109,6 +114,7 @@ class ContinuousPhoneAudio(context: Context) {
         handler.removeCallbacksAndMessages(null)
         removeListeners?.let { runCatching { it() } }
         removeListeners = null
+        keepAlive.stop()
         if (Build.VERSION.SDK_INT >= 31 && ownsDevice) runCatching { audio.clearCommunicationDevice() }
         ownsDevice = false
         if (ownsMode) runCatching { audio.mode = AudioManager.MODE_NORMAL }
