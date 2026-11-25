@@ -7,6 +7,15 @@ object NoticeTest {
     // Both callers are on the main thread. The media service owns this callback
     // only while a media client is connected.
     var receiver: ((CityAnnouncement.Notice) -> Unit)? = null
+    var phoneCaption: ((String?) -> Unit)? = null
+    var currentCaption: String? = null
+        private set
+
+    fun publishCaption(value: String?) {
+        if (currentCaption == value) return
+        currentCaption = value
+        phoneCaption?.invoke(value)
+    }
 
     fun send(notice: CityAnnouncement.Notice): Boolean {
         val active = receiver ?: return false
