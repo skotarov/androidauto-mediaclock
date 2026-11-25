@@ -15,18 +15,22 @@ class NoticeSoundPlayer {
     private var track: AudioTrack? = null
     private val finish = Runnable { stop() }
 
-    fun play(sound: NoticeSound) {
+    fun play(sound: NoticeSound, phoneChannel: Boolean = false) {
         stop()
         if (sound == NoticeSound.SILENT) return
         try {
-            val samples = sound.pcm()
+            val original = sound.pcm()
+            val sampleRate = if (phoneChannel) 16000 else NoticeSound.SAMPLE_RATE
+            val samples = if (!phoneChannel) original else ShortArray(sound.durationMs * sampleRate / 1000) { i ->
+                original[(i.toLong() * NoticeSound.SAMPLE_RATE / sampleRate).toInt().coerceAtMost(original.lastIndex)]
+            }
             val audio = AudioTrack.Builder()
                 .setAudioAttributes(AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setUsage(if (phoneChannel) AudioAttributes.USAGE_VOICE_COMMUNICATION else AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                     .build())
                 .setAudioFormat(AudioFormat.Builder()
-                    .setSampleRate(NoticeSound.SAMPLE_RATE)
+                    .setSampleRate(sampleRate)
                     .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                     .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
                     .build())
