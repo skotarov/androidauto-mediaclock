@@ -158,7 +158,7 @@ class MainActivity : Activity() {
         })
 
         root.addView(checkOption(
-            "Weather + voice alerts",
+            "Weather",
             ClockSelectionStore.weatherEnabled(prefs),
             captureToggle = { weatherToggle = it }
         ) { checked ->
