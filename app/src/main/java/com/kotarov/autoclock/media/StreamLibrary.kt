@@ -13,7 +13,7 @@ object StreamLibrary {
     const val KEY_LIST = "stream_library_v85"
     const val KEY_SELECTED = "stream_selected_v85"
     const val ALERT_ID = "autoclock_clock"
-    data class Station(val id: String, val name: String, val url: String, val icon: String = "") {
+    data class Station(val id: String, val name: String, val url: String, val icon: String = "", val local: Boolean = false) {
         fun bitmap(): Bitmap? = runCatching {
             val bytes = Base64.decode(icon, Base64.DEFAULT)
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
@@ -32,8 +32,10 @@ object StreamLibrary {
         (0 until a.length()).mapNotNull { i ->
             val o = a.optJSONObject(i) ?: return@mapNotNull null
             val url = o.optString("url")
-            if (!CustomStreamPlayer.valid(url)) null else Station(o.getString("id"),
-                o.optString("name").ifBlank { defaultName(url) }, url, o.optString("icon"))
+            val local = o.optBoolean("local", false)
+            if (!(if (local) CustomStreamPlayer.validLocal(url) else CustomStreamPlayer.valid(url))) null
+            else Station(o.getString("id"), o.optString("name").ifBlank { defaultName(url) },
+                url, o.optString("icon"), local)
         }
     }.getOrDefault(emptyList())
     fun selected(prefs: SharedPreferences): Station? =
@@ -41,7 +43,7 @@ object StreamLibrary {
     fun save(prefs: SharedPreferences, stations: List<Station>) {
         val a = JSONArray()
         stations.forEach { s ->
-            a.put(JSONObject().put("id", s.id).put("name", s.name).put("url", s.url).put("icon", s.icon))
+            a.put(JSONObject().put("id", s.id).put("name", s.name).put("url", s.url).put("icon", s.icon).put("local", s.local))
         }
         val edit = prefs.edit().putString(KEY_LIST, a.toString())
         if (stations.none { it.id == prefs.getString(KEY_SELECTED, ALERT_ID) })
@@ -49,6 +51,17 @@ object StreamLibrary {
         edit.apply()
     }
     fun newStation(url: String) = Station("stream:" + UUID.randomUUID().toString(), defaultName(url), url)
+    fun newFile(uri: String, name: String) = Station("file:" + UUID.randomUUID().toString(),
+        name.take(128).ifBlank { "Local file" }, uri, local = true)
+    fun move(stations: List<Station>, from: String, to: String, after: Boolean): List<Station> {
+        if (from == to) return stations
+        val source = stations.firstOrNull { it.id == from } ?: return stations
+        val rest = stations.filterNot { it.id == from }.toMutableList()
+        val target = rest.indexOfFirst { it.id == to }
+        if (target < 0) return stations
+        rest.add(target + if (after) 1 else 0, source)
+        return rest
+    }
     fun migrate(prefs: SharedPreferences) {
         if (prefs.contains(KEY_LIST)) return
         val url = prefs.getString(CustomStreamPlayer.KEY_URL, "").orEmpty()
