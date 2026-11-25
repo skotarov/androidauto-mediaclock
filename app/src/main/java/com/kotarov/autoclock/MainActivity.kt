@@ -222,11 +222,29 @@ class MainActivity : Activity() {
         val chimeButton = quickButton(R.drawable.ic_setting_chime, "Alert chime") {
             showChimePicker()
         }
-        listOf(carAudioButton, sizeButton, themeButton, speakButton, chimeButton, testButton).forEach { button ->
-            quickRow.addView(FrameLayout(this).apply {
+        fun addQuickControl(parent: LinearLayout, button: ImageButton) {
+            parent.addView(FrameLayout(this).apply {
                 addView(button, FrameLayout.LayoutParams(dp(48), dp(48), android.view.Gravity.CENTER))
-            }, LinearLayout.LayoutParams(0, dp(52), 1f))
+            }, LinearLayout.LayoutParams(0, dp(56), 1f))
         }
+        listOf(carAudioButton, sizeButton, themeButton).forEach { button ->
+            addQuickControl(quickRow, button)
+        }
+        // A single subtle outline links the three message-related controls.
+        // Equal weights preserve the original six button positions.
+        val messageControls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER
+            background = GradientDrawable().apply {
+                cornerRadius = dp(28).toFloat()
+                setColor(Color.TRANSPARENT)
+                setStroke(dp(1), faint)
+            }
+        }
+        listOf(speakButton, chimeButton, testButton).forEach { button ->
+            addQuickControl(messageControls, button)
+        }
+        quickRow.addView(messageControls, LinearLayout.LayoutParams(0, dp(56), 3f))
         addSpaced(root, quickRow)
         syncQuickButtons()
 
