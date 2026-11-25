@@ -43,7 +43,7 @@ object StreamMetadata {
     private fun fetchIcon(url: String): String = runCatching {
         val c = connection(url)
         try {
-            if (c.responseCode !in 200..299) return ""
+            if (c.responseCode !in 200..299) return@runCatching ""
             val bytes = c.inputStream.use { input ->
                 val out = ByteArrayOutputStream()
                 val buf = ByteArray(4096)
@@ -52,16 +52,16 @@ object StreamMetadata {
                     if (n < 0) break
                     out.write(buf, 0, n)
                 }
-                if (out.size() > 256 * 1024) return ""
+                if (out.size() > 256 * 1024) return@runCatching ""
                 out.toByteArray()
             }
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-            if (bounds.outWidth !in 1..4096 || bounds.outHeight !in 1..4096) return ""
+            if (bounds.outWidth !in 1..4096 || bounds.outHeight !in 1..4096) return@runCatching ""
             val opts = BitmapFactory.Options().apply {
                 inSampleSize = maxOf(1, Integer.highestOneBit(maxOf(bounds.outWidth, bounds.outHeight) / 96))
             }
-            val original = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts) ?: return ""
+            val original = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts) ?: return@runCatching ""
             val small = Bitmap.createScaledBitmap(original, 64, 64, true)
             val out = ByteArrayOutputStream()
             small.compress(Bitmap.CompressFormat.PNG, 100, out)
