@@ -21,8 +21,8 @@ android {
         applicationId = "com.kotarov.autoclock2"
         minSdk = 23
         targetSdk = 36
-        versionCode = 101
-        versionName = "0.101.0"
+        versionCode = 102
+        versionName = "0.102.0"
     }
 
     // The public beta workflow supplies its permanent signing identity.
@@ -59,6 +59,13 @@ android {
         }
     }
 
+    packaging {
+        resources {
+            pickFirsts += setOf("META-INF/LICENSE", "META-INF/LICENSE.txt", "META-INF/NOTICE", "META-INF/NOTICE.txt",
+                "META-INF/DEPENDENCIES", "META-INF/versions/9/OSGI-INF/MANIFEST.MF")
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -72,6 +79,8 @@ android {
 
 dependencies {
     implementation("androidx.media:media:1.7.0")
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+    implementation("org.jsoup:jsoup:1.22.2")
     implementation("androidx.car.app:app:1.4.0")
     testImplementation("junit:junit:4.13.2")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.2")

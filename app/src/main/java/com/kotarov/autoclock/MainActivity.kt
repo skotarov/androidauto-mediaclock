@@ -751,7 +751,8 @@ class MainActivity : Activity() {
             type = "*/*"
             putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("audio/*", "video/*", "text/*", "application/epub+zip",
                 "application/x-fictionbook+xml", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                "application/octet-stream", "application/xml"))
+                "application/octet-stream", "application/xml", "application/pdf", "application/rtf",
+                "application/x-rtf", "application/xhtml+xml"))
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
         }
         runCatching { startActivityForResult(intent, FILE_REQUEST) }.onFailure {
@@ -773,7 +774,7 @@ class MainActivity : Activity() {
         val textFile = com.kotarov.autoclock.media.BookFormat.detect(name, mime) != null
         if (!textFile && mime != null && !mime.startsWith("audio/") && !mime.startsWith("video/") &&
             mime != "application/octet-stream") {
-            android.widget.Toast.makeText(this, "Select audio, video, TXT, EPUB, FB2, DOCX or Markdown", android.widget.Toast.LENGTH_SHORT).show()
+            android.widget.Toast.makeText(this, "Select audio, video, TXT, EPUB, FB2, DOCX, PDF, HTML, RTF or Markdown", android.widget.Toast.LENGTH_SHORT).show()
             return
         }
         val granted = runCatching {

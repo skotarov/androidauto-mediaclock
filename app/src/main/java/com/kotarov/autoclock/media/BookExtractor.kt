@@ -37,6 +37,9 @@ internal object BookExtractor {
         val budget = Budget(MAX_BYTES)
         when (format) {
             BookFormat.PLAIN -> plain(Limited(input, budget, MAX_BYTES, check), check, emit)
+            BookFormat.PDF -> PdfBookExtractor.extract(Limited(input, budget, MAX_BYTES, check), directory, check, emit)
+            BookFormat.HTML -> HtmlBookExtractor.extract(Limited(input, budget, 4L * 1024 * 1024, check), check, emit)
+            BookFormat.RTF -> RtfBookExtractor.extract(Limited(input, budget, MAX_BYTES, check), check, emit)
             BookFormat.FB2 -> xmlText(Limited(input, budget, MAX_BYTES, check), format, check, emit)
             BookFormat.EPUB, BookFormat.DOCX -> {
                 val archive = File.createTempFile("book-", ".zip", directory)

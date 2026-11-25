@@ -96,7 +96,7 @@ internal class TextFileReader(context: Context) {
                     if (doc == null) finish("Document unavailable, protected, too large or unreadable")
                     else {
                         document = doc
-                        if (doc.length == 0) finish("Text file is empty")
+                        if (doc.length == 0) finish("No readable text found (scanned PDFs need OCR)")
                         else {
                             offset = prefs.getInt(source, 0).coerceIn(0, doc.length)
                             lastSaved = offset
@@ -128,6 +128,7 @@ internal class TextFileReader(context: Context) {
                     null, null, null)?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
             }.getOrNull().orEmpty()
             val format = BookFormat.detect(name, app.contentResolver.getType(uri)) ?: BookFormat.PLAIN
+            if (format == BookFormat.PDF) com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(app)
             afd.use { descriptor ->
                 descriptor.createInputStream().use { input ->
                     file.outputStream().buffered().writer(Charsets.UTF_16BE).use { output ->
