@@ -749,7 +749,9 @@ class MainActivity : Activity() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "*/*"
-            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("audio/*", "video/*", "text/plain"))
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("audio/*", "video/*", "text/*", "application/epub+zip",
+                "application/x-fictionbook+xml", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "application/octet-stream", "application/xml"))
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
         }
         runCatching { startActivityForResult(intent, FILE_REQUEST) }.onFailure {
@@ -768,10 +770,10 @@ class MainActivity : Activity() {
             contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
                 null, null, null)?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
         }.getOrNull() ?: "Local file"
-        val textFile = mime == "text/plain" || name.endsWith(".txt", ignoreCase = true)
+        val textFile = com.kotarov.autoclock.media.BookFormat.detect(name, mime) != null
         if (!textFile && mime != null && !mime.startsWith("audio/") && !mime.startsWith("video/") &&
             mime != "application/octet-stream") {
-            android.widget.Toast.makeText(this, "Select an audio, video or TXT file", android.widget.Toast.LENGTH_SHORT).show()
+            android.widget.Toast.makeText(this, "Select audio, video, TXT, EPUB, FB2, DOCX or Markdown", android.widget.Toast.LENGTH_SHORT).show()
             return
         }
         val granted = runCatching {

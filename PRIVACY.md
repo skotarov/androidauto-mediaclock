@@ -35,3 +35,7 @@ For privacy questions see the [developer profile](https://github.com/skotarov); 
 ## Play distribution and reading
 
 The initial Play release does not request location or contact weather providers. It uses ordinary media playback, with an Android media foreground notification while playing. Local audio and text positions are saved on the device. TXT reading creates a temporary UTF-16 text cache in private app storage, deleted when reading stops normally; stale caches are cleaned on later reading. The offline system speech engine receives text chunks for synthesis; the app does not deliberately upload the text. The test build retains optional location and weather features described above. The Play release has no payment, advertising, analytics or account system at launch. Future monetization or weather services require a revised disclosure before activation.
+
+## Additional local book formats
+
+EPUB, FB2 and DOCX documents are parsed locally and converted to a temporary private text cache for offline speech. Markdown is read as plain text. ZIP-based books may briefly require a private temporary archive copy; this is deleted after extraction, and old orphaned book caches are cleaned on later reading. No document content is sent to a developer server.

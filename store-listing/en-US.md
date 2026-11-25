@@ -5,7 +5,7 @@
 **Short description:** Listen to your audio, radio and text files on the road with Android Auto.
 
 **Full description:**
-Listen. Plan. Travel. Bring your own audio along for the journey. Listen to local recordings, podcasts, lectures and audiobooks, or add direct HTTPS audio streams and internet radio. Choose a plain-text file and listen with an installed Android offline voice.
+Listen. Plan. Travel. Bring your own audio along for the journey. Listen to local recordings, podcasts, lectures and audiobooks, or add direct HTTPS audio streams and internet radio. Choose a TXT, EPUB, FB2, DOCX or Markdown file and listen with an installed Android offline voice.
 
 - Play, pause and seek supported audio from Android Auto.
 - Continue reading and local playback from saved bookmarks.

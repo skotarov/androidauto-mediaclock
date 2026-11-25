@@ -19,3 +19,7 @@ This edition does not request location permission or send location to weather se
 Settings and bookmarks remain on the device until removed or app storage is cleared. Temporary text caches are removed when reading stops normally; orphaned caches are cleaned on later reading. You can remove source entries, clear app storage, revoke document access through Android or uninstall the app. Android cloud backup is disabled. External stream providers may have their own retention and deletion practices. HTTPS is used for direct streams.
 
 The developer does not sell personal data or use it for advertising. Any future weather or payment functionality requires an updated policy and applicable Play declarations before activation.
+
+## Additional local book formats
+
+EPUB, FB2 and DOCX documents are parsed locally and converted to a temporary private text cache for offline speech. Markdown is read as plain text. ZIP-based books may briefly require a private temporary archive copy; this is deleted after extraction, and old orphaned book caches are cleaned on later reading. No document content is sent to a developer server.

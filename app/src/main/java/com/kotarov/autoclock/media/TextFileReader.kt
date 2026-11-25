@@ -10,7 +10,6 @@ import android.os.SystemClock
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import java.io.File
-import java.io.PushbackInputStream
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.util.Locale
@@ -94,7 +93,7 @@ internal class TextFileReader(context: Context) {
                     loadSignal = null
                     handler.removeCallbacks(timeout)
                     val doc = result.getOrNull()
-                    if (doc == null) finish("TXT unavailable, too large or unreadable")
+                    if (doc == null) finish("Document unavailable, protected, too large or unreadable")
                     else {
                         document = doc
                         if (doc.length == 0) finish("Text file is empty")
@@ -123,37 +122,24 @@ internal class TextFileReader(context: Context) {
                 ?: error("No file")
             var length = 0
             val sample = StringBuilder(4000)
+            val uri = Uri.parse(source)
+            val name = runCatching {
+                app.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
+                    null, null, null)?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+            }.getOrNull().orEmpty()
+            val format = BookFormat.detect(name, app.contentResolver.getType(uri)) ?: BookFormat.PLAIN
             afd.use { descriptor ->
-                PushbackInputStream(descriptor.createInputStream(), 3).use { stream ->
-                    val prefix = ByteArray(3)
-                    var n = 0
-                    while (n < prefix.size) {
-                        val read = stream.read(prefix, n, prefix.size - n)
-                        if (read <= 0) break
-                        n += read
-                    }
-                    val b = prefix.map { it.toInt() and 255 }
-                    val (charset, skip) = when {
-                        n >= 3 && b == listOf(239, 187, 191) -> Charsets.UTF_8 to 3
-                        n >= 2 && b[0] == 255 && b[1] == 254 -> Charsets.UTF_16LE to 2
-                        n >= 2 && b[0] == 254 && b[1] == 255 -> Charsets.UTF_16BE to 2
-                        else -> Charsets.UTF_8 to 0
-                    }
-                    if (n > skip) stream.unread(prefix, skip, n - skip)
-                    stream.reader(charset).buffered().use { reader ->
-                        file.outputStream().buffered().writer(Charsets.UTF_16BE).use { output ->
-                            val buffer = CharArray(8192)
-                            while (true) {
-                                signal.throwIfCanceled()
-                                if (Thread.currentThread().isInterrupted) error("Cancelled")
-                                val count = reader.read(buffer)
-                                if (count < 0) break
-                                require(length.toLong() + count <= TextReading.MAX_CHARS)
-                                length += count
-                                if (sample.length < 4000)
-                                    sample.append(buffer, 0, minOf(count, 4000 - sample.length))
-                                output.write(buffer, 0, count)
-                            }
+                descriptor.createInputStream().use { input ->
+                    file.outputStream().buffered().writer(Charsets.UTF_16BE).use { output ->
+                        BookExtractor.extract(format, input, dir, {
+                            signal.throwIfCanceled()
+                            if (Thread.currentThread().isInterrupted) error("Cancelled")
+                        }) { text ->
+                            require(length.toLong() + text.length <= TextReading.MAX_CHARS)
+                            length += text.length
+                            if (sample.length < 4000)
+                                sample.append(text, 0, minOf(text.length, 4000 - sample.length))
+                            output.write(text)
                         }
                     }
                 }
@@ -281,7 +267,7 @@ internal class TextFileReader(context: Context) {
                 if (generation == token && serial == readSerial && !paused) {
                     job = null
                     handler.removeCallbacks(timeout)
-                    if (result.isFailure) finish("TXT read failed")
+                    if (result.isFailure) finish("Document read failed")
                     else {
                         val chunk = result.getOrNull()
                         if (chunk == null) finish(null)
