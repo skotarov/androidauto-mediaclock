@@ -13,6 +13,7 @@ import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import androidx.media.MediaBrowserServiceCompat
+import com.kotarov.autoclock.R
 import com.kotarov.autoclock.artwork.ClockArtworkProvider
 import com.kotarov.autoclock.artwork.ClockRenderer
 import com.kotarov.autoclock.artwork.PublishedArtwork
@@ -54,7 +55,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private var artKey: String? = null
     private var miniKey: String? = null
     private var lastPublished: MediaPublicationKey? = null
-    private var lastPlayback: Boolean? = null
+    private data class PlaybackKey(val running: Boolean, val id: String, val seekable: Boolean)
+    private var lastPlayback: PlaybackKey? = null
     private data class WeatherArtwork(val locality: String?, val forecast: List<ForecastStore.Hour>)
     private var lastWeatherArtwork: WeatherArtwork? = null
     private var weatherArtworkRevision = 0L
@@ -162,6 +164,17 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                     }
                 }
 
+                override fun onCustomAction(action: String?, extras: Bundle?) {
+                    val delta = when (action) {
+                        ACTION_BACK_10 -> -10000
+                        ACTION_FORWARD_10 -> 10000
+                        else -> return
+                    }
+                    if (streamPlayer.seekBy(StreamLibrary.selected(prefs)?.url, delta)) {
+                        lastPlayback = null
+                        publishPlaybackState()
+                    }
+                }
                 override fun onPlay() = setWeatherEnabled(true)
                 override fun onPause() = setWeatherEnabled(false)
                 override fun onStop() = setWeatherEnabled(false)
@@ -212,35 +225,21 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val items = mutableListOf<MediaBrowserCompat.MediaItem>()
         val alert = MediaDescriptionCompat.Builder().setMediaId(CLOCK_ID)
             .setTitle("Alert only")
-            .setIconBitmap(sourceIcon(true)).build()
+            .setIconBitmap(sourceIcon(R.drawable.ic_source_travel)).build()
         items.add(MediaBrowserCompat.MediaItem(alert, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
         StreamLibrary.list(prefs).forEach { station ->
             val desc = MediaDescriptionCompat.Builder().setMediaId(station.id)
-                .setTitle(station.name).setIconBitmap(station.bitmap() ?: sourceIcon(false)).build()
+                .setTitle(station.name).setIconBitmap(station.bitmap() ?: sourceIcon(if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast)).build()
             items.add(MediaBrowserCompat.MediaItem(desc, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
         }
         result.sendResult(items)
     }
 
-    private fun sourceIcon(alert: Boolean): Bitmap {
+    private fun sourceIcon(resource: Int): Bitmap {
         val bitmap = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
-        val canvas = android.graphics.Canvas(bitmap)
-        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-            color = android.graphics.Color.rgb(35, 155, 255)
-            strokeWidth = 4f
-            style = android.graphics.Paint.Style.STROKE
-        }
-        if (alert) {
-            canvas.drawCircle(32f, 32f, 23f, paint)
-            canvas.drawLine(32f, 32f, 32f, 16f, paint)
-            canvas.drawLine(32f, 32f, 45f, 32f, paint)
-        } else {
-            canvas.drawRoundRect(7f, 20f, 57f, 51f, 5f, 5f, paint)
-            canvas.drawLine(10f, 19f, 48f, 8f, paint)
-            canvas.drawCircle(21f, 35f, 8f, paint)
-            canvas.drawLine(36f, 31f, 49f, 31f, paint)
-            canvas.drawLine(36f, 39f, 49f, 39f, paint)
-        }
+        val drawable = getDrawable(resource)
+        drawable?.setBounds(4, 4, 60, 60)
+        drawable?.draw(android.graphics.Canvas(bitmap))
         return bitmap
     }
 
@@ -506,8 +505,13 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private fun syncStream() {
         val url = if (clientActive && running && !noticePlaying)
             StreamLibrary.selected(prefs)?.url else null
-        streamPlayer.sync(url, phoneMode != PhoneAudioMode.OFF) { error ->
-            if (error == "File ended") setWeatherEnabled(false)
+        streamPlayer.sync(url, phoneMode != PhoneAudioMode.OFF, onChanged = {
+            lastPlayback = null
+            publishPlaybackState()
+        }) { error ->
+            lastPlayback = null
+            publishPlaybackState()
+            if (error == "Media ended") setWeatherEnabled(false)
             if (clientActive && !noticePlaying && testNotice == null) {
                 testNotice = CityAnnouncement.Notice("ℹ️", error)
                 handler.removeCallbacks(hideTestNotice)
@@ -515,6 +519,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 publishClock()
             }
         }
+        publishPlaybackState()
     }
 
     private fun playNotice(body: String) {
@@ -531,25 +536,31 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     private fun publishPlaybackState() {
         val isRunning = running
-        if (lastPlayback == isRunning) return
+        val station = StreamLibrary.selected(prefs)
+        val seek = streamPlayer.seekState(station?.url)
+        val key = PlaybackKey(isRunning, station?.id ?: CLOCK_ID, seek != null)
+        if (lastPlayback == key) return
         val actions = PlaybackStateCompat.ACTION_PLAY or
             PlaybackStateCompat.ACTION_PAUSE or PlaybackStateCompat.ACTION_STOP or
             PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID or
             PlaybackStateCompat.ACTION_PREPARE_FROM_MEDIA_ID
-        session.setPlaybackState(
-            PlaybackStateCompat.Builder()
-                .setState(
-                    ClockPlaybackState.forRunning(isRunning),
-                    PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN,
-                    0f
-                )
-                .setActions(actions)
-                .build()
-        )
-        lastPlayback = isRunning
+        val builder = PlaybackStateCompat.Builder()
+            .setState(ClockPlaybackState.forRunning(isRunning),
+                seek?.position?.toLong() ?: PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN,
+                if (isRunning && seek != null && !noticePlaying) 1f else 0f)
+            .setActions(actions)
+        // Leave next/previous slots free: Auto may place these custom actions there.
+        if (seek != null) {
+            builder.addCustomAction(ACTION_BACK_10, "Back 10 seconds", R.drawable.ic_replay_10)
+            builder.addCustomAction(ACTION_FORWARD_10, "Forward 10 seconds", R.drawable.ic_forward_10)
+        }
+        session.setPlaybackState(builder.build())
+        lastPlayback = key
     }
 
     companion object {
+        private const val ACTION_BACK_10 = "autoclock.back_10"
+        private const val ACTION_FORWARD_10 = "autoclock.forward_10"
         const val PREFERENCES = "clock_settings"
         const val KEY_LAYOUT = "clock_layout"
         const val KEY_SHOW_LOCATION = "show_location_message_v48"
