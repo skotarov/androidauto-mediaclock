@@ -14,6 +14,8 @@ Preferences, last location/locality and cached weather are stored on the device,
 
 The current beta has no accounts, advertising or analytics SDKs, or developer-operated tracking service. We do not sell personal data or use location for advertising. External providers may retain their own logs.
 
+The app uses an installed offline English Android text-to-speech voice to read the displayed notice text while weather and voice alerts are enabled. It does not intentionally select a network voice or transmit notice text to a developer-operated speech service.
+
 ## Controls and retention
 
 Revoke location permission in Android Settings to stop new location access. Previously cached data may remain until refreshed or deleted. Clear app storage or uninstall to delete local settings and cached data. Android cloud backup is disabled for this app version. HTTPS is used for weather requests. Third-party retention is governed by provider policies.
