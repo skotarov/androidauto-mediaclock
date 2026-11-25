@@ -516,7 +516,16 @@ class MainActivity : Activity() {
             setPadding(dp(8), dp(12), dp(8), dp(12))
             setOnClickListener { selectPhoneSource(StreamLibrary.ALERT_ID) }
         }
-        addSpaced(streamRows, alert)
+        val alertRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            addView(ImageView(this@MainActivity).apply {
+                setImageResource(R.drawable.ic_source_travel)
+            }, LinearLayout.LayoutParams(dp(36), dp(36)).apply { marginEnd = dp(8) })
+            addView(alert, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            setOnClickListener { selectPhoneSource(StreamLibrary.ALERT_ID) }
+        }
+        addSpaced(streamRows, alertRow)
         StreamLibrary.list(prefs).forEach { station ->
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -563,7 +572,7 @@ class MainActivity : Activity() {
             row.addView(ImageView(this).apply {
                 val icon = station.bitmap()
                 if (icon != null) setImageBitmap(icon)
-                else setImageResource(android.R.drawable.ic_media_play)
+                else setImageResource(if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast)
                 contentDescription = station.name
             }, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginEnd = dp(8) })
             row.addView(text(station.name, 16f, 0).apply {
