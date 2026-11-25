@@ -23,10 +23,36 @@ class CustomStreamPlayer(context: Context) {
     private var ownsMode = false
     private var ownsDevice = false
     private var requested: Triple<String, Boolean, Boolean>? = null
-    private var localResume: Pair<String, Int>? = null
+    data class SeekState(val position: Int, val duration: Int)
+    private var savedSeek: Pair<String, SeekState>? = null
+    private var prepared = false
+    private var seekable = false
+    private var changed: () -> Unit = {}
+
+    fun seekState(url: String?): SeekState? {
+        if (url == null) return null
+        val media = player
+        if (requested?.first == url && prepared && seekable && media != null) {
+            return runCatching { SeekState(media.currentPosition, media.duration) }.getOrNull()
+                ?.takeIf { it.duration > 0 }
+        }
+        return savedSeek?.takeIf { it.first == url }?.second
+    }
+
+    fun seekBy(url: String?, deltaMs: Int): Boolean {
+        val current = seekState(url) ?: return false
+        val target = (current.position.toLong() + deltaMs).coerceIn(0L, current.duration.toLong()).toInt()
+        val media = player
+        if (prepared && seekable && requested?.first == url && media != null) {
+            if (runCatching { media.seekTo(target) }.isFailure) return false
+        }
+        if (url != null) savedSeek = url to current.copy(position = target)
+        return true
+    }
 
     fun sync(url: String?, phone: Boolean, sharedPhoneChannel: Boolean = false,
-             onError: (String) -> Unit) {
+             onChanged: () -> Unit = {}, onError: (String) -> Unit) {
+        changed = onChanged
         val next = url?.takeIf { valid(it) || validLocal(it) }?.let { Triple(it, phone, sharedPhoneChannel) }
         if (requested == next) return
         stop()
@@ -123,22 +149,34 @@ class CustomStreamPlayer(context: Context) {
                 if (token == generation && player === it) {
                     handler.removeCallbacks(timeout)
                     runCatching {
-                        val position = localResume?.takeIf { p -> p.first == url }?.second ?: 0
-                        if (validLocal(url) && position > 0 && position < it.duration) it.seekTo(position)
+                        prepared = true
+                        seekable = it.duration > 0
+                        val position = savedSeek?.takeIf { p -> p.first == url }?.second?.position ?: 0
+                        if (seekable && position > 0 && position < it.duration) it.seekTo(position)
                         it.start()
+                        changed()
                     }.onFailure { fail(token, "Playback failed", onError) }
                 }
             }
+            media.setOnInfoListener { _, what, _ ->
+                if (token == generation && what == MediaPlayer.MEDIA_INFO_NOT_SEEKABLE) {
+                    seekable = false
+                    if (savedSeek?.first == url) savedSeek = null
+                    changed()
+                }
+                false
+            }
+            media.setOnSeekCompleteListener { if (token == generation) changed() }
             media.setOnErrorListener { _, _, _ ->
                 fail(token, "Stream unavailable", onError)
                 true
             }
             media.setOnCompletionListener {
-                if (token == generation && validLocal(url)) {
-                    localResume = null
+                if (token == generation && (validLocal(url) || seekable)) {
+                    savedSeek = null
                     requested = null
                     stop()
-                    onError("File ended")
+                    onError("Media ended")
                 } else fail(token, "Stream ended", onError)
             }
             if (validLocal(url)) media.setDataSource(app, android.net.Uri.parse(url))
@@ -168,11 +206,12 @@ class CustomStreamPlayer(context: Context) {
         val previous = requested
         requested = null
         val old = player
-        if (old != null && previous != null && validLocal(previous.first)) {
-            runCatching { old.currentPosition }.getOrNull()?.takeIf { it > 0 }?.let {
-                localResume = previous.first to it
-            }
+        if (old != null && previous != null && prepared && seekable) {
+            runCatching { SeekState(old.currentPosition, old.duration) }.getOrNull()
+                ?.takeIf { it.duration > 0 }?.let { savedSeek = previous.first to it }
         }
+        prepared = false
+        seekable = false
         player = null
         if (old != null) runCatching { old.release() }
         releaseRoute()
