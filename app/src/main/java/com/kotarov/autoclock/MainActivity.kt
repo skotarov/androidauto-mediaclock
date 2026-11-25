@@ -8,6 +8,9 @@ import android.content.ClipData
 import android.net.Uri
 import android.view.DragEvent
 import android.support.v4.media.MediaBrowserCompat
+import android.support.v4.media.session.MediaControllerCompat
+import android.support.v4.media.session.PlaybackStateCompat
+import android.widget.ImageButton
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -60,6 +63,21 @@ class MainActivity : Activity() {
     private lateinit var digitalImage: ImageView
     private lateinit var weatherButton: android.widget.ImageButton
     private var phoneBrowser: MediaBrowserCompat? = null
+    private var phoneController: MediaControllerCompat? = null
+    private lateinit var carAudioButton: ImageButton
+    private lateinit var sizeButton: ImageButton
+    private lateinit var speakButton: ImageButton
+    private lateinit var themeButton: ImageButton
+    private lateinit var backButton: ImageButton
+    private lateinit var forwardButton: ImageButton
+    private val playbackCallback = object : MediaControllerCompat.Callback() {
+        override fun onPlaybackStateChanged(state: PlaybackStateCompat?) {
+            syncTransportButtons(state)
+        }
+        override fun onSessionDestroyed() {
+            detachPhoneController()
+        }
+    }
     private val previewTick = object : Runnable {
         override fun run() {
             updatePreviewTiles()
@@ -71,6 +89,11 @@ class MainActivity : Activity() {
     private lateinit var streamRows: LinearLayout
     private val weatherPreferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == StreamLibrary.KEY_LIST || key == StreamLibrary.KEY_SELECTED) renderStreams()
+        if (key == PhoneAudioMode.KEY || key == NoticeAudio.KEY_SPEAK ||
+            key == AutoClockMediaService.KEY_LAYOUT || key == ClockTheme.KEY) {
+            syncQuickButtons()
+            updatePreviewTiles()
+        }
         if (key == ClockPreset.KEY_ADD_WEATHER) syncWeatherToggle()
         else if (key == "weather_fetched_at" || key == WeatherStore.KEY_LOCALITY) {
             updatePreviewTiles()
@@ -158,14 +181,54 @@ class MainActivity : Activity() {
                 marginStart = dp(6)
             })
         root.addView(choices)
-        val weatherRow = LinearLayout(this).apply {
+        val quickRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER
+        }
+        carAudioButton = quickButton(R.drawable.ic_bluetooth_audio, "Use car phone audio") {
+            if (android.os.Build.VERSION.SDK_INT >= 31) {
+                testAudio.stop()
+                val checked = PhoneAudioMode.read(prefs) == PhoneAudioMode.OFF
+                prefs.edit().putString(PhoneAudioMode.KEY,
+                    if (checked) PhoneAudioMode.ALERTS.id else PhoneAudioMode.OFF.id).apply()
+                syncQuickButtons()
+            }
+        }
+        carAudioButton.isEnabled = android.os.Build.VERSION.SDK_INT >= 31
+        sizeButton = quickButton(R.drawable.ic_setting_size, "Clock size") {
+            val compact = prefs.getString(AutoClockMediaService.KEY_LAYOUT, "standard") == "compact"
+            prefs.edit().putString(AutoClockMediaService.KEY_LAYOUT,
+                if (compact) "standard" else "compact").apply()
+            syncQuickButtons()
+            updatePreviewTiles()
+        }
+        speakButton = quickButton(R.drawable.ic_setting_speak, "Speak messages") {
+            testAudio.stop()
+            prefs.edit().putBoolean(NoticeAudio.KEY_SPEAK,
+                !prefs.getBoolean(NoticeAudio.KEY_SPEAK, true)).apply()
+            syncQuickButtons()
+        }
+        val testButton = quickButton(R.drawable.ic_setting_test, "Test") { showSoundTest() }
+        themeButton = quickButton(R.drawable.ic_setting_light, "Light theme") {
+            val light = ClockTheme.fromId(prefs.getString(ClockTheme.KEY, null)) == ClockTheme.LIGHT
+            prefs.edit().putString(ClockTheme.KEY,
+                if (light) ClockTheme.DARK.id else ClockTheme.LIGHT.id).apply()
+            syncQuickButtons()
+            updatePreviewTiles()
+        }
+        listOf(carAudioButton, sizeButton, speakButton, testButton, themeButton).forEach { button ->
+            quickRow.addView(FrameLayout(this).apply {
+                addView(button, FrameLayout.LayoutParams(dp(48), dp(48), android.view.Gravity.CENTER))
+            }, LinearLayout.LayoutParams(0, dp(52), 1f))
+        }
+        addSpaced(root, quickRow)
+        syncQuickButtons()
+
+        val transportRow = LinearLayout(this).apply {
             gravity = android.view.Gravity.CENTER
             orientation = LinearLayout.HORIZONTAL
-            addView(text("Weather", 17f, 0), LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { marginEnd = dp(12) })
         }
-        weatherButton = android.widget.ImageButton(this).apply {
+        weatherButton = ImageButton(this).apply {
             background = GradientDrawable().apply {
                 cornerRadius = dp(32).toFloat()
                 setColor(Color.rgb(225, 228, 232))
@@ -179,69 +242,19 @@ class MainActivity : Activity() {
                 syncWeatherToggle()
             }
         }
-        weatherRow.addView(weatherButton, LinearLayout.LayoutParams(dp(108), dp(52)))
-        addSpaced(root, weatherRow)
+        backButton = quickButton(R.drawable.ic_replay_10, "Back 10 seconds") {
+            phoneController?.transportControls?.sendCustomAction(AutoClockMediaService.ACTION_BACK_10, null)
+        }
+        forwardButton = quickButton(R.drawable.ic_forward_10, "Forward 10 seconds") {
+            phoneController?.transportControls?.sendCustomAction(AutoClockMediaService.ACTION_FORWARD_10, null)
+        }
+        transportRow.addView(weatherButton, LinearLayout.LayoutParams(dp(108), dp(52)))
+        listOf(backButton, forwardButton).forEach { button ->
+            transportRow.addView(button, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(12) })
+        }
+        addSpaced(root, transportRow)
+        syncTransportButtons(null)
         syncWeatherToggle()
-
-        // Directly BELOW the two thumbnails, with no explanatory widgets.
-        root.addView(checkOption(
-            "Light theme",
-            ClockTheme.fromId(prefs.getString(ClockTheme.KEY, null)) == ClockTheme.LIGHT
-        ) { checked ->
-            prefs.edit().putString(
-                ClockTheme.KEY,
-                if (checked) ClockTheme.LIGHT.id else ClockTheme.DARK.id
-            ).apply()
-            updatePreviewTiles()
-        })
-
-        updatePreviewTiles()
-
-        root.addView(text("Size", 18f, dp(5)))
-        val sizeRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-        }
-        sizeRow.addView(text("A", 14f, 0))
-        val sizeSlider = SeekBar(this).apply {
-            max = 1 // Keep the two validated render sizes: compact / standard.
-            progress = if (prefs.getString(
-                    AutoClockMediaService.KEY_LAYOUT, "standard"
-                ) == "compact") 0 else 1
-            contentDescription = "Clock size"
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(
-                    seekBar: SeekBar?, value: Int, fromUser: Boolean
-                ) {
-                    if (!fromUser) return
-                    prefs.edit().putString(
-                        AutoClockMediaService.KEY_LAYOUT,
-                        if (value == 0) "compact" else "standard"
-                    ).apply()
-                    updatePreviewTiles()
-                }
-                override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
-                override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
-            })
-        }
-        sizeRow.addView(sizeSlider,
-            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        sizeRow.addView(text("A", 28f, 0))
-        root.addView(sizeRow, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply { bottomMargin = dp(24) })
-
-        if (android.os.Build.VERSION.SDK_INT >= 31) {
-            root.addView(checkOption(
-                "Use car phone audio",
-                PhoneAudioMode.read(prefs) != PhoneAudioMode.OFF,
-                bluetoothIcon = true
-            ) { checked ->
-                testAudio.stop()
-                prefs.edit().putString(PhoneAudioMode.KEY,
-                    if (checked) PhoneAudioMode.ALERTS.id else PhoneAudioMode.OFF.id).apply()
-            })
-        }
 
         val messages = settingsGroup(root, "Messages")
         val soundButton = Button(this).apply {
@@ -265,16 +278,6 @@ class MainActivity : Activity() {
             }
         }
         addSpaced(messages, soundButton)
-        messages.addView(checkOption("Speak messages",
-            prefs.getBoolean(NoticeAudio.KEY_SPEAK, true)) { checked ->
-            testAudio.stop()
-            prefs.edit().putBoolean(NoticeAudio.KEY_SPEAK, checked).apply()
-        })
-        addSpaced(messages, Button(this).apply {
-            text = "Test"
-            isAllCaps = false
-            setOnClickListener { showSoundTest() }
-        })
         locationMessage = text("", 18f, dp(4)).apply {
             gravity = android.view.Gravity.CENTER
             visibility = View.GONE
@@ -336,7 +339,20 @@ class MainActivity : Activity() {
         NoticeTest.phoneCaption = phoneCaption
         phoneCaption(NoticeTest.currentCaption)
         phoneBrowser = MediaBrowserCompat(this, ComponentName(this, AutoClockMediaService::class.java),
-            object : MediaBrowserCompat.ConnectionCallback() {}, null).also { it.connect() }
+            object : MediaBrowserCompat.ConnectionCallback() {
+                override fun onConnected() {
+                    val browser = phoneBrowser ?: return
+                    if (!browser.isConnected) return
+                    detachPhoneController()
+                    phoneController = MediaControllerCompat(this@MainActivity, browser.sessionToken).also {
+                        it.registerCallback(playbackCallback, messageHandler)
+                        syncTransportButtons(it.playbackState)
+                    }
+                }
+                override fun onConnectionSuspended() { detachPhoneController() }
+                override fun onConnectionFailed() { detachPhoneController() }
+            }, null).also { it.connect() }
+        syncQuickButtons()
         messageHandler.removeCallbacks(previewTick)
         messageHandler.post(previewTick)
     }
@@ -345,6 +361,7 @@ class MainActivity : Activity() {
         messageHandler.removeCallbacks(hideLocationMessage)
         messageHandler.removeCallbacks(previewTick)
         if (NoticeTest.phoneCaption === phoneCaption) NoticeTest.phoneCaption = null
+        detachPhoneController()
         phoneBrowser?.disconnect()
         phoneBrowser = null
         if (::locationMessage.isInitialized) locationMessage.visibility = View.GONE
@@ -354,6 +371,52 @@ class MainActivity : Activity() {
         testAudio.stop()
         releasePreviews()
         super.onStop()
+    }
+
+    private fun quickButton(icon: Int, label: String, action: () -> Unit): ImageButton =
+        ImageButton(this).apply {
+            setImageResource(icon)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            contentDescription = label
+            if (android.os.Build.VERSION.SDK_INT >= 26) tooltipText = label
+            setOnClickListener { action() }
+            paintQuickButton(this, false)
+        }
+
+    private fun paintQuickButton(button: ImageButton, active: Boolean) {
+        button.isSelected = active
+        button.background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(if (active) accent else background)
+            setStroke(dp(2), if (active) accent else faint)
+        }
+        button.setColorFilter(Color.WHITE)
+        button.alpha = if (button.isEnabled) 1f else 0.35f
+    }
+
+    private fun syncQuickButtons() {
+        if (!::carAudioButton.isInitialized || !::themeButton.isInitialized) return
+        val prefs = settings()
+        paintQuickButton(carAudioButton, carAudioButton.isEnabled && PhoneAudioMode.read(prefs) != PhoneAudioMode.OFF)
+        paintQuickButton(sizeButton, prefs.getString(AutoClockMediaService.KEY_LAYOUT, "standard") == "standard")
+        paintQuickButton(speakButton, prefs.getBoolean(NoticeAudio.KEY_SPEAK, true))
+        paintQuickButton(themeButton, ClockTheme.fromId(prefs.getString(ClockTheme.KEY, null)) == ClockTheme.LIGHT)
+    }
+
+    private fun syncTransportButtons(state: PlaybackStateCompat?) {
+        if (!::backButton.isInitialized || !::forwardButton.isInitialized) return
+        val actions = state?.customActions.orEmpty()
+        backButton.isEnabled = actions.any { it.action == AutoClockMediaService.ACTION_BACK_10 }
+        forwardButton.isEnabled = actions.any { it.action == AutoClockMediaService.ACTION_FORWARD_10 }
+        paintQuickButton(backButton, false)
+        paintQuickButton(forwardButton, false)
+    }
+
+    private fun detachPhoneController() {
+        phoneController?.unregisterCallback(playbackCallback)
+        phoneController = null
+        syncTransportButtons(null)
     }
 
     private fun syncWeatherToggle() {
