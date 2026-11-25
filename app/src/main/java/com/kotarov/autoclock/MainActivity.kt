@@ -88,7 +88,10 @@ class MainActivity : Activity() {
     private val testAudio by lazy { NoticeAudio(this) }
     private lateinit var streamRows: LinearLayout
     private val weatherPreferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == StreamLibrary.KEY_LIST || key == StreamLibrary.KEY_SELECTED) renderStreams()
+        if (key == StreamLibrary.KEY_LIST || key == StreamLibrary.KEY_SELECTED) {
+            renderStreams()
+            syncTransportButtons(phoneController?.playbackState)
+        }
         if (key == PhoneAudioMode.KEY || key == NoticeAudio.KEY_SPEAK ||
             key == AutoClockMediaService.KEY_LAYOUT || key == ClockTheme.KEY) {
             syncQuickButtons()
@@ -406,9 +409,12 @@ class MainActivity : Activity() {
 
     private fun syncTransportButtons(state: PlaybackStateCompat?) {
         if (!::backButton.isInitialized || !::forwardButton.isInitialized) return
+        val alertOnly = StreamLibrary.selected(settings()) == null
         val actions = state?.customActions.orEmpty()
-        backButton.isEnabled = actions.any { it.action == AutoClockMediaService.ACTION_BACK_10 }
-        forwardButton.isEnabled = actions.any { it.action == AutoClockMediaService.ACTION_FORWARD_10 }
+        backButton.visibility = if (alertOnly) View.GONE else View.VISIBLE
+        forwardButton.visibility = if (alertOnly) View.GONE else View.VISIBLE
+        backButton.isEnabled = !alertOnly && actions.any { it.action == AutoClockMediaService.ACTION_BACK_10 }
+        forwardButton.isEnabled = !alertOnly && actions.any { it.action == AutoClockMediaService.ACTION_FORWARD_10 }
         paintQuickButton(backButton, false)
         paintQuickButton(forwardButton, false)
     }
@@ -425,6 +431,13 @@ class MainActivity : Activity() {
         weatherButton.setImageResource(if (playing) android.R.drawable.ic_media_pause
             else android.R.drawable.ic_media_play)
         weatherButton.contentDescription = if (playing) "Pause" else "Play"
+        weatherButton.isSelected = playing
+        weatherButton.background = GradientDrawable().apply {
+            cornerRadius = dp(32).toFloat()
+            setColor(if (playing) Color.WHITE else background)
+            setStroke(dp(2), if (playing) Color.WHITE else faint)
+        }
+        weatherButton.setColorFilter(if (playing) Color.rgb(47, 52, 60) else Color.WHITE)
         updatePreviewTiles()
     }
 
