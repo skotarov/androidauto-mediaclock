@@ -29,7 +29,9 @@ internal class TextFileReader(context: Context) {
         LinkedBlockingQueue<Runnable>()) { runnable ->
         Thread(runnable, "AutoClockText").apply { isDaemon = true }
     }
-    private data class Document(val file: File, val length: Int, val sample: String)
+    private data class Document(val file: File, val length: Int, val sample: String, val cached: Boolean = false) {
+        fun release() { if (!cached) file.delete() }
+    }
     private data class Chunk(val start: Int, val end: Int, val body: String)
     private var document: Document? = null
     private var job: Future<*>? = null
@@ -136,13 +138,13 @@ internal class TextFileReader(context: Context) {
             val result = runCatching { prepare(source, signal) }
             handler.post {
                 if (generation != token) {
-                    result.getOrNull()?.file?.delete()
+                    result.getOrNull()?.release()
                 } else {
                     job = null
                     loadSignal = null
                     handler.removeCallbacks(timeout)
                     val doc = result.getOrNull()
-                    if (doc == null) finish("Document unavailable, protected, too large or unreadable")
+                    if (doc == null) finish(result.exceptionOrNull()?.message?.takeIf { it.startsWith("PDF needs") } ?: "Document unavailable, protected, too large or unreadable")
                     else {
                         document = doc
                         if (doc.length == 0) finish("No readable text found (scanned PDFs need OCR)")
@@ -179,14 +181,26 @@ internal class TextFileReader(context: Context) {
             val previousBackend = prefs.getString(backendKey, null)
             // Keep the extraction algorithm stable for bookmarks created by
             // previous versions: different engines can produce different offsets.
-            val tryNative = format == BookFormat.PDF && android.os.Build.VERSION.SDK_INT >= 35 &&
-                (previousBackend == "native" || (previousBackend == null && !prefs.contains(source)))
+            val tryNative = format == BookFormat.PDF && PdfBookExtractor.nativeAvailable() &&
+                (!LegacyPdfExtractor.available || previousBackend == "native" || (previousBackend == null && !prefs.contains(source)))
+            if (format == BookFormat.PDF && !tryNative && !LegacyPdfExtractor.available)
+                error("PDF needs Android 15 or Android 12–14 with S Extension 13; install Universal")
+            val sourceKey = BookDiskCache.fingerprint(app, uri, signal)
+            fun cacheKey(native: Boolean) = sourceKey?.let {
+                BookDiskCache.key(it, format.name + if (format == BookFormat.PDF) (if (native) ":native" else ":pdfbox") else ":v2")
+            }
+            cacheKey(tryNative)?.let { key ->
+                BookDiskCache.read(dir, key)?.let { hit ->
+                    file.delete()
+                    return Document(hit.file, hit.length, hit.sample, true)
+                }
+            }
             fun extract(native: Boolean) {
                 signal.throwIfCanceled()
                 length = 0
                 sample.setLength(0)
                 if (format == BookFormat.PDF && !native)
-                    com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(app)
+                    LegacyPdfExtractor.init(app)
                 val afd = app.contentResolver.openAssetFileDescriptor(uri, "r", signal) ?: error("No file")
                 afd.use { descriptor ->
                     descriptor.createInputStream().use { input ->
@@ -211,7 +225,7 @@ internal class TextFileReader(context: Context) {
             } catch (e: Exception) {
                 // Fall back only for a new PDF, before committing a backend
                 // choice; never reinterpret an existing native bookmark.
-                if (!nativeUsed || previousBackend == "native") throw e
+                if (!nativeUsed || previousBackend == "native" || !LegacyPdfExtractor.available) throw e
                 signal.throwIfCanceled()
                 if (Thread.currentThread().isInterrupted) throw e
                 nativeUsed = false
@@ -224,7 +238,9 @@ internal class TextFileReader(context: Context) {
             signal.throwIfCanceled()
             // The cache is a fixed-width character index, not a synthesized audio file.
             require(file.length() == length.toLong() * 2L)
-            return Document(file, length, sample.toString())
+            val cached = cacheKey(nativeUsed)?.let { BookDiskCache.store(dir, it, file) }
+            return if (cached != null) Document(cached, length, sample.toString(), true)
+                else Document(file, length, sample.toString())
         } catch (e: Throwable) {
             file.delete()
             throw e
@@ -443,7 +459,7 @@ internal class TextFileReader(context: Context) {
             runCatching { old.stop() }
             runCatching { old.shutdown() }
         }
-        document?.file?.delete()
+        document?.release()
         document = null
         ready = false
         paused = false

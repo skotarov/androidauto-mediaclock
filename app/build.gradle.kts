@@ -12,6 +12,8 @@ val commercialForecastEndpoint = providers.gradleProperty("autoClockForecastEndp
     .orElse("").get().trim()
 val escapedEndpoint = commercialForecastEndpoint.replace("\\", "\\\\").replace("\"", "\\\"")
 
+val litePdf = providers.gradleProperty("litePdf").map { it.toBoolean() }.orElse(false).get()
+
 android {
     buildFeatures { buildConfig = true }
     namespace = "com.kotarov.autoclock"
@@ -21,8 +23,9 @@ android {
         applicationId = "com.kotarov.autoclock2"
         minSdk = 23
         targetSdk = 36
-        versionCode = 106
-        versionName = "0.106.0"
+        versionCode = 107
+        versionName = "0.107.0"
+        buildConfigField("boolean", "LITE_PDF", litePdf.toString())
     }
 
     // The public beta workflow supplies its permanent signing identity.
@@ -59,6 +62,8 @@ android {
         }
     }
 
+    sourceSets.getByName("main").java.srcDir(if (litePdf) "src/litePdf/kotlin" else "src/universalPdf/kotlin")
+
     packaging {
         resources {
             pickFirsts += setOf("META-INF/LICENSE", "META-INF/LICENSE.txt", "META-INF/NOTICE", "META-INF/NOTICE.txt",
@@ -79,11 +84,10 @@ android {
 
 dependencies {
     implementation("androidx.media:media:1.7.0")
-    implementation("com.tom-roush:pdfbox-android:2.0.27.0") {
+    if (!litePdf) implementation("com.tom-roush:pdfbox-android:2.0.27.0") {
         // Text-only reader rejects encrypted documents and never signs/verifies.
         exclude(group = "org.bouncycastle")
     }
-    implementation("org.jsoup:jsoup:1.22.2")
     implementation("androidx.car.app:app:1.4.0")
     testImplementation("junit:junit:4.13.2")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.2")

@@ -39,9 +39,9 @@ internal object BookExtractor {
             BookFormat.PLAIN -> plain(Limited(input, budget, MAX_BYTES, check), check, emit)
             BookFormat.PDF -> {
                 val bounded = Limited(input, budget, MAX_BYTES, check)
-                if (nativePdf && android.os.Build.VERSION.SDK_INT >= 35)
+                if (nativePdf && PdfBookExtractor.nativeAvailable())
                     PdfBookExtractor.extractNative(bounded, directory, check, emit)
-                else PdfBookExtractor.extract(bounded, directory, check, emit)
+                else LegacyPdfExtractor.extract(bounded, directory, check, emit)
             }
             BookFormat.HTML -> HtmlBookExtractor.extract(Limited(input, budget, 4L * 1024 * 1024, check), check, emit)
             BookFormat.RTF -> RtfBookExtractor.extract(Limited(input, budget, MAX_BYTES, check), check, emit)

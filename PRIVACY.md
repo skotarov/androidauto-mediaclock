@@ -41,3 +41,5 @@ The initial Play release does not request location or contact weather providers.
 EPUB, FB2 and DOCX documents are parsed locally and converted to a temporary private text cache for offline speech. Markdown is read as plain text. ZIP-based books may briefly require a private temporary archive copy; this is deleted after extraction, and old orphaned book caches are cleaned on later reading. No document content is sent to a developer server.
 
 PDF (embedded text only), local HTML and RTF are also processed on the device. PDF extraction can use temporary scratch storage in the private app cache, which is normally deleted when extraction closes. HTML scripts and remote resources are not executed or fetched. Scanned documents and password-protected PDFs are not supported. No OCR or online conversion service is used.
+
+Extracted book text may remain in private app cache for reuse (up to 3 files, 64 MiB total, 7 days; cleaned on subsequent reading). Documents without reliable size and modification metadata use temporary files only. Clearing app cache removes retained extracts. Bookmarks remain separate.
