@@ -1,11 +1,13 @@
 package com.kotarov.autoclock.media
 
-/** Temporary two-line media messages. Use monotonic elapsed time;
+/** Temporary media messages. Use monotonic elapsed time;
  * ordinary locality updates do not repeat. */
 class CityAnnouncement {
     private var lastCity: String? = null
     private var until = 0L
-    data class Notice(val heading: String, val body: String)
+    data class Notice(val heading: String, val body: String) {
+        val subtitle: String get() = "$heading $body"
+    }
     private var message: Notice? = null
 
     fun update(city: String?, now: Long): Boolean {
@@ -36,8 +38,7 @@ class CityAnnouncement {
     fun title(now: Long): String? = notice(now)?.body
 
     companion object {
-        /** The title contains only a symbol. Keep the complete English
-         * warning in the subtitle, including any forecast time prefix. */
+        /** Prefix the complete warning subtitle with its symbol. */
         internal fun warningIcon(warning: String): String =
             when (warning.removePrefix("Within 1h: ").trim()) {
                 "Thunderstorm" -> "⛈️"
@@ -48,6 +49,6 @@ class CityAnnouncement {
                 else -> if (warning.startsWith("Precipitation:")) "🌧️" else "⚠️"
             }
 
-        const val DURATION_MS = 8000L
+        const val DURATION_MS = 15000L
     }
 }
