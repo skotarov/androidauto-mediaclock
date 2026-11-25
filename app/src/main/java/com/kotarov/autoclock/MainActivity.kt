@@ -24,6 +24,7 @@ import android.app.Activity
 import android.app.AlertDialog
 import com.kotarov.autoclock.media.NoticeSound
 import com.kotarov.autoclock.media.NoticeAudio
+import com.kotarov.autoclock.media.CustomStreamPlayer
 import com.kotarov.autoclock.media.NoticeTest
 import com.kotarov.autoclock.media.NoticeSoundPlayer
 import android.widget.Switch
@@ -242,6 +243,47 @@ class MainActivity : Activity() {
                 prefs.edit().putBoolean(NoticeAudio.KEY_PHONE_CHANNEL, checked).apply()
             })
         }
+
+        root.addView(checkOption(
+            "Custom stream",
+            prefs.getBoolean(CustomStreamPlayer.KEY_ENABLED, false)
+        ) { checked ->
+            prefs.edit().putBoolean(CustomStreamPlayer.KEY_ENABLED, checked).apply()
+        })
+        root.addView(Button(this).apply {
+            isAllCaps = false
+            text = "Stream URL"
+            setOnClickListener {
+                val field = android.widget.EditText(this@MainActivity).apply {
+                    inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                        android.text.InputType.TYPE_TEXT_VARIATION_URI
+                    hint = "https://..."
+                    setSingleLine(true)
+                    setText(prefs.getString(CustomStreamPlayer.KEY_URL, ""))
+                }
+                val dialog = AlertDialog.Builder(this@MainActivity)
+                    .setTitle("Custom stream URL")
+                    .setView(field)
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton("Save", null)
+                    .create()
+                dialog.setOnShowListener {
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                        val url = field.text.toString().trim()
+                        if (url.isNotEmpty() && !CustomStreamPlayer.valid(url)) {
+                            field.error = "Enter a direct HTTPS audio URL"
+                        } else {
+                            prefs.edit().putString(CustomStreamPlayer.KEY_URL, url).apply()
+                            dialog.dismiss()
+                        }
+                    }
+                }
+                dialog.show()
+            }
+        }, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ))
 
         // Weather attribution stays at the bottom of the phone settings.
         root.addView(View(this), LinearLayout.LayoutParams(
