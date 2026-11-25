@@ -24,6 +24,8 @@ import android.app.Activity
 import android.app.AlertDialog
 import com.kotarov.autoclock.media.NoticeSound
 import com.kotarov.autoclock.media.NoticeAudio
+import com.kotarov.autoclock.media.PhoneAudioMode
+import com.kotarov.autoclock.media.ContinuousPhoneAudio
 import com.kotarov.autoclock.media.CustomStreamPlayer
 import com.kotarov.autoclock.media.NoticeTest
 import com.kotarov.autoclock.media.NoticeSoundPlayer
@@ -55,7 +57,16 @@ class MainActivity : Activity() {
     private var syncingWeatherToggle = false
     private val soundPreview by lazy { NoticeSoundPlayer() }
     private val testAudio by lazy { NoticeAudio(this) }
+    private var phoneAudioButton: Button? = null
+    private fun updatePhoneAudioButton() {
+        val prefs = settings()
+        val mode = PhoneAudioMode.read(prefs)
+        val status = if (mode == PhoneAudioMode.CONTINUOUS)
+            " · " + (prefs.getString(ContinuousPhoneAudio.KEY_STATUS, null) ?: "Waiting for Android Auto") else ""
+        phoneAudioButton?.text = "Bluetooth phone audio: " + mode.label + status
+    }
     private val weatherPreferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == ContinuousPhoneAudio.KEY_STATUS || key == PhoneAudioMode.KEY) updatePhoneAudioButton()
         if (key == ClockPreset.KEY_ADD_WEATHER) syncWeatherToggle()
         else if (key == "weather_fetched_at" || key == WeatherStore.KEY_LOCALITY) {
             updatePreviewTiles()
@@ -235,13 +246,34 @@ class MainActivity : Activity() {
         ).apply { topMargin = dp(16) })
 
         if (android.os.Build.VERSION.SDK_INT >= 31) {
-            root.addView(checkOption(
-                "Bluetooth phone audio",
-                prefs.getBoolean(NoticeAudio.KEY_PHONE_CHANNEL, false)
-            ) { checked ->
-                testAudio.stop()
-                prefs.edit().putBoolean(NoticeAudio.KEY_PHONE_CHANNEL, checked).apply()
-            })
+            phoneAudioButton = Button(this).apply {
+                isAllCaps = false
+                setOnClickListener {
+                    val modes = PhoneAudioMode.entries
+                    AlertDialog.Builder(this@MainActivity)
+                        .setTitle("Bluetooth phone audio")
+                        .setSingleChoiceItems(modes.map { it.label }.toTypedArray(),
+                            modes.indexOf(PhoneAudioMode.read(prefs))) { dialog, index ->
+                            testAudio.stop()
+                            // Clear stale status when there is no connected media service.
+                            if (NoticeTest.receiver == null)
+                                prefs.edit().remove(ContinuousPhoneAudio.KEY_STATUS).apply()
+                            val selected = modes[index]
+                            // Also let the same mode be reselected to retry a failed route.
+                            if (selected == PhoneAudioMode.read(prefs) &&
+                                selected == PhoneAudioMode.CONTINUOUS) {
+                                prefs.edit().putString(PhoneAudioMode.KEY, PhoneAudioMode.OFF.id).apply()
+                            }
+                            prefs.edit().putString(PhoneAudioMode.KEY, selected.id).apply()
+                            updatePhoneAudioButton()
+                            dialog.dismiss()
+                        }
+                        .setNegativeButton("Cancel", null)
+                        .show()
+                }
+            }
+            root.addView(phoneAudioButton)
+            updatePhoneAudioButton()
         }
 
         root.addView(checkOption(
@@ -319,6 +351,7 @@ class MainActivity : Activity() {
         super.onStart()
         settings().registerOnSharedPreferenceChangeListener(weatherPreferenceListener)
         syncWeatherToggle()
+        updatePhoneAudioButton()
     }
 
     override fun onStop() {
@@ -485,7 +518,7 @@ class MainActivity : Activity() {
                     val prefs = settings()
                     testAudio.play(NoticeSound.fromId(prefs.getString(NoticeSound.KEY, null)),
                         NoticeTest.spoken(sample),
-                        prefs.getBoolean(NoticeAudio.KEY_PHONE_CHANNEL, false))
+                        PhoneAudioMode.read(prefs) != PhoneAudioMode.OFF)
                 }
             }
             .setNegativeButton("Cancel", null)
