@@ -62,7 +62,8 @@ class MainActivity : Activity() {
         val prefs = settings()
         val mode = PhoneAudioMode.read(prefs)
         val status = if (mode == PhoneAudioMode.CONTINUOUS)
-            " · " + (prefs.getString(ContinuousPhoneAudio.KEY_STATUS, null) ?: "Waiting for Android Auto") else ""
+            " · " + (if (NoticeTest.receiver == null) "Waiting for Android Auto"
+                else prefs.getString(ContinuousPhoneAudio.KEY_STATUS, null) ?: "Connecting…") else ""
         phoneAudioButton?.text = "Bluetooth phone audio: " + mode.label + status
     }
     private val weatherPreferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
