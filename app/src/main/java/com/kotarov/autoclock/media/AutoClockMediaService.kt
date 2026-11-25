@@ -28,6 +28,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var session: MediaSessionCompat
     private lateinit var prefs: SharedPreferences
+    private var activeSource: StreamLibrary.Station? = null
     private val running: Boolean
         get() = ClockSelectionStore.weatherEnabled(prefs)
     private val cityAnnouncement = CityAnnouncement()
@@ -93,6 +94,9 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (!clientActive) return@OnSharedPreferenceChangeListener
+        if (key == StreamLibrary.KEY_LIST || key == StreamLibrary.KEY_SELECTED) {
+            activeSource = StreamLibrary.selected(prefs)
+        }
         if (key == PhoneAudioMode.KEY || key == NoticeAudio.KEY_PHONE_CHANNEL) {
             stopNoticeAudio()
             streamPlayer.stop()
@@ -148,6 +152,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         }
         ClockSelectionStore.migrateSimplifiedIfNeeded(prefs)
         StreamLibrary.migrate(prefs)
+        activeSource = StreamLibrary.selected(prefs)
         session = MediaSessionCompat(this, "AutoClockMediaTestsV037").apply {
             setFlags(MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS)
             setCallback(object : MediaSessionCompat.Callback() {
@@ -168,7 +173,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                         ACTION_FORWARD_10 -> 10000
                         else -> return
                     }
-                    val station = StreamLibrary.selected(prefs)
+                    val station = activeSource
                     if (station?.textFile != true && streamPlayer.seekBy(station?.url, delta)) {
                         lastPlayback = null
                         publishPlaybackState()
@@ -256,6 +261,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private fun resumeClientWork() {
         if (clientActive) return
         clientActive = true
+        activeSource = StreamLibrary.selected(prefs)
         NoticeTest.receiver = receiveTest
         syncStream()
         lastWarningRevision = prefs.getLong(WeatherStore.KEY_WARNING_REV, 0L)
@@ -307,6 +313,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     override fun onDestroy() {
         suspendClientWork()
+        streamPlayer.close()
         // Service shutdown must not change the saved weather preference.
         prefs.unregisterOnSharedPreferenceChangeListener(prefsListener)
         session.isActive = false
@@ -340,8 +347,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             stopNoticeAudio()
             streamPlayer.stop()
         } else if (running && !noticePlaying) {
-            // Explicit Play retries an ended or failed stream.
-            streamPlayer.stop()
+            // Retry a failed request without restarting an already playing source.
+            streamPlayer.retryFailed()
         }
         ClockSelectionStore.setWeatherEnabled(prefs, enabled)
         // The same preference listener handles phone switches. Publish now
@@ -416,6 +423,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         }
         val notice = cityAnnouncement.notice(tick)
         val caption = (testNotice ?: notice)?.subtitle
+        val position = if (caption == null) currentMediaPosition() else null
         NoticeTest.publishCaption(caption)
         val key = artwork.toString() + "|" + miniArtwork.toString()
         if (artKey != key || baseMetadata == null) {
@@ -476,7 +484,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 artworkWorker.cancel()
                 requestedArtKey = null
             }
-            publishMediaSubtitle(key, caption, currentMediaPosition())
+            publishMediaSubtitle(key, caption, position)
         }
         // Each newly created notice is a distinct object, even if the same
         // warning appears again at a later refresh. Never sound on redraw.
@@ -486,25 +494,25 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 playNotice(notice.body)
             }
         }
-        schedulePositionTick(caption, currentMediaPosition())
+        schedulePositionTick(caption, position)
     }
 
     private fun currentMediaPosition(): Int? {
         if (!clientActive || !running || noticePlaying) return null
-        return streamPlayer.activePositionMs(StreamLibrary.selected(prefs)?.url)
+        return streamPlayer.activePositionMs(activeSource?.url)
     }
 
     private fun schedulePositionTick(caption: String?, position: Int?) {
         handler.removeCallbacks(positionTick)
         if (clientActive && caption == null && position != null) {
-            handler.postDelayed(positionTick, 1000L)
+            handler.postDelayed(positionTick, (1000L - position % 1000L).coerceAtLeast(100L))
         }
     }
 
     private fun refreshPositionSubtitle() {
         if (!clientActive) return
         val caption = (testNotice ?: cityAnnouncement.notice(SystemClock.elapsedRealtime()))?.subtitle
-        val position = currentMediaPosition()
+        val position = if (caption == null) currentMediaPosition() else null
         artKey?.let { publishMediaSubtitle(it, caption, position) }
         schedulePositionTick(caption, position)
     }
@@ -512,12 +520,12 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private fun publishMediaSubtitle(key: String, caption: String?, position: Int?) {
         val base = baseMetadata ?: return
         val textProgress = if (running && !noticePlaying && caption == null)
-            streamPlayer.readingProgress(StreamLibrary.selected(prefs)?.url) else null
+            streamPlayer.readingProgress(activeSource?.url) else null
         val subtitle = MediaPositionSubtitle.text(caption, position) ?: textProgress ?: INVISIBLE_TEXT
-        val publication = MediaPublicationKey(key, INVISIBLE_TEXT, subtitle)
+        val publication = MediaPublicationKey(key, INVISIBLE_TEXT, subtitle, activeSource?.id ?: CLOCK_ID)
         if (publication == lastPublished) return
         session.setMetadata(MediaMetadataCompat.Builder(base)
-            .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, StreamLibrary.selected(prefs)?.id ?: CLOCK_ID)
+            .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, activeSource?.id ?: CLOCK_ID)
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, INVISIBLE_TEXT)
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, subtitle)
             .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, INVISIBLE_TEXT)
@@ -529,11 +537,11 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     private fun syncStream() {
         val station = if (clientActive && running && !noticePlaying)
-            StreamLibrary.selected(prefs) else null
+            activeSource else null
         val url = station?.url
         streamPlayer.sync(url, phoneMode != PhoneAudioMode.OFF,
             textLanguage = station?.takeIf { it.textFile }?.language, onChanged = {
-            lastPlayback = null
+            if (station?.textFile != true) lastPlayback = null
             publishPlaybackState()
             refreshPositionSubtitle()
         }) { error ->
@@ -552,13 +560,16 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private fun playNotice(body: String) {
+        val sound = NoticeSound.fromId(prefs.getString(NoticeSound.KEY, null))
+        val speak = prefs.getBoolean(NoticeAudio.KEY_SPEAK, true)
+        // A visual-only notice must not touch playback or the audio route.
+        if (!speak && sound == NoticeSound.SILENT) return
         noticePlaying = true
         handler.removeCallbacks(positionTick)
-        // Release the stream's HFP route before the short alert claims it.
-        streamPlayer.stop()
-        val sound = NoticeSound.fromId(prefs.getString(NoticeSound.KEY, null))
+        // Release the HFP route, but retain an already prepared TXT reader.
+        streamPlayer.suspendForNotice()
         noticeAudio.play(sound, body, phoneMode != PhoneAudioMode.OFF,
-            speakEnabled = prefs.getBoolean(NoticeAudio.KEY_SPEAK, true)) {
+            speakEnabled = speak) {
             noticePlaying = false
             syncStream()
         }
@@ -566,7 +577,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     private fun publishPlaybackState() {
         val isRunning = running
-        val station = StreamLibrary.selected(prefs)
+        val station = activeSource
         val seek = if (station?.textFile == true) null else streamPlayer.seekState(station?.url)
         val key = PlaybackKey(isRunning, station?.id ?: CLOCK_ID, seek != null)
         if (lastPlayback == key) return

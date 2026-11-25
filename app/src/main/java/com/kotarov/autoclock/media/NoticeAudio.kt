@@ -22,6 +22,7 @@ class NoticeAudio(context: Context) {
     private var speakEnabled = true
     private var ownsMode = false
     private var ownsDevice = false
+    private var routeWatch: (() -> Unit)? = null
 
     fun play(sound: NoticeSound, text: String, phoneChannel: Boolean,
              sharedPhoneChannel: Boolean = false,
@@ -89,7 +90,7 @@ class NoticeAudio(context: Context) {
                     if (token == generation) {
                         if (routeActive(id)) {
                             playOnRoute(token, sound, text, true)
-                            monitor(token, id)
+                            watchRoute(token, id)
                         } else fallback(token, sound, text)
                     }
                 }, 700L)
@@ -109,12 +110,20 @@ class NoticeAudio(context: Context) {
                 audio.communicationDevice?.id == id
         }.getOrDefault(false)
 
+    private fun watchRoute(token: Long, id: Int) {
+        if (token != generation) return
+        routeWatch = PhoneRouteWatch.start(audio, handler) {
+            if (token == generation && !routeActive(id)) complete()
+        }
+        if (routeWatch == null) monitor(token, id)
+    }
+
     private fun monitor(token: Long, id: Int) {
         handler.postDelayed({
             if (token == generation) {
                 if (routeActive(id)) monitor(token, id) else complete()
             }
-        }, 250L)
+        }, 1000L)
     }
 
     private fun fallback(token: Long, sound: NoticeSound, text: String) {
@@ -156,6 +165,8 @@ class NoticeAudio(context: Context) {
     }
 
     private fun releaseRoute() {
+        routeWatch?.invoke()
+        routeWatch = null
         keepAlive.stop()
         if (Build.VERSION.SDK_INT >= 31 && ownsDevice) {
             runCatching { audio.clearCommunicationDevice() }

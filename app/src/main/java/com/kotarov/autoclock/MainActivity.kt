@@ -87,9 +87,12 @@ class MainActivity : Activity() {
     private val soundPreview by lazy { NoticeSoundPlayer() }
     private val testAudio by lazy { NoticeAudio(this) }
     private lateinit var streamRows: LinearLayout
+    private val sourceTitles = mutableMapOf<String, TextView>()
+    private var renderedSources: List<StreamLibrary.Station>? = null
+    private var highlightedSource: String? = null
     private val weatherPreferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == StreamLibrary.KEY_LIST || key == StreamLibrary.KEY_SELECTED) {
-            renderStreams()
+            if (key == StreamLibrary.KEY_LIST) renderStreams() else highlightSelectedSource()
             syncTransportButtons(phoneController?.playbackState)
         }
         if (key == PhoneAudioMode.KEY || key == NoticeAudio.KEY_SPEAK ||
@@ -584,13 +587,22 @@ class MainActivity : Activity() {
 
     private fun renderStreams() {
         if (!::streamRows.isInitialized) return
-        streamRows.removeAllViews()
         val prefs = settings()
+        val sources = StreamLibrary.list(prefs)
+        if (renderedSources == sources) {
+            highlightSelectedSource()
+            return
+        }
+        renderedSources = sources
+        streamRows.removeAllViews()
+        sourceTitles.clear()
         val selected = prefs.getString(StreamLibrary.KEY_SELECTED, StreamLibrary.ALERT_ID)
+        highlightedSource = selected
         val alert = text("Alert only", 16f, 0).apply {
             setTextColor(if (selected == StreamLibrary.ALERT_ID) accent else ink)
             setOnClickListener { selectPhoneSource(StreamLibrary.ALERT_ID) }
         }
+        sourceTitles[StreamLibrary.ALERT_ID] = alert
         val alertRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
@@ -605,7 +617,7 @@ class MainActivity : Activity() {
             setOnClickListener { selectPhoneSource(StreamLibrary.ALERT_ID) }
         }
         addSpaced(streamRows, alertRow)
-        StreamLibrary.list(prefs).forEach { station ->
+        sources.forEach { station ->
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = android.view.Gravity.CENTER_VERTICAL
@@ -654,10 +666,12 @@ class MainActivity : Activity() {
                 else setImageResource(if (station.textFile) R.drawable.ic_source_text else if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast)
                 contentDescription = station.name
             }, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginEnd = dp(8) })
-            row.addView(text(station.name, 16f, 0).apply {
+            val title = text(station.name, 16f, 0).apply {
                 setTextColor(if (selected == station.id) accent else ink)
                 setOnClickListener { selectPhoneSource(station.id) }
-            }, LinearLayout.LayoutParams(
+            }
+            sourceTitles[station.id] = title
+            row.addView(title, LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             row.addView(Button(this).apply {
                 text = "Edit"
@@ -688,12 +702,20 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun highlightSelectedSource() {
+        val selected = settings().getString(StreamLibrary.KEY_SELECTED, StreamLibrary.ALERT_ID)
+        if (selected == highlightedSource) return
+        sourceTitles[highlightedSource]?.setTextColor(ink)
+        sourceTitles[selected]?.setTextColor(accent)
+        highlightedSource = selected
+    }
+
     private fun selectPhoneSource(id: String) {
         val prefs = settings()
         prefs.edit().putString(StreamLibrary.KEY_SELECTED, id).apply()
         ClockSelectionStore.setWeatherEnabled(prefs, true)
         syncWeatherToggle()
-        renderStreams()
+        highlightSelectedSource()
     }
 
     private fun pickFile() {

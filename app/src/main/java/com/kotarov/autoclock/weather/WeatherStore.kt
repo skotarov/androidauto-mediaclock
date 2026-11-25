@@ -40,6 +40,8 @@ object WeatherStore {
     private var fixInFlight = false
     private var latest: Location? = null
     private var lastFallback: Long? = null
+    private var stationarySince: Long? = null
+    private var lastLocalityFixNanos = Long.MIN_VALUE
     private var weatherThread: Thread? = null
     private var localityThread: Thread? = null
     private var lastWeatherAttempt: Long? = null
@@ -157,6 +159,8 @@ object WeatherStore {
             generation++
             latest = null
             localityConfirmation.reset()
+            stationarySince = null
+            lastLocalityFixNanos = Long.MIN_VALUE
             lastFallback = null
             val prefs = app!!.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             val lat = Double.fromBits(prefs.getLong(KEY_LAT, Double.NaN.toBits()))
@@ -220,10 +224,14 @@ object WeatherStore {
             }
         }
         val now = SystemClock.elapsedRealtime()
+        val stationary = stationarySince?.let { now - it >= TravelRefreshPolicy.STATIONARY_AFTER_MS } == true
+        val weatherNeedsFix = lastWeatherSuccess?.let { now - it >= TravelRefreshPolicy.WEATHER_INTERVAL_MS } ?: true
+        val fallbackInterval = TravelRefreshPolicy.fallbackInterval(stationary,
+            weatherNeedsFix || localityConfirmation.pending || localityFailed)
         if (WeatherLocation.fresh(latest)) {
             processFix(latest!!)
         } else if (!fixInFlight &&
-            (lastFallback == null || now - lastFallback!! >= TravelRefreshPolicy.FALLBACK_INTERVAL_MS)) {
+            (lastFallback == null || now - lastFallback!! >= fallbackInterval)) {
             lastFallback = now
             fixInFlight = true
             val token = generation
@@ -242,7 +250,10 @@ object WeatherStore {
         val context = app ?: return
         if (!WeatherLocation.permitted(context) || !WeatherLocation.fresh(location)) return
         val prior = latest
-        if (prior != null && location.elapsedRealtimeNanos < prior.elapsedRealtimeNanos) return
+        if (prior != null && location.elapsedRealtimeNanos <= prior.elapsedRealtimeNanos) return
+        val now = SystemClock.elapsedRealtime()
+        stationarySince = if (prior != null && prior.distanceTo(location) <= 100f &&
+            (!location.hasSpeed() || location.speed <= 1f)) stationarySince ?: now else null
         latest = Location(location)
         processFix(location)
     }
@@ -252,10 +263,12 @@ object WeatherStore {
         if (!WeatherLocation.permitted(context)) return
         val point = TravelRefreshPolicy.Point(location.latitude, location.longitude)
         val now = SystemClock.elapsedRealtime()
-        if (localityThread == null && TravelRefreshPolicy.localityDue(now,
+        if (localityThread == null && location.elapsedRealtimeNanos != lastLocalityFixNanos &&
+            TravelRefreshPolicy.localityDue(now,
                 lastLocalityAttempt, point.distanceFrom(lastLocalityPoint),
                 locality(context) != null && !localityConfirmation.pending, localityFailed)) {
             lastLocalityAttempt = now
+            lastLocalityFixNanos = location.elapsedRealtimeNanos
             val token = generation
             localityThread = Thread({
                 val name = resolveLocality(context, point.lat, point.lon)
@@ -351,9 +364,16 @@ object WeatherStore {
                         val editor = prefs.edit()
                         if (result != null) {
                             val savedAt = System.currentTimeMillis()
+                            val announced = prefs.getString("warning_announced_v95", prefs.getString(KEY_WARNING, null))
+                            val lastAnnounced = prefs.getLong(KEY_WARNING_REV, 0L)
                             editor.putString(KEY_WARNING, warning)
-                                .putLong(KEY_WARNING_REV, savedAt)
-                                .putString("weather_cached_mode", AUTO_ID)
+                            if (WeatherWarning.shouldAnnounce(announced, warning, savedAt - lastAnnounced)) {
+                                editor.putString("warning_announced_v95", warning)
+                                    .putLong(KEY_WARNING_REV, savedAt)
+                            } else if (warning == null && prefs.getString(KEY_WARNING, null) != null) {
+                                editor.remove("warning_announced_v95").putLong(KEY_WARNING_REV, savedAt)
+                            }
+                            editor.putString("weather_cached_mode", AUTO_ID)
                                 .putLong("weather_fetched_at", savedAt)
                                 .putLong("weather_observation_time", result.reportTimeMs)
                                 .putString("weather_station_label", result.place)

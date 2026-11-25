@@ -15,7 +15,7 @@ object StreamLibrary {
     const val ALERT_ID = "autoclock_clock"
     data class Station(val id: String, val name: String, val url: String, val icon: String = "", val local: Boolean = false,
         val textFile: Boolean = false, val language: String = "auto") {
-        fun bitmap(): Bitmap? = runCatching {
+        fun bitmap(): Bitmap? = if (icon.isBlank()) null else runCatching {
             val bytes = Base64.decode(icon, Base64.DEFAULT)
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
         }.getOrNull()
@@ -28,8 +28,13 @@ object StreamLibrary {
             path.replace('-', ' ').replace('_', ' ').take(48)
         else host.take(48)
     }.getOrDefault("Stream")
-    fun list(prefs: SharedPreferences): List<Station> = runCatching {
-        val a = JSONArray(prefs.getString(KEY_LIST, "[]"))
+    private var cachedRaw: String? = null
+    private var cachedList: List<Station> = emptyList()
+    @Synchronized fun list(prefs: SharedPreferences): List<Station> {
+        val raw = prefs.getString(KEY_LIST, "[]").orEmpty()
+        if (raw == cachedRaw) return cachedList
+        cachedList = runCatching {
+        val a = JSONArray(raw)
         (0 until a.length()).mapNotNull { i ->
             val o = a.optJSONObject(i) ?: return@mapNotNull null
             val url = o.optString("url")
@@ -38,7 +43,10 @@ object StreamLibrary {
             else Station(o.getString("id"), o.optString("name").ifBlank { defaultName(url) },
                 url, o.optString("icon"), local, local && o.optBoolean("textFile", false), o.optString("language", "auto"))
         }
-    }.getOrDefault(emptyList())
+        }.getOrDefault(emptyList())
+        cachedRaw = raw
+        return cachedList
+    }
     fun selected(prefs: SharedPreferences): Station? =
         list(prefs).firstOrNull { it.id == prefs.getString(KEY_SELECTED, ALERT_ID) }
     fun save(prefs: SharedPreferences, stations: List<Station>) {

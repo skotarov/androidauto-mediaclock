@@ -4,6 +4,11 @@ package com.kotarov.autoclock.weather
 object TravelRefreshPolicy {
     const val LOCATION_TICK_MS = 30_000L
     const val FALLBACK_INTERVAL_MS = 60_000L
+    const val STATIONARY_INTERVAL_MS = 5 * 60_000L
+    const val STATIONARY_AFTER_MS = 2 * 60_000L
+
+    fun fallbackInterval(stationary: Boolean, urgent: Boolean): Long =
+        if (stationary && !urgent) STATIONARY_INTERVAL_MS else FALLBACK_INTERVAL_MS
     const val WEATHER_INTERVAL_MS = 15 * 60_000L
     const val WEATHER_DISTANCE_KM = 5.0
     const val WEATHER_MIN_ATTEMPT_MS = 60_000L

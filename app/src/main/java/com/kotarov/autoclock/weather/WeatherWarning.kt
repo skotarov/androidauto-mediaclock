@@ -11,6 +11,21 @@ object WeatherWarning {
         else -> null
     }
 
+    const val REMINDER_MS = 60 * 60_000L
+
+    /** Identical hazards need at most an hourly reminder; a new hazard is immediate. */
+    fun shouldAnnounce(previous: String?, next: String?, elapsedMs: Long): Boolean {
+        if (next == null) return false
+        if (previous == null) return true
+        if (elapsedMs >= REMINDER_MS) return true
+        fun chance(message: String) = message.takeIf { it.startsWith("Precipitation: ") }
+            ?.removePrefix("Precipitation: ")?.removeSuffix("%")?.toIntOrNull()
+        val before = chance(previous)
+        val after = chance(next)
+        if (before != null && after != null) return after - before >= 20
+        return previous != next
+    }
+
     fun testMessages(): List<String> {
         val types = listOf(95, 66, 75, 65, 45).mapNotNull { anomaly(it) }
         return types + types.map { "Within 1h: $it" } + "Precipitation: 80%"

@@ -22,11 +22,13 @@ class CustomStreamPlayer(context: Context) {
     private val keepAlive = PhoneAudioKeepAlive()
     private var ownsMode = false
     private var ownsDevice = false
+    private var routeWatch: (() -> Unit)? = null
     private var requested: Triple<String, Boolean, Boolean>? = null
     data class SeekState(val position: Int, val duration: Int)
     private var savedSeek: Pair<String, SeekState>? = null
     private var textLanguage: String? = null
-    private val reader by lazy { TextFileReader(app) }
+    private var reader: TextFileReader? = null
+    private var failed = false
     private var reading = false
     private var prepared = false
     private var seekable = false
@@ -40,7 +42,7 @@ class CustomStreamPlayer(context: Context) {
     }
 
     fun readingProgress(url: String?): String? =
-        if (reading && requested?.first == url) reader.progress() else null
+        if (reading && requested?.first == url) reader?.progress() else null
 
     fun seekState(url: String?): SeekState? {
         if (url == null) return null
@@ -68,7 +70,8 @@ class CustomStreamPlayer(context: Context) {
         changed = onChanged
         val next = url?.takeIf { valid(it) || validLocal(it) }?.let { Triple(it, phone, sharedPhoneChannel) }
         if (requested == next && this.textLanguage == textLanguage) return
-        stop()
+        val reuse = next != null && textLanguage != null && reader?.matches(next.first, textLanguage) == true
+        stop(keepReader = reuse)
         if (next == null) return
         this.textLanguage = textLanguage
         requested = next
@@ -125,7 +128,7 @@ class CustomStreamPlayer(context: Context) {
                 if (token == generation) {
                     if (routeActive(id)) {
                         open(token, url, true, onError)
-                        monitor(token, id, onError)
+                        watchRoute(token, id, onError)
                     } else fail(token, "Phone audio interrupted", onError)
                 }
             }, 700L)
@@ -141,6 +144,14 @@ class CustomStreamPlayer(context: Context) {
                 audio.communicationDevice?.id == id
         }.getOrDefault(false)
 
+    private fun watchRoute(token: Long, id: Int, onError: (String) -> Unit) {
+        if (token != generation) return
+        routeWatch = PhoneRouteWatch.start(audio, handler) {
+            if (token == generation && !routeActive(id)) fail(token, "Phone audio interrupted", onError)
+        }
+        if (routeWatch == null) monitor(token, id, onError)
+    }
+
     private fun monitor(token: Long, id: Int, onError: (String) -> Unit) {
         handler.postDelayed({
             if (token == generation) {
@@ -155,7 +166,8 @@ class CustomStreamPlayer(context: Context) {
         val language = textLanguage
         if (language != null) {
             reading = true
-            reader.start(url, language, phone, changed) { error ->
+            val currentReader = reader ?: TextFileReader(app).also { reader = it }
+            currentReader.start(url, language, phone, changed) { error ->
                 if (token == generation) {
                     if (error == null) {
                         stop()
@@ -226,13 +238,25 @@ class CustomStreamPlayer(context: Context) {
         stop()
         requested = previous
         textLanguage = language
+        failed = true
         onError(message)
     }
 
-    fun stop() {
+    fun retryFailed() { if (failed) stop() }
+
+    fun suspendForNotice() { stop(keepReader = true) }
+
+    fun close() {
+        stop()
+        reader?.close()
+        reader = null
+    }
+
+    fun stop(keepReader: Boolean = false) {
         generation++
         handler.removeCallbacksAndMessages(null)
-        if (reading) reader.stop()
+        if (keepReader) reader?.pause() else reader?.stop()
+        failed = false
         reading = false
         textLanguage = null
         val previous = requested
@@ -250,6 +274,8 @@ class CustomStreamPlayer(context: Context) {
     }
 
     private fun releaseRoute() {
+        routeWatch?.invoke()
+        routeWatch = null
         keepAlive.stop()
         if (Build.VERSION.SDK_INT >= 31 && ownsDevice) runCatching { audio.clearCommunicationDevice() }
         ownsDevice = false
