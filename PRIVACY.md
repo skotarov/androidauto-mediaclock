@@ -18,6 +18,8 @@ The app uses an installed offline English Android text-to-speech voice to read t
 
 An optional Bluetooth phone audio setting temporarily selects a connected hands-free audio output for alerts. The app does not place calls, read call history, record audio or request microphone access.
 
+Custom stream is optional. The entered HTTPS audio URL is stored locally; the phone connects directly to the selected provider, which receives normal network information such as IP address. Audio is not relayed through an Auto Clock server. When using Bluetooth phone audio, speech may be synthesized to a temporary local audio file which is deleted after playback or cancellation.
+
 ## Controls and retention
 
 Revoke location permission in Android Settings to stop new location access. Previously cached data may remain until refreshed or deleted. Clear app storage or uninstall to delete local settings and cached data. Android cloud backup is disabled for this app version. HTTPS is used for weather requests. Third-party retention is governed by provider policies.
