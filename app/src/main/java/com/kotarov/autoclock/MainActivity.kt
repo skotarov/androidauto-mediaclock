@@ -24,6 +24,7 @@ import android.widget.TextView
 import android.app.Activity
 import android.app.AlertDialog
 import com.kotarov.autoclock.media.NoticeSound
+import com.kotarov.autoclock.media.NoticeAudio
 import com.kotarov.autoclock.media.NoticeSoundPlayer
 import android.widget.Switch
 import com.kotarov.autoclock.artwork.ClockRenderer
@@ -241,6 +242,15 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { topMargin = dp(16) })
+
+        if (android.os.Build.VERSION.SDK_INT >= 31) {
+            root.addView(checkOption(
+                "Bluetooth phone audio",
+                prefs.getBoolean(NoticeAudio.KEY_PHONE_CHANNEL, false)
+            ) { checked ->
+                prefs.edit().putBoolean(NoticeAudio.KEY_PHONE_CHANNEL, checked).apply()
+            })
+        }
 
         // Weather attribution stays at the bottom of the phone settings.
         root.addView(View(this), LinearLayout.LayoutParams(
