@@ -559,8 +559,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     companion object {
-        private const val ACTION_BACK_10 = "autoclock.back_10"
-        private const val ACTION_FORWARD_10 = "autoclock.forward_10"
+        const val ACTION_BACK_10 = "autoclock.back_10"
+        const val ACTION_FORWARD_10 = "autoclock.forward_10"
         const val PREFERENCES = "clock_settings"
         const val KEY_LAYOUT = "clock_layout"
         const val KEY_SHOW_LOCATION = "show_location_message_v48"
