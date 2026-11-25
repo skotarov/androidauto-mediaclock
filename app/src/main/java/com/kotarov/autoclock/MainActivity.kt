@@ -92,6 +92,12 @@ class MainActivity : Activity() {
     private val previewWorker = ArtworkWorkers.create<PreviewImages> { it.discard() }
     private val messageHandler = Handler(Looper.getMainLooper())
     private lateinit var locationMessage: TextView
+    private val phoneCaption: (String?) -> Unit = { value ->
+        if (::locationMessage.isInitialized) {
+            locationMessage.text = value.orEmpty()
+            locationMessage.visibility = if (value == null) View.GONE else View.VISIBLE
+        }
+    }
     private val hideLocationMessage = Runnable {
         if (::locationMessage.isInitialized) locationMessage.visibility = View.GONE
     }
@@ -327,6 +333,8 @@ class MainActivity : Activity() {
         settings().registerOnSharedPreferenceChangeListener(weatherPreferenceListener)
         syncWeatherToggle()
         renderStreams()
+        NoticeTest.phoneCaption = phoneCaption
+        phoneCaption(NoticeTest.currentCaption)
         phoneBrowser = MediaBrowserCompat(this, ComponentName(this, AutoClockMediaService::class.java),
             object : MediaBrowserCompat.ConnectionCallback() {}, null).also { it.connect() }
         messageHandler.removeCallbacks(previewTick)
@@ -336,6 +344,7 @@ class MainActivity : Activity() {
     override fun onStop() {
         messageHandler.removeCallbacks(hideLocationMessage)
         messageHandler.removeCallbacks(previewTick)
+        if (NoticeTest.phoneCaption === phoneCaption) NoticeTest.phoneCaption = null
         phoneBrowser?.disconnect()
         phoneBrowser = null
         if (::locationMessage.isInitialized) locationMessage.visibility = View.GONE
@@ -523,10 +532,12 @@ class MainActivity : Activity() {
                             val source = event.localState as? String
                             if (source != null) {
                                 val p = settings()
-                                val next = StreamLibrary.move(StreamLibrary.list(p), source, station.id,
-                                    event.y > view.height / 2f)
-                                // Delay the redraw until Android finishes drag dispatch.
-                                messageHandler.post { StreamLibrary.save(p, next); renderStreams() }
+                                val after = event.y > view.height / 2f
+                                // Read the latest list after drag dispatch (metadata may have updated).
+                                messageHandler.post {
+                                    StreamLibrary.save(p, StreamLibrary.move(StreamLibrary.list(p), source, station.id, after))
+                                    if (!isDestroyed) renderStreams()
+                                }
                             }
                             true
                         }
@@ -615,7 +626,7 @@ class MainActivity : Activity() {
         if (requestCode != FILE_REQUEST || resultCode != RESULT_OK) return
         val uri = data?.data ?: return
         if (!CustomStreamPlayer.validLocal(uri.toString())) return
-        val mime = contentResolver.getType(uri)
+        val mime = runCatching { contentResolver.getType(uri) }.getOrNull()
         if (mime != null && !mime.startsWith("audio/") && !mime.startsWith("video/") &&
             mime != "application/octet-stream") {
             android.widget.Toast.makeText(this, "Select an audio or video file", android.widget.Toast.LENGTH_SHORT).show()
