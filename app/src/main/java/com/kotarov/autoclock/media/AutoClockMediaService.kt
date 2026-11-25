@@ -31,6 +31,18 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         get() = ClockSelectionStore.weatherEnabled(prefs)
     private val cityAnnouncement = CityAnnouncement()
     private val noticeAudio by lazy { NoticeAudio(this) }
+    private var testNotice: CityAnnouncement.Notice? = null
+    private val hideTestNotice = Runnable {
+        testNotice = null
+        if (clientActive) publishClock()
+    }
+    private val receiveTest: (CityAnnouncement.Notice) -> Unit = { sample ->
+        testNotice = NoticeTest.marked(sample)
+        handler.removeCallbacks(hideTestNotice)
+        handler.postDelayed(hideTestNotice, CityAnnouncement.DURATION_MS)
+        publishClock()
+        playNotice(NoticeTest.spoken(sample))
+    }
     private var lastSoundNotice: CityAnnouncement.Notice? = null
     private var clientActive = false
     private var lastWarningRevision = 0L
@@ -199,6 +211,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private fun resumeClientWork() {
         if (clientActive) return
         clientActive = true
+        NoticeTest.receiver = receiveTest
         lastWarningRevision = prefs.getLong(WeatherStore.KEY_WARNING_REV, 0L)
         WeatherStore.start(this, WeatherStore.Client.CAR)
         publishClock()
@@ -209,6 +222,9 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     private fun suspendClientWork() {
         clientActive = false
+        if (NoticeTest.receiver === receiveTest) NoticeTest.receiver = null
+        handler.removeCallbacks(hideTestNotice)
+        testNotice = null
         WeatherStore.stop(WeatherStore.Client.CAR)
         handler.removeCallbacks(minuteTick)
         handler.removeCallbacks(settingsRefresh)
@@ -344,7 +360,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         // Keep both title fields visually blank; put the icon and message
         // together in the subtitle for either metadata convention.
         val temporaryTitle = INVISIBLE_TEXT
-        val temporarySubtitle = notice?.subtitle ?: INVISIBLE_TEXT
+        val temporarySubtitle = (testNotice ?: notice)?.subtitle ?: INVISIBLE_TEXT
         val key = artwork.toString() + "|" + miniArtwork.toString()
         if (artKey != key || baseMetadata == null) {
             if (requestedArtKey != key) {
@@ -418,14 +434,17 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         }
         // Each newly created notice is a distinct object, even if the same
         // warning appears again at a later refresh. Never sound on redraw.
-        if (notice != null && notice !== lastSoundNotice) {
+        if (testNotice == null && notice != null && notice !== lastSoundNotice) {
             lastSoundNotice = notice
             if (running) {
-                val sound = NoticeSound.fromId(prefs.getString(NoticeSound.KEY, null))
-                noticeAudio.play(sound, notice.body,
-                    prefs.getBoolean(NoticeAudio.KEY_PHONE_CHANNEL, false))
+                playNotice(notice.body)
             }
         }
+    }
+
+    private fun playNotice(body: String) {
+        val sound = NoticeSound.fromId(prefs.getString(NoticeSound.KEY, null))
+        noticeAudio.play(sound, body, prefs.getBoolean(NoticeAudio.KEY_PHONE_CHANNEL, false))
     }
 
     private fun publishPlaybackState() {
