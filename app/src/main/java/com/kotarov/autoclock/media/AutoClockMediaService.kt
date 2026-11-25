@@ -273,6 +273,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         if (NoticeTest.receiver === receiveTest) NoticeTest.receiver = null
         handler.removeCallbacks(hideTestNotice)
         testNotice = null
+        NoticeTest.publishCaption(null)
         WeatherStore.stop(WeatherStore.Client.CAR)
         handler.removeCallbacks(minuteTick)
         handler.removeCallbacks(settingsRefresh)
@@ -417,7 +418,9 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         // Keep both title fields visually blank; put the icon and message
         // together in the subtitle for either metadata convention.
         val temporaryTitle = INVISIBLE_TEXT
-        val temporarySubtitle = (testNotice ?: notice)?.subtitle ?: INVISIBLE_TEXT
+        val caption = (testNotice ?: notice)?.subtitle
+        NoticeTest.publishCaption(caption)
+        val temporarySubtitle = caption ?: INVISIBLE_TEXT
         val key = artwork.toString() + "|" + miniArtwork.toString()
         if (artKey != key || baseMetadata == null) {
             if (requestedArtKey != key) {
