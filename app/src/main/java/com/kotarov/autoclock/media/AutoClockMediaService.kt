@@ -31,6 +31,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         get() = ClockSelectionStore.weatherEnabled(prefs)
     private val cityAnnouncement = CityAnnouncement()
     private val noticeSound = NoticeSoundPlayer()
+    private val noticeSpeech by lazy { NoticeSpeech(this) }
     private var lastSoundNotice: CityAnnouncement.Notice? = null
     private var clientActive = false
     private var lastWarningRevision = 0L
@@ -73,6 +74,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (!clientActive) return@OnSharedPreferenceChangeListener
+        if (key == ClockPreset.KEY_ADD_WEATHER && !running) stopNoticeAudio()
         if (key == KEY_SHOW_LOCATION) {
             val city = WeatherStore.locality(this)
             cityAnnouncement.show(city, SystemClock.elapsedRealtime())
@@ -212,7 +214,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         handler.removeCallbacks(settingsRefresh)
         handler.removeCallbacks(hideCityTitle)
         queuedWarning = null
-        noticeSound.stop()
+        stopNoticeAudio()
         artworkWorker.cancel()
         requestedArtKey = null
         baseMetadata = null
@@ -262,7 +264,13 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         handler.postDelayed(hideCityTitle, CityAnnouncement.DURATION_MS)
     }
 
+    private fun stopNoticeAudio() {
+        noticeSound.stop()
+        noticeSpeech.stop()
+    }
+
     private fun setWeatherEnabled(enabled: Boolean) {
+        if (!enabled) stopNoticeAudio()
         ClockSelectionStore.setWeatherEnabled(prefs, enabled)
         // The same preference listener handles phone switches. Publish now
         // for car transport commands, avoiding duplicate queued artwork.
@@ -413,7 +421,12 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         // warning appears again at a later refresh. Never sound on redraw.
         if (notice != null && notice !== lastSoundNotice) {
             lastSoundNotice = notice
-            noticeSound.play(NoticeSound.fromId(prefs.getString(NoticeSound.KEY, null)))
+            if (running) {
+                val sound = NoticeSound.fromId(prefs.getString(NoticeSound.KEY, null))
+                noticeSound.play(sound)
+                noticeSpeech.speak(notice.body,
+                    if (sound == NoticeSound.SILENT) 0L else sound.durationMs.toLong() + 250L)
+            }
         }
     }
 
