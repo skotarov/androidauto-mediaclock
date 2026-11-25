@@ -17,18 +17,21 @@ class NoticeAudio(context: Context) {
     private val chime = NoticeSoundPlayer()
     private val speech = NoticeSpeech(context)
     private var generation = 0L
+    private var finished: (() -> Unit)? = null
     private var ownsMode = false
     private var ownsDevice = false
 
-    fun play(sound: NoticeSound, text: String, phoneChannel: Boolean) {
+    fun play(sound: NoticeSound, text: String, phoneChannel: Boolean,
+             onFinished: () -> Unit = {}) {
         stop()
+        finished = onFinished
         val token = generation
         if (!phoneChannel || Build.VERSION.SDK_INT < 31) {
             playOnRoute(token, sound, text, false)
             return
         }
         // Never compete with an ongoing call or another communication session.
-        if (audio.mode != AudioManager.MODE_NORMAL) return
+        if (audio.mode != AudioManager.MODE_NORMAL) { complete(); return }
         try {
             val devices = audio.availableCommunicationDevices.filter {
                 it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
@@ -62,7 +65,7 @@ class NoticeAudio(context: Context) {
         if (token != generation || Build.VERSION.SDK_INT < 31) return
         try {
             if (audio.mode != AudioManager.MODE_IN_COMMUNICATION) {
-                stop()
+                complete()
                 return
             }
             if (audio.communicationDevice?.id == id) {
@@ -94,7 +97,7 @@ class NoticeAudio(context: Context) {
     private fun monitor(token: Long, id: Int) {
         handler.postDelayed({
             if (token == generation) {
-                if (routeActive(id)) monitor(token, id) else stop()
+                if (routeActive(id)) monitor(token, id) else complete()
             }
         }, 250L)
     }
@@ -103,6 +106,7 @@ class NoticeAudio(context: Context) {
         if (token != generation) return
         releaseRoute()
         if (audio.mode == AudioManager.MODE_NORMAL) playOnRoute(token, sound, text, false)
+        else complete()
     }
 
     private fun playOnRoute(token: Long, sound: NoticeSound, text: String, phone: Boolean) {
@@ -111,13 +115,20 @@ class NoticeAudio(context: Context) {
         speech.speak(text,
             if (sound == NoticeSound.SILENT) 0L else sound.durationMs.toLong() + 250L,
             phone) {
-            if (token == generation) stop()
+            if (token == generation) complete()
         }
         // Independent safety timeout even if the TTS engine never calls back.
-        handler.postDelayed({ if (token == generation) stop() }, 15000L)
+        handler.postDelayed({ if (token == generation) complete() }, 15000L)
+    }
+
+    private fun complete() {
+        val callback = finished
+        stop()
+        callback?.invoke()
     }
 
     fun stop() {
+        finished = null
         generation++
         handler.removeCallbacksAndMessages(null)
         chime.stop()
