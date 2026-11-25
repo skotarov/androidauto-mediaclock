@@ -36,12 +36,14 @@ object ClockRenderer {
     private const val CONTENT_CENTER_Y = 190f
     // Slightly lower the pure digital face; analog and weather-only remain.
     private const val DIGITAL_CENTER_DOWN = 10f
+    // The host overlays its transport button at the bottom of the shared artwork.
+    private const val DIGITAL_WEATHER_CENTER_Y = 116f
     private const val DIGITAL_TIME_SIZE = 96f
     // All digital forecast measurements are in the main artwork coordinate
     // space; no separate scaled forecast canvas.
-    private const val DIGITAL_FORECAST_TOP = 44f
+    private const val DIGITAL_FORECAST_TOP = 41f
     private const val DIGITAL_FORECAST_PITCH = 51f
-    private const val DIGITAL_FORECAST_CITY_OFFSET = 115f
+    private const val DIGITAL_FORECAST_CITY_OFFSET = 104f
     private const val COMPACT_ANALOG_CENTER_Y = 208f
     // Original standard Y=216 with radius 122. Restore original near-top
     // placement, adding only 6px clearance: Y=222, top=100 instead of 94.
@@ -110,15 +112,15 @@ object ClockRenderer {
         val unit = radius / STANDARD_RADIUS
         val clockY = if (preset.hasAnalog) {
             if (compact) COMPACT_ANALOG_CENTER_Y else STANDARD_ANALOG_CENTER_Y
-        } else CONTENT_CENTER_Y + DIGITAL_CENTER_DOWN
+        } else if (preset.usesWeather) DIGITAL_WEATHER_CENTER_Y
+        else CONTENT_CENTER_Y + DIGITAL_CENTER_DOWN
 
         if (preset.hasAnalog) {
             drawDial(canvas, time, radius, clockY, theme)
             if (preset.usesWeather) drawForecastRing(canvas, time, radius, clockY,
                 forecast, theme)
         } else {
-            // One identical clock face in both digital modes: same font,
-            // position, outlines and user-selected size.
+            // Preserve the pure clock layout; playing weather sits above host controls.
             drawText(canvas, time.format(timeFormat), CENTER_X, clockY,
                 DIGITAL_TIME_SIZE * unit, white, unit, theme)
             if (preset.usesWeather)
@@ -366,7 +368,7 @@ object ClockRenderer {
                 // Apply opacity to the complete icon only. Text is painted
                 // directly, with its own alpha, for clean antialiased edges.
                 val half = 23f * unit
-                val iconY = top + 44f * unit
+                val iconY = top + 41f * unit
                 val save = if (slot.alpha < 255)
                     canvas.saveLayerAlpha(x - half, iconY - half, x + half, iconY + half, slot.alpha)
                     else canvas.save()
@@ -378,7 +380,7 @@ object ClockRenderer {
             temp.alpha = slot.alpha
             val temperature = hour?.let { "${it.temperatureC.roundToInt()}°" } ?: "–"
             // Extra air below the icon; the city sits below this row.
-            canvas.drawText(temperature, x, top + 88f * unit, temp)
+            canvas.drawText(temperature, x, top + 78f * unit, temp)
         }
     }
 
