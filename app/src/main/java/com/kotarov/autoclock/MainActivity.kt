@@ -432,7 +432,7 @@ class MainActivity : Activity() {
     private fun syncTransportButtons(state: PlaybackStateCompat?) {
         if (!::backButton.isInitialized || !::forwardButton.isInitialized) return
         val selectedSource = StreamLibrary.selected(settings())
-        val alertOnly = selectedSource == null || selectedSource.textFile
+        val alertOnly = selectedSource == null
         val actions = state?.customActions.orEmpty()
         backButton.visibility = if (alertOnly) View.GONE else View.VISIBLE
         forwardButton.visibility = if (alertOnly) View.GONE else View.VISIBLE

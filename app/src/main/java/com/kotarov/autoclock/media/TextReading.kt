@@ -30,6 +30,22 @@ internal object TextReading {
         }
         return if (device in listOf("en", "de", "fr", "es", "it", "pt")) device else "en"
     }
+    /** About 150 characters per ten seconds at normal speech speed.
+     * Engines/languages vary; keep the native duration unknown. */
+    fun skipOffset(offset: Int, length: Int, deltaMs: Int): Int {
+        if (length <= 0) return 0
+        val delta = deltaMs.toLong() * 15L / 1000L
+        return (offset.toLong() + delta).coerceIn(0L, length.toLong()).toInt()
+    }
+
+    fun wordStart(text: String, index: Int): Int {
+        val pos = index.coerceIn(0, text.length)
+        if (pos == 0 || pos == text.length || text[pos].isWhitespace() || text[pos - 1].isWhitespace()) return pos
+        var start = pos
+        while (start > 0 && !text[start - 1].isWhitespace()) start--
+        return if (start == 0 && pos >= 64) pos else start
+    }
+
     fun percent(offset: Int, length: Int): Int =
         if (length <= 0) 0 else (offset.toLong() * 100 / length).toInt().coerceIn(0, 100)
 }

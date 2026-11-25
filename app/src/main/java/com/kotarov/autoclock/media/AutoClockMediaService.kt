@@ -65,7 +65,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private var artKey: String? = null
     private var miniKey: String? = null
     private var lastPublished: MediaPublicationKey? = null
-    private data class PlaybackKey(val running: Boolean, val id: String, val duration: Int?, val advancing: Boolean)
+    private data class PlaybackKey(val running: Boolean, val id: String, val duration: Int?, val advancing: Boolean, val textSkip: Boolean)
     private var lastPlayback: PlaybackKey? = null
     private data class WeatherArtwork(val locality: String?, val forecast: List<ForecastStore.Hour>)
     private var lastWeatherArtwork: WeatherArtwork? = null
@@ -194,9 +194,12 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                         else -> return
                     }
                     val station = activeSource
-                    if (station?.textFile != true && streamPlayer.seekBy(station?.url, delta)) {
+                    val moved = if (station?.textFile == true) streamPlayer.skipText(station.url, delta)
+                        else streamPlayer.seekBy(station?.url, delta)
+                    if (moved) {
                         lastPlayback = null
                         publishPlaybackState()
+                        if (!playMode) refreshPositionSubtitle()
                     }
                 }
                 override fun onPlayFromSearch(query: String?, extras: Bundle?) {
@@ -671,7 +674,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val station = activeSource
         val seek = mediaSeek()
         val advancing = isRunning && seek != null && !noticePlaying && streamPlayer.isPlaying()
-        val key = PlaybackKey(isRunning, station?.id ?: CLOCK_ID, seek?.duration, advancing)
+        val textSkip = station?.textFile == true && streamPlayer.canSkipText(station.url)
+        val key = PlaybackKey(isRunning, station?.id ?: CLOCK_ID, seek?.duration, advancing, textSkip)
         if (lastPlayback == key) return
         var actions = PlaybackStateCompat.ACTION_PLAY or
             PlaybackStateCompat.ACTION_PAUSE or PlaybackStateCompat.ACTION_STOP or
@@ -684,7 +688,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 if (advancing) 1f else 0f)
             .setActions(actions)
         // Leave next/previous slots free: Auto may place these custom actions there.
-        if (seek != null) {
+        if (seek != null || textSkip) {
             builder.addCustomAction(ACTION_BACK_10, "Back 10 seconds", R.drawable.ic_replay_10)
             builder.addCustomAction(ACTION_FORWARD_10, "Forward 10 seconds", R.drawable.ic_forward_10)
         }
@@ -815,7 +819,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             .setState(state, seek?.position?.toLong() ?: PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN,
                 if (state == PlaybackStateCompat.STATE_PLAYING && seek != null) 1f else 0f)
         mediaError?.let { builder.setErrorMessage(PlaybackStateCompat.ERROR_CODE_APP_ERROR, it) }
-        if (seek != null) {
+        if (seek != null || (source?.textFile == true && streamPlayer.canSkipText(source.url))) {
             builder.addCustomAction(ACTION_BACK_10, "Back 10 seconds", R.drawable.ic_replay_10)
             builder.addCustomAction(ACTION_FORWARD_10, "Forward 10 seconds", R.drawable.ic_forward_10)
         }

@@ -60,6 +60,25 @@ internal class TextFileReader(context: Context) {
         "${TextReading.percent(offset, it.length)}%"
     }
 
+    /** Relative speech seek uses text offsets, not a fabricated media duration. */
+    fun canSkip(source: String): Boolean = ready && document != null && url == source
+
+    fun skipBy(source: String, deltaMs: Int): Boolean {
+        val doc = document ?: return false
+        if (!canSkip(source)) return false
+        val target = TextReading.skipOffset(offset, doc.length, deltaMs)
+        if (target == offset) return true
+        activeId = null
+        cancelJob()
+        runCatching { engine?.stop() }
+        offset = target
+        checkpoint(force = true)
+        lastPercent = -1
+        reportProgress()
+        if (!paused) next(alignWord = true)
+        return true
+    }
+
     fun start(source: String, language: String, phone: Boolean,
               onChanged: () -> Unit, onFinished: (String?) -> Unit) {
         if (matches(source, language) && paused) {
@@ -70,7 +89,7 @@ internal class TextFileReader(context: Context) {
             val tts = engine ?: run { finish("Text-to-speech unavailable"); return }
             try {
                 setRoute(tts, phone)
-                next()
+                next(alignWord = true)
             } catch (_: Exception) { finish("Text-to-speech unavailable") }
             return
         }
@@ -228,9 +247,16 @@ internal class TextFileReader(context: Context) {
     }
 
     /** Read only a small window on a worker; skipped whitespace never fills RAM. */
-    private fun readChunk(doc: Document, position: Int): Chunk? =
+    private fun readChunk(doc: Document, position: Int, alignWord: Boolean): Chunk? =
         RandomAccessFile(doc.file, "r").use { input ->
             var start = position
+            if (alignWord && start in 1 until doc.length) {
+                val from = (start - 64).coerceAtLeast(0)
+                val count = minOf(start - from + 1, doc.length - from)
+                input.seek(from.toLong() * 2L)
+                val around = CharArray(count) { input.readChar() }
+                start = from + TextReading.wordStart(String(around), start - from)
+            }
             while (start < doc.length) {
                 if (Thread.currentThread().isInterrupted) error("Cancelled")
                 input.seek(start.toLong() * 2L)
@@ -253,7 +279,7 @@ internal class TextFileReader(context: Context) {
             null
         }
 
-    private fun next() {
+    private fun next(alignWord: Boolean = false) {
         val doc = document ?: return
         if (!ready || paused) return
         if (offset >= doc.length) { finish(null); return }
@@ -263,7 +289,7 @@ internal class TextFileReader(context: Context) {
         handler.removeCallbacks(timeout)
         handler.postDelayed(timeout, 15_000L)
         job = worker.submit {
-            val result = runCatching { readChunk(doc, position) }
+            val result = runCatching { readChunk(doc, position, alignWord) }
             handler.post {
                 if (generation == token && serial == readSerial && !paused) {
                     job = null

@@ -63,6 +63,11 @@ class CustomStreamPlayer(context: Context) {
     fun isPlaying(): Boolean = if (reading) reader?.progress() != null
         else runCatching { player?.isPlaying == true }.getOrDefault(false)
 
+    fun canSkipText(url: String?): Boolean = url != null && reader?.canSkip(url) == true
+
+    fun skipText(url: String?, deltaMs: Int): Boolean =
+        url != null && reader?.skipBy(url, deltaMs) == true
+
     fun seekBy(url: String?, deltaMs: Int): Boolean {
         val current = seekState(url) ?: return false
         return seekTo(url, current.position.toLong() + deltaMs)
