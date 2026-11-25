@@ -67,8 +67,8 @@ jobs:
           "$signer" sign --ks "$AUTO_CLOCK_BETA_STORE" --ks-type PKCS12 \
             --ks-key-alias autoclock-beta --ks-pass env:AUTO_CLOCK_BETA_PASSWORD \
             --key-pass env:AUTO_CLOCK_BETA_PASSWORD \
-            --out dist/AutoClock-2-v0.82-beta.apk app/build/outputs/apk/debug/app-debug.apk
-          verification=$("$signer" verify --verbose --print-certs dist/AutoClock-2-v0.82-beta.apk)
+            --out dist/AutoClock-2-v0.83-beta.apk app/build/outputs/apk/debug/app-debug.apk
+          verification=$("$signer" verify --verbose --print-certs dist/AutoClock-2-v0.83-beta.apk)
           printf '%s\n' "$verification"
           actual=$(printf '%s\n' "$verification" | awk '/^(Signer #[0-9]+|V[0-9]+([.][0-9]+)? Signer):? certificate SHA-256 digest:/ {print $NF}' | tr -d ':\r' | tr '[:upper:]' '[:lower:]')
           if ! printf '%s\n' "$verification" | grep -Eq '^Number of signers: 1[[:space:]]*$' || [[ "$actual" != "$fingerprint" ]]; then
@@ -81,11 +81,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if ! gh release view v0.82.0-beta >/dev/null 2>&1; then
-            gh release create v0.82.0-beta \
+          if ! gh release view v0.83.0-beta >/dev/null 2>&1; then
+            gh release create v0.83.0-beta \
               --target "$GITHUB_SHA" \
-              --title "Auto Clock 2 — beta 0.82.0" \
-              --notes "Permanent beta signing identity. Uninstall older differently signed beta builds once; subsequent signed beta updates retain settings. Custom HTTPS stream and synthesized audio-file playback for Bluetooth phone alerts." \
+              --title "Auto Clock 2 — beta 0.83.0" \
+              --notes "Permanent beta signing identity. Uninstall older differently signed beta builds once; subsequent signed beta updates retain settings. Three Bluetooth phone audio modes: Off, Alerts only, Continuous test." \
               --prerelease
           fi
-          gh release upload v0.82.0-beta dist/AutoClock-2-v0.82-beta.apk --clobber
+          gh release upload v0.83.0-beta dist/AutoClock-2-v0.83-beta.apk --clobber
