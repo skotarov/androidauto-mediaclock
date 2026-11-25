@@ -2,6 +2,8 @@ package com.kotarov.autoclock.media
 
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.MediaPlayer
+import java.io.File
 import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
@@ -14,6 +16,8 @@ class NoticeSpeech(context: Context) {
     private val app = context.applicationContext
     private val handler = Handler(Looper.getMainLooper())
     private var engine: TextToSpeech? = null
+    private var player: MediaPlayer? = null
+    private var speechFile: File? = null
     private var generation = 0L
     private var onFinished: (() -> Unit)? = null
 
@@ -72,7 +76,13 @@ class NoticeSpeech(context: Context) {
             val id = "autoclock-notice-$token"
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) = Unit
-                override fun onDone(utteranceId: String?) = finish(utteranceId)
+                override fun onDone(utteranceId: String?) {
+                    if (utteranceId == id) handler.post {
+                        if (token == generation) {
+                            if (phoneChannel) playFile(token) else stop()
+                        }
+                    }
+                }
                 @Deprecated("Deprecated in Android")
                 override fun onError(utteranceId: String?) = finish(utteranceId)
                 override fun onError(utteranceId: String?, errorCode: Int) = finish(utteranceId)
@@ -82,9 +92,38 @@ class NoticeSpeech(context: Context) {
                     }
                 }
             })
-            if (tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, id) != TextToSpeech.SUCCESS) stop()
+            val result = if (phoneChannel) {
+                val file = File.createTempFile("notice-", ".wav", app.cacheDir)
+                speechFile = file
+                tts.synthesizeToFile(text, null, file, id)
+            } else tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, id)
+            if (result != TextToSpeech.SUCCESS) stop()
         } catch (e: Exception) {
             Log.w("AutoClock", "Notice speech unavailable", e)
+            stop()
+        }
+    }
+
+    private fun playFile(token: Long) {
+        val file = speechFile ?: run { stop(); return }
+        try {
+            val media = MediaPlayer()
+            player = media
+            media.setAudioAttributes(AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+            media.setDataSource(file.absolutePath)
+            media.setOnPreparedListener {
+                if (token == generation && player === it) it.start()
+            }
+            media.setOnCompletionListener { if (token == generation) stop() }
+            media.setOnErrorListener { _, _, _ ->
+                if (token == generation) stop()
+                true
+            }
+            media.prepareAsync()
+        } catch (e: Exception) {
+            Log.w("AutoClock", "Synthesized speech playback failed", e)
             stop()
         }
     }
@@ -94,12 +133,16 @@ class NoticeSpeech(context: Context) {
         val finished = onFinished
         onFinished = null
         handler.removeCallbacksAndMessages(null)
+        player?.let { runCatching { it.release() } }
+        player = null
         val old = engine
         engine = null
         if (old != null) {
             runCatching { old.stop() }
             runCatching { old.shutdown() }
         }
+        speechFile?.delete()
+        speechFile = null
         finished?.invoke()
     }
 }
