@@ -18,6 +18,7 @@ class CustomStreamPlayer(context: Context) {
     private val handler = Handler(Looper.getMainLooper())
     private var player: MediaPlayer? = null
     private var generation = 0L
+    private val keepAlive = PhoneAudioKeepAlive()
     private var ownsMode = false
     private var ownsDevice = false
     private var requested: Triple<String, Boolean, Boolean>? = null
@@ -56,6 +57,11 @@ class CustomStreamPlayer(context: Context) {
             ownsMode = true
             ownsDevice = audio.setCommunicationDevice(device)
             if (!ownsDevice) {
+                releaseRoute()
+                open(token, next.first, false, onError)
+                return
+            }
+            if (!keepAlive.start()) {
                 releaseRoute()
                 open(token, next.first, false, onError)
                 return
@@ -153,6 +159,7 @@ class CustomStreamPlayer(context: Context) {
     }
 
     private fun releaseRoute() {
+        keepAlive.stop()
         if (Build.VERSION.SDK_INT >= 31 && ownsDevice) runCatching { audio.clearCommunicationDevice() }
         ownsDevice = false
         if (ownsMode) runCatching { audio.mode = AudioManager.MODE_NORMAL }
