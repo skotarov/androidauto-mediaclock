@@ -3,16 +3,24 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// Commercial builds require a licensed Open-Meteo-compatible HTTPS gateway.
+// Keep the upstream API key on the server, not in the APK.
+val commercialForecastEndpoint = providers.gradleProperty("autoClockForecastEndpoint")
+    .orElse(providers.environmentVariable("AUTO_CLOCK_FORECAST_ENDPOINT"))
+    .orElse("").get().trim()
+val escapedEndpoint = commercialForecastEndpoint.replace("\\", "\\\\").replace("\"", "\\\"")
+
 android {
+    buildFeatures { buildConfig = true }
     namespace = "com.kotarov.autoclock"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.kotarov.autoclock2"
         minSdk = 23
-        targetSdk = 35
-        versionCode = 77
-        versionName = "0.77.0-beta"
+        targetSdk = 36
+        versionCode = 78
+        versionName = "0.78.0-beta"
     }
 
     // The public beta workflow supplies its permanent signing identity.
@@ -32,7 +40,11 @@ android {
     }
 
     buildTypes {
+        getByName("release") {
+            buildConfigField("String", "FORECAST_ENDPOINT", "\"$escapedEndpoint\"")
+        }
         getByName("debug") {
+            buildConfigField("String", "FORECAST_ENDPOINT", "\"https://api.open-meteo.com/v1/forecast\"")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -54,4 +66,16 @@ dependencies {
     implementation("androidx.media:media:1.7.0")
     testImplementation("junit:junit:4.13.2")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.2")
+}
+
+tasks.matching { it.name == "preReleaseBuild" }.configureEach {
+    doFirst {
+        val uri = runCatching { java.net.URI(commercialForecastEndpoint) }.getOrNull()
+        require(uri != null && uri.scheme == "https" && !uri.host.isNullOrBlank() &&
+            !uri.host.equals("api.open-meteo.com", ignoreCase = true) &&
+            uri.rawQuery == null && uri.rawFragment == null && uri.userInfo == null &&
+            !uri.path.isNullOrBlank()) {
+            "Commercial release requires a licensed HTTPS forecast gateway via AUTO_CLOCK_FORECAST_ENDPOINT."
+        }
+    }
 }
