@@ -65,7 +65,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private var artKey: String? = null
     private var miniKey: String? = null
     private var lastPublished: MediaPublicationKey? = null
-    private data class PlaybackKey(val running: Boolean, val id: String, val seekable: Boolean, val advancing: Boolean)
+    private data class PlaybackKey(val running: Boolean, val id: String, val duration: Int?, val advancing: Boolean)
     private var lastPlayback: PlaybackKey? = null
     private data class WeatherArtwork(val locality: String?, val forecast: List<ForecastStore.Hour>)
     private var lastWeatherArtwork: WeatherArtwork? = null
@@ -206,7 +206,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                     if (match != null && selectSource(match.id)) setWeatherEnabled(true)
                 }
                 override fun onSeekTo(pos: Long) {
-                    if (playMode && streamPlayer.seekTo(activeSource?.url, pos)) {
+                    if (activeSource?.textFile != true && streamPlayer.seekTo(activeSource?.url, pos)) {
                         lastPlayback = null
                         publishPlaybackState()
                     }
@@ -592,7 +592,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val textProgress = if (running && !noticePlaying && caption == null)
             streamPlayer.readingProgress(activeSource?.url) else null
         val subtitle = MediaPositionSubtitle.text(caption, position) ?: textProgress ?: INVISIBLE_TEXT
-        val publication = MediaPublicationKey(key, INVISIBLE_TEXT, subtitle, activeSource?.id ?: CLOCK_ID)
+        val duration = mediaSeek()?.duration
+        val publication = MediaPublicationKey(key, INVISIBLE_TEXT, subtitle, activeSource?.id ?: CLOCK_ID, duration)
         if (publication == lastPublished) return
         session.setMetadata(MediaMetadataCompat.Builder(base)
             .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, activeSource?.id ?: CLOCK_ID)
@@ -601,6 +602,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, INVISIBLE_TEXT)
             .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, INVISIBLE_TEXT)
             .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, subtitle)
+            .apply { duration?.let { putLong(MediaMetadataCompat.METADATA_KEY_DURATION, it.toLong()) } }
             .build())
         lastPublished = publication
     }
@@ -618,7 +620,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             textLanguage = station?.takeIf { it.textFile }?.language, onChanged = {
             if (playMode || station?.textFile != true) lastPlayback = null
             publishPlaybackState()
-            refreshPositionSubtitle()
+            if (playMode) publishPlayMetadata() else refreshPositionSubtitle()
         }) { error ->
             if (playMode) {
                 setPlayRequested(false)
@@ -638,7 +640,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             }
         }
         publishPlaybackState()
-        refreshPositionSubtitle()
+        if (playMode) publishPlayMetadata() else refreshPositionSubtitle()
     }
 
     private fun playNotice(body: String) {
@@ -659,18 +661,23 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         }
     }
 
+    /** TXT progress is measured in characters, not milliseconds. Never invent a duration. */
+    private fun mediaSeek(): CustomStreamPlayer.SeekState? = activeSource?.takeUnless { it.textFile }
+        ?.let { streamPlayer.seekState(it.url) }
+
     private fun publishPlaybackState() {
         if (playMode) { publishPlayState(); return }
         val isRunning = running
         val station = activeSource
-        val seek = if (station?.textFile == true) null else streamPlayer.seekState(station?.url)
-        val advancing = isRunning && seek != null && !noticePlaying
-        val key = PlaybackKey(isRunning, station?.id ?: CLOCK_ID, seek != null, advancing)
+        val seek = mediaSeek()
+        val advancing = isRunning && seek != null && !noticePlaying && streamPlayer.isPlaying()
+        val key = PlaybackKey(isRunning, station?.id ?: CLOCK_ID, seek?.duration, advancing)
         if (lastPlayback == key) return
-        val actions = PlaybackStateCompat.ACTION_PLAY or
+        var actions = PlaybackStateCompat.ACTION_PLAY or
             PlaybackStateCompat.ACTION_PAUSE or PlaybackStateCompat.ACTION_STOP or
             PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID or
             PlaybackStateCompat.ACTION_PREPARE_FROM_MEDIA_ID
+        if (seek != null) actions = actions or PlaybackStateCompat.ACTION_SEEK_TO
         val builder = PlaybackStateCompat.Builder()
             .setState(ClockPlaybackState.forRunning(isRunning),
                 seek?.position?.toLong() ?: PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN,
@@ -686,10 +693,13 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private var playMetadataSource: StreamLibrary.Station? = null
+    private var playMetadataDuration: Int? = null
     private fun publishPlayMetadata() {
         val source = activeSource
-        if (source == playMetadataSource && session.controller.metadata != null) return
+        val duration = mediaSeek()?.duration
+        if (source == playMetadataSource && duration == playMetadataDuration && session.controller.metadata != null) return
         playMetadataSource = source
+        playMetadataDuration = duration
         val builder = MediaMetadataCompat.Builder()
         if (source != null) {
             builder.putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, source.id)
@@ -701,6 +711,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                     source.bitmap() ?: sourceIcon(if (source.textFile) R.drawable.ic_source_text
                         else if (source.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast))
         } else builder.putString(MediaMetadataCompat.METADATA_KEY_TITLE, "Select audio")
+        duration?.let { builder.putLong(MediaMetadataCompat.METADATA_KEY_DURATION, it.toLong()) }
         session.setMetadata(builder.build())
     }
 
@@ -788,7 +799,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     private fun publishPlayState() {
         val source = activeSource
-        val seek = if (source?.textFile == true) null else streamPlayer.seekState(source?.url)
+        val seek = mediaSeek()
         val state = when {
             mediaError != null -> PlaybackStateCompat.STATE_ERROR
             source == null -> PlaybackStateCompat.STATE_NONE

@@ -49,11 +49,15 @@ class CustomStreamPlayer(context: Context) {
     fun seekState(url: String?): SeekState? {
         if (url == null) return null
         val media = player
-        if (requested?.first == url && prepared && seekable && media != null) {
+        if (requested?.first == url) {
+            // An active request must establish its own timeline. Never reuse a
+            // previous finite duration while the new connection is live/loading.
+            if (!prepared || !seekable || media == null) return null
             return runCatching { SeekState(media.currentPosition, media.duration) }.getOrNull()
-                ?.takeIf { it.duration > 0 }
+                ?.takeIf { PlaybackTimeline.known(it.position, it.duration) }
         }
         return savedSeek?.takeIf { it.first == url }?.second
+            ?.takeIf { PlaybackTimeline.known(it.position, it.duration) }
     }
 
     fun isPlaying(): Boolean = if (reading) reader?.progress() != null
@@ -212,6 +216,7 @@ class CustomStreamPlayer(context: Context) {
                     runCatching {
                         prepared = true
                         seekable = it.duration > 0
+                        if (!seekable && savedSeek?.first == url) savedSeek = null
                         val position = savedSeek?.takeIf { p -> p.first == url }?.second?.position
                             ?: if (validLocal(url)) localBookmarks.getInt(url, 0) else 0
                         if (seekable && position > 0 && position < it.duration) it.seekTo(position)
