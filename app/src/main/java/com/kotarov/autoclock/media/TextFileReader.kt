@@ -167,8 +167,6 @@ internal class TextFileReader(context: Context) {
             ?.forEach { it.delete() }
         val file = File.createTempFile("book-", ".utf16", dir)
         try {
-            val afd = app.contentResolver.openAssetFileDescriptor(Uri.parse(source), "r", signal)
-                ?: error("No file")
             var length = 0
             val sample = StringBuilder(4000)
             val uri = Uri.parse(source)
@@ -177,22 +175,51 @@ internal class TextFileReader(context: Context) {
                     null, null, null)?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
             }.getOrNull().orEmpty()
             val format = BookFormat.detect(name, app.contentResolver.getType(uri)) ?: BookFormat.PLAIN
-            if (format == BookFormat.PDF) com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(app)
-            afd.use { descriptor ->
-                descriptor.createInputStream().use { input ->
-                    file.outputStream().buffered().writer(Charsets.UTF_16BE).use { output ->
-                        BookExtractor.extract(format, input, dir, {
-                            signal.throwIfCanceled()
-                            if (Thread.currentThread().isInterrupted) error("Cancelled")
-                        }) { text ->
-                            require(length.toLong() + text.length <= TextReading.MAX_CHARS)
-                            length += text.length
-                            if (sample.length < 4000)
-                                sample.append(text, 0, minOf(text.length, 4000 - sample.length))
-                            output.write(text)
+            val backendKey = "pdf_backend:" + source
+            val previousBackend = prefs.getString(backendKey, null)
+            // Keep the extraction algorithm stable for bookmarks created by
+            // previous versions: different engines can produce different offsets.
+            val tryNative = format == BookFormat.PDF && android.os.Build.VERSION.SDK_INT >= 35 &&
+                (previousBackend == "native" || (previousBackend == null && !prefs.contains(source)))
+            fun extract(native: Boolean) {
+                signal.throwIfCanceled()
+                length = 0
+                sample.setLength(0)
+                if (format == BookFormat.PDF && !native)
+                    com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(app)
+                val afd = app.contentResolver.openAssetFileDescriptor(uri, "r", signal) ?: error("No file")
+                afd.use { descriptor ->
+                    descriptor.createInputStream().use { input ->
+                        file.outputStream().buffered().writer(Charsets.UTF_16BE).use { output ->
+                            BookExtractor.extract(format, input, dir, {
+                                signal.throwIfCanceled()
+                                if (Thread.currentThread().isInterrupted) error("Cancelled")
+                            }, nativePdf = native) { text ->
+                                require(length.toLong() + text.length <= TextReading.MAX_CHARS)
+                                length += text.length
+                                if (sample.length < 4000)
+                                    sample.append(text, 0, minOf(text.length, 4000 - sample.length))
+                                output.write(text)
+                            }
                         }
                     }
                 }
+            }
+            var nativeUsed = tryNative
+            try {
+                extract(nativeUsed)
+            } catch (e: Exception) {
+                // Fall back only for a new PDF, before committing a backend
+                // choice; never reinterpret an existing native bookmark.
+                if (!nativeUsed || previousBackend == "native") throw e
+                signal.throwIfCanceled()
+                if (Thread.currentThread().isInterrupted) throw e
+                nativeUsed = false
+                extract(false)
+            }
+            if (format == BookFormat.PDF) {
+                signal.throwIfCanceled()
+                prefs.edit().putString(backendKey, if (nativeUsed) "native" else "pdfbox").apply()
             }
             signal.throwIfCanceled()
             // The cache is a fixed-width character index, not a synthesized audio file.

@@ -5,3 +5,7 @@
 
 # PDFBox optional JPEG2000 image decoder; this app extracts text only.
 -dontwarn com.gemalto.jp2.JP2Decoder
+
+# Optional PDFBox public-key encryption/signature implementation is not shipped.
+# Only unencrypted PDF text extraction is supported.
+-dontwarn org.bouncycastle.**

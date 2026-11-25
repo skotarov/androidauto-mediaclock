@@ -33,11 +33,16 @@ internal object BookExtractor {
     }
 
     fun extract(format: BookFormat, input: InputStream, directory: File,
-                check: () -> Unit, emit: (String) -> Unit) {
+                check: () -> Unit, nativePdf: Boolean = false, emit: (String) -> Unit) {
         val budget = Budget(MAX_BYTES)
         when (format) {
             BookFormat.PLAIN -> plain(Limited(input, budget, MAX_BYTES, check), check, emit)
-            BookFormat.PDF -> PdfBookExtractor.extract(Limited(input, budget, MAX_BYTES, check), directory, check, emit)
+            BookFormat.PDF -> {
+                val bounded = Limited(input, budget, MAX_BYTES, check)
+                if (nativePdf && android.os.Build.VERSION.SDK_INT >= 35)
+                    PdfBookExtractor.extractNative(bounded, directory, check, emit)
+                else PdfBookExtractor.extract(bounded, directory, check, emit)
+            }
             BookFormat.HTML -> HtmlBookExtractor.extract(Limited(input, budget, 4L * 1024 * 1024, check), check, emit)
             BookFormat.RTF -> RtfBookExtractor.extract(Limited(input, budget, MAX_BYTES, check), check, emit)
             BookFormat.FB2 -> xmlText(Limited(input, budget, MAX_BYTES, check), format, check, emit)

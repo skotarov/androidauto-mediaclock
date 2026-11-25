@@ -21,8 +21,8 @@ android {
         applicationId = "com.kotarov.autoclock2"
         minSdk = 23
         targetSdk = 36
-        versionCode = 105
-        versionName = "0.105.0"
+        versionCode = 106
+        versionName = "0.106.0"
     }
 
     // The public beta workflow supplies its permanent signing identity.
@@ -79,7 +79,10 @@ android {
 
 dependencies {
     implementation("androidx.media:media:1.7.0")
-    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0") {
+        // Text-only reader rejects encrypted documents and never signs/verifies.
+        exclude(group = "org.bouncycastle")
+    }
     implementation("org.jsoup:jsoup:1.22.2")
     implementation("androidx.car.app:app:1.4.0")
     testImplementation("junit:junit:4.13.2")
