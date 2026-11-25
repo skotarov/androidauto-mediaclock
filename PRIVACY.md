@@ -1,8 +1,8 @@
-# Auto Clock 2 — Privacy Policy
+# SmartTrip Clock — Privacy Policy
 
 Effective 25 November 2026
 
-Auto Clock 2 is a travel clock and weather companion maintained by the [Auto Clock developer](https://github.com/skotarov).
+Auto Clock 2 is a travel clock and weather companion maintained by the [SmartTrip Clock developer](https://github.com/skotarov).
 
 ## Data and purpose
 

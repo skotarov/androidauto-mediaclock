@@ -1,10 +1,10 @@
-# Auto Clock 2 — Google Play privacy policy
+# SmartTrip Clock — Google Play privacy policy
 
 This policy applies to the initial audio-player edition distributed through Google Play, not the experimental GitHub clock/weather beta.
 
 ## Developer and contact
 
-The application is maintained by the Auto Clock developer, [developer profile](https://github.com/skotarov). For privacy inquiries use the developer contact published on the Google Play listing when available. Do not post private information in public issues. A direct contact must be confirmed by the developer before public distribution.
+The application is maintained by the SmartTrip Clock developer, [developer profile](https://github.com/skotarov). For privacy inquiries use the developer contact published on the Google Play listing when available. Do not post private information in public issues. A direct contact must be confirmed by the developer before public distribution.
 
 ## Information used
 

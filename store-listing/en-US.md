@@ -1,11 +1,11 @@
-# Working store listing — name pending
+# SmartTrip Clock — store listing
 
-**Name:** Auto Clock 2 (provisional)
+**Name:** SmartTrip Clock
 
 **Short description:** Listen to your audio, radio and text files on the road with Android Auto.
 
 **Full description:**
-Bring your own audio along for the journey. Listen to local recordings, lectures and audiobooks, or add direct HTTPS audio streams and internet radio. Choose a plain-text file and listen with an installed Android offline voice.
+Listen. Plan. Travel. Bring your own audio along for the journey. Listen to local recordings, podcasts, lectures and audiobooks, or add direct HTTPS audio streams and internet radio. Choose a plain-text file and listen with an installed Android offline voice.
 
 - Play, pause and seek supported audio from Android Auto.
 - Continue reading and local playback from saved bookmarks.
@@ -17,3 +17,6 @@ Text reading requires an installed offline voice for the chosen language. Stream
 
 ## Required visual assets
 512 × 512 PNG app icon; 1024 × 500 feature graphic; at least two actual phone screenshots; screenshots of actual Android Auto media browsing/playback for review. Do not reuse beta clock-in-media screenshots for this edition.
+
+## Future weather feature — not in current Play listing
+Once licensed and available, hourly local weather can help drivers decide when to set off on a long journey, whether to stay at their hotel longer to avoid adverse conditions, and whether to allow extra travel time. It is not a route-wide forecast or arrival-time prediction. Check official warnings and route conditions before travel.

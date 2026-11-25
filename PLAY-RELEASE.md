@@ -1,11 +1,11 @@
-# Google Play release preparation — 0.97
+# Google Play release preparation — 0.98
 
 ## Build and product
-- Keep application ID com.kotarov.autoclock2 until owner chooses final brand. Debug beta keeps existing clock/weather artwork and alert controls.
+- Keep application ID com.kotarov.autoclock2 to preserve installation identity. Debug beta keeps existing clock/weather artwork and alert controls.
 - Release is a real audio player: library of local audio, TXT reading and user-entered HTTPS audio streams, actual titles, static media artwork, normal audio focus and playback states. No Alert only in car library, no simulated phone audio route, no clock as media artwork. Phone clock remains. No weather requests in Play build until licensed and reviewed.
 - CI builds and stores an unsigned AAB. Build locally with `gradle bundleRelease`; sign with the owner's upload key before Play submission. Enroll in Play App Signing and use owner-controlled upload key. Do not reuse GitHub beta certificate as upload key without explicit decision.
 - Launch free, no ads or payments. Later paid features require Google Play Billing and a weather license before weather is enabled in monetized distribution. No fake purchase UI.
-- Name candidates RoadMind / DriveMate / RoadTime; verify availability and trademarks, confirm brand before listing.
+- Working brand SmartTrip Clock, slogan Listen. Plan. Travel. Verify availability and trademarks before public listing.
 
 ## Console declarations (draft for current Play release only)
 - Category Music & Audio; opt in Android Auto, not Android Automotive OS unless separately tested.

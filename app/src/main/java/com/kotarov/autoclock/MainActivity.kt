@@ -169,7 +169,7 @@ class MainActivity : Activity() {
             }
             root.requestApplyInsets()
         }
-        root.addView(text("Auto Clock 2", 27f, dp(16)))
+        root.addView(text("SmartTrip Clock", 27f, dp(16)))
 
         // The blue outline is the exclusive selection, as in phone display
         // settings. No radio-circle UI is added next to the thumbnails.
@@ -325,7 +325,7 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
         ))
         val credit = if (BuildConfig.PLAY_MEDIA_MODE) "Privacy Policy"
-            else "Weather data: NOAA / Open-Meteo (CC BY 4.0)\nAdapted for Auto Clock\nPrivacy Policy"
+            else "Weather data: NOAA / Open-Meteo (CC BY 4.0)\nAdapted for SmartTrip Clock\nPrivacy Policy"
         val attribution = android.text.SpannableString(credit).apply {
             fun link(label: String, url: String) {
                 val start = credit.indexOf(label)

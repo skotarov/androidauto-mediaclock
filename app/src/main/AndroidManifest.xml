@@ -16,7 +16,7 @@
 
     <application
         android:allowBackup="false"
-        android:label="Auto Clock 2"
+        android:label="SmartTrip Clock"
         android:icon="@drawable/ic_auto_clock"
         android:supportsRtl="true"
         android:theme="@style/Theme.AutoClock">
