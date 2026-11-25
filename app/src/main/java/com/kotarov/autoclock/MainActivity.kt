@@ -408,7 +408,8 @@ class MainActivity : Activity() {
 
     private fun syncTransportButtons(state: PlaybackStateCompat?) {
         if (!::backButton.isInitialized || !::forwardButton.isInitialized) return
-        val alertOnly = StreamLibrary.selected(settings()) == null
+        val selectedSource = StreamLibrary.selected(settings())
+        val alertOnly = selectedSource == null || selectedSource.textFile
         val actions = state?.customActions.orEmpty()
         backButton.visibility = if (alertOnly) View.GONE else View.VISIBLE
         forwardButton.visibility = if (alertOnly) View.GONE else View.VISIBLE
@@ -650,7 +651,7 @@ class MainActivity : Activity() {
             row.addView(ImageView(this).apply {
                 val icon = station.bitmap()
                 if (icon != null) setImageBitmap(icon)
-                else setImageResource(if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast)
+                else setImageResource(if (station.textFile) R.drawable.ic_source_text else if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast)
                 contentDescription = station.name
             }, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginEnd = dp(8) })
             row.addView(text(station.name, 16f, 0).apply {
@@ -699,7 +700,7 @@ class MainActivity : Activity() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "*/*"
-            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("audio/*", "video/*"))
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("audio/*", "video/*", "text/plain"))
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
         }
         runCatching { startActivityForResult(intent, FILE_REQUEST) }.onFailure {
@@ -714,9 +715,14 @@ class MainActivity : Activity() {
         val uri = data?.data ?: return
         if (!CustomStreamPlayer.validLocal(uri.toString())) return
         val mime = runCatching { contentResolver.getType(uri) }.getOrNull()
-        if (mime != null && !mime.startsWith("audio/") && !mime.startsWith("video/") &&
+        val name = runCatching {
+            contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
+                null, null, null)?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+        }.getOrNull() ?: "Local file"
+        val textFile = mime == "text/plain" || name.endsWith(".txt", ignoreCase = true)
+        if (!textFile && mime != null && !mime.startsWith("audio/") && !mime.startsWith("video/") &&
             mime != "application/octet-stream") {
-            android.widget.Toast.makeText(this, "Select an audio or video file", android.widget.Toast.LENGTH_SHORT).show()
+            android.widget.Toast.makeText(this, "Select an audio, video or TXT file", android.widget.Toast.LENGTH_SHORT).show()
             return
         }
         val granted = runCatching {
@@ -726,24 +732,37 @@ class MainActivity : Activity() {
             android.widget.Toast.makeText(this, "Persistent file access unavailable", android.widget.Toast.LENGTH_LONG).show()
             return
         }
-        val name = runCatching {
-            contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
-                null, null, null)?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
-        }.getOrNull() ?: "Local file"
         val prefs = settings()
-        val station = StreamLibrary.newFile(uri.toString(), name)
+        val station = StreamLibrary.newFile(uri.toString(), name, textFile)
         StreamLibrary.save(prefs, StreamLibrary.list(prefs) + station)
         renderStreams()
     }
 
     private fun editFileName(station: StreamLibrary.Station) {
         val field = android.widget.EditText(this).apply { setSingleLine(true); setText(station.name) }
-        AlertDialog.Builder(this).setTitle("Edit file").setView(field)
+        val languages = listOf("auto" to "Automatic", "bg" to "Bulgarian", "en" to "English",
+            "ru" to "Russian", "de" to "German", "fr" to "French", "es" to "Spanish")
+        val language = android.widget.Spinner(this).apply {
+            adapter = android.widget.ArrayAdapter(this@MainActivity,
+                android.R.layout.simple_spinner_dropdown_item, languages.map { it.second })
+            setSelection(languages.indexOfFirst { it.first == station.language }.coerceAtLeast(0))
+        }
+        val fields = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(8))
+            addView(field)
+            if (station.textFile) {
+                addView(text("Reading language", 14f, dp(8)))
+                addView(language)
+            }
+        }
+        AlertDialog.Builder(this).setTitle("Edit file").setView(fields)
             .setNegativeButton("Cancel", null).setPositiveButton("Save") { _, _ ->
                 val name = field.text.toString().trim().take(128).ifBlank { station.name }
                 val prefs = settings()
                 StreamLibrary.save(prefs, StreamLibrary.list(prefs).map {
-                    if (it.id == station.id) it.copy(name = name) else it
+                    if (it.id == station.id) it.copy(name = name,
+                        language = if (station.textFile) languages[language.selectedItemPosition.coerceAtLeast(0)].first else it.language) else it
                 })
                 renderStreams()
             }.show()

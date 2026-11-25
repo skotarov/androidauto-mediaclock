@@ -25,6 +25,9 @@ class CustomStreamPlayer(context: Context) {
     private var requested: Triple<String, Boolean, Boolean>? = null
     data class SeekState(val position: Int, val duration: Int)
     private var savedSeek: Pair<String, SeekState>? = null
+    private var textLanguage: String? = null
+    private val reader by lazy { TextFileReader(app) }
+    private var reading = false
     private var prepared = false
     private var seekable = false
     private var changed: () -> Unit = {}
@@ -35,6 +38,9 @@ class CustomStreamPlayer(context: Context) {
         if (url == null || requested?.first != url || !prepared || !seekable) return null
         return runCatching { media.currentPosition }.getOrNull()?.takeIf { it >= 0 }
     }
+
+    fun readingProgress(url: String?): String? =
+        if (reading && requested?.first == url) reader.progress() else null
 
     fun seekState(url: String?): SeekState? {
         if (url == null) return null
@@ -58,12 +64,13 @@ class CustomStreamPlayer(context: Context) {
     }
 
     fun sync(url: String?, phone: Boolean, sharedPhoneChannel: Boolean = false,
-             onChanged: () -> Unit = {}, onError: (String) -> Unit) {
+             textLanguage: String? = null, onChanged: () -> Unit = {}, onError: (String) -> Unit) {
         changed = onChanged
         val next = url?.takeIf { valid(it) || validLocal(it) }?.let { Triple(it, phone, sharedPhoneChannel) }
-        if (requested == next) return
+        if (requested == next && this.textLanguage == textLanguage) return
         stop()
         if (next == null) return
+        this.textLanguage = textLanguage
         requested = next
         val token = generation
         if (sharedPhoneChannel && phone && Build.VERSION.SDK_INT >= 31) {
@@ -145,6 +152,19 @@ class CustomStreamPlayer(context: Context) {
 
     private fun open(token: Long, url: String, phone: Boolean, onError: (String) -> Unit) {
         if (token != generation) return
+        val language = textLanguage
+        if (language != null) {
+            reading = true
+            reader.start(url, language, phone, changed) { error ->
+                if (token == generation) {
+                    if (error == null) {
+                        stop()
+                        onError("Media ended")
+                    } else fail(token, error, onError)
+                }
+            }
+            return
+        }
         try {
             val media = MediaPlayer()
             player = media
@@ -202,14 +222,19 @@ class CustomStreamPlayer(context: Context) {
         // Keep the failed request until explicit Play or configuration change;
         // a weather refresh must never trigger an infinite reconnect loop.
         val previous = requested
+        val language = textLanguage
         stop()
         requested = previous
+        textLanguage = language
         onError(message)
     }
 
     fun stop() {
         generation++
         handler.removeCallbacksAndMessages(null)
+        if (reading) reader.stop()
+        reading = false
+        textLanguage = null
         val previous = requested
         requested = null
         val old = player

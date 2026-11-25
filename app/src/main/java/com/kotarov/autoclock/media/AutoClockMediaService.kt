@@ -168,7 +168,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                         ACTION_FORWARD_10 -> 10000
                         else -> return
                     }
-                    if (streamPlayer.seekBy(StreamLibrary.selected(prefs)?.url, delta)) {
+                    val station = StreamLibrary.selected(prefs)
+                    if (station?.textFile != true && streamPlayer.seekBy(station?.url, delta)) {
                         lastPlayback = null
                         publishPlaybackState()
                     }
@@ -227,7 +228,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         items.add(MediaBrowserCompat.MediaItem(alert, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
         StreamLibrary.list(prefs).forEach { station ->
             val desc = MediaDescriptionCompat.Builder().setMediaId(station.id)
-                .setTitle(station.name).setIconBitmap(station.bitmap() ?: sourceIcon(if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast)).build()
+                .setTitle(station.name).setIconBitmap(station.bitmap() ?: sourceIcon(if (station.textFile) R.drawable.ic_source_text else if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast)).build()
             items.add(MediaBrowserCompat.MediaItem(desc, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
         }
         result.sendResult(items)
@@ -510,7 +511,9 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     private fun publishMediaSubtitle(key: String, caption: String?, position: Int?) {
         val base = baseMetadata ?: return
-        val subtitle = MediaPositionSubtitle.text(caption, position) ?: INVISIBLE_TEXT
+        val textProgress = if (running && !noticePlaying && caption == null)
+            streamPlayer.readingProgress(StreamLibrary.selected(prefs)?.url) else null
+        val subtitle = MediaPositionSubtitle.text(caption, position) ?: textProgress ?: INVISIBLE_TEXT
         val publication = MediaPublicationKey(key, INVISIBLE_TEXT, subtitle)
         if (publication == lastPublished) return
         session.setMetadata(MediaMetadataCompat.Builder(base)
@@ -525,9 +528,11 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private fun syncStream() {
-        val url = if (clientActive && running && !noticePlaying)
-            StreamLibrary.selected(prefs)?.url else null
-        streamPlayer.sync(url, phoneMode != PhoneAudioMode.OFF, onChanged = {
+        val station = if (clientActive && running && !noticePlaying)
+            StreamLibrary.selected(prefs) else null
+        val url = station?.url
+        streamPlayer.sync(url, phoneMode != PhoneAudioMode.OFF,
+            textLanguage = station?.takeIf { it.textFile }?.language, onChanged = {
             lastPlayback = null
             publishPlaybackState()
             refreshPositionSubtitle()
@@ -562,7 +567,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private fun publishPlaybackState() {
         val isRunning = running
         val station = StreamLibrary.selected(prefs)
-        val seek = streamPlayer.seekState(station?.url)
+        val seek = if (station?.textFile == true) null else streamPlayer.seekState(station?.url)
         val key = PlaybackKey(isRunning, station?.id ?: CLOCK_ID, seek != null)
         if (lastPlayback == key) return
         val actions = PlaybackStateCompat.ACTION_PLAY or

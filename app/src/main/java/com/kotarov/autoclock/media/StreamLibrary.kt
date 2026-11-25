@@ -13,7 +13,8 @@ object StreamLibrary {
     const val KEY_LIST = "stream_library_v85"
     const val KEY_SELECTED = "stream_selected_v85"
     const val ALERT_ID = "autoclock_clock"
-    data class Station(val id: String, val name: String, val url: String, val icon: String = "", val local: Boolean = false) {
+    data class Station(val id: String, val name: String, val url: String, val icon: String = "", val local: Boolean = false,
+        val textFile: Boolean = false, val language: String = "auto") {
         fun bitmap(): Bitmap? = runCatching {
             val bytes = Base64.decode(icon, Base64.DEFAULT)
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
@@ -35,7 +36,7 @@ object StreamLibrary {
             val local = o.optBoolean("local", false)
             if (!(if (local) CustomStreamPlayer.validLocal(url) else CustomStreamPlayer.valid(url))) null
             else Station(o.getString("id"), o.optString("name").ifBlank { defaultName(url) },
-                url, o.optString("icon"), local)
+                url, o.optString("icon"), local, local && o.optBoolean("textFile", false), o.optString("language", "auto"))
         }
     }.getOrDefault(emptyList())
     fun selected(prefs: SharedPreferences): Station? =
@@ -43,7 +44,7 @@ object StreamLibrary {
     fun save(prefs: SharedPreferences, stations: List<Station>) {
         val a = JSONArray()
         stations.forEach { s ->
-            a.put(JSONObject().put("id", s.id).put("name", s.name).put("url", s.url).put("icon", s.icon).put("local", s.local))
+            a.put(JSONObject().put("id", s.id).put("name", s.name).put("url", s.url).put("icon", s.icon).put("local", s.local).put("textFile", s.textFile).put("language", s.language))
         }
         val edit = prefs.edit().putString(KEY_LIST, a.toString())
         if (stations.none { it.id == prefs.getString(KEY_SELECTED, ALERT_ID) })
@@ -51,8 +52,8 @@ object StreamLibrary {
         edit.apply()
     }
     fun newStation(url: String) = Station("stream:" + UUID.randomUUID().toString(), defaultName(url), url)
-    fun newFile(uri: String, name: String) = Station("file:" + UUID.randomUUID().toString(),
-        name.take(128).ifBlank { "Local file" }, uri, local = true)
+    fun newFile(uri: String, name: String, textFile: Boolean = false) = Station("file:" + UUID.randomUUID().toString(),
+        name.take(128).ifBlank { "Local file" }, uri, local = true, textFile = textFile)
     fun move(stations: List<Station>, from: String, to: String, after: Boolean): List<Station> {
         if (from == to) return stations
         val source = stations.firstOrNull { it.id == from } ?: return stations
