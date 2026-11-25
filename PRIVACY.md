@@ -16,7 +16,7 @@ The current beta has no accounts, advertising or analytics SDKs, or developer-op
 
 The app uses an installed offline English Android text-to-speech voice to read the displayed notice text while weather and voice alerts are enabled. It does not intentionally select a network voice or transmit notice text to a developer-operated speech service.
 
-An optional Bluetooth phone audio setting temporarily selects a connected hands-free audio output for alerts. The app does not place calls, read call history, record audio or request microphone access.
+An optional Bluetooth phone audio setting can temporarily select a connected hands-free audio output for alerts or hold that route during an active Android Auto session in the experimental continuous mode. The route is released when the mode is disabled, the media client disconnects, or the system interrupts it. The app does not place calls, read call history, record audio or request microphone access.
 
 Custom stream is optional. The entered HTTPS audio URL is stored locally; the phone connects directly to the selected provider, which receives normal network information such as IP address. Audio is not relayed through an Auto Clock server. When using Bluetooth phone audio, speech may be synthesized to a temporary local audio file which is deleted after playback or cancellation.
 
