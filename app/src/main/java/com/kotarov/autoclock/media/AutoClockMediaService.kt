@@ -32,7 +32,6 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private val cityAnnouncement = CityAnnouncement()
     private val noticeAudio by lazy { NoticeAudio(this) }
     private val streamPlayer by lazy { CustomStreamPlayer(this) }
-    private val continuousPhoneAudio by lazy { ContinuousPhoneAudio(this) }
     private val phoneMode: PhoneAudioMode get() = PhoneAudioMode.read(prefs)
     private var noticePlaying = false
     private var testNotice: CityAnnouncement.Notice? = null
@@ -92,13 +91,17 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         if (key == PhoneAudioMode.KEY || key == NoticeAudio.KEY_PHONE_CHANNEL) {
             stopNoticeAudio()
             streamPlayer.stop()
-            continuousPhoneAudio.stop()
-            syncPhoneMode()
             syncStream()
         }
         if (key == ClockPreset.KEY_ADD_WEATHER && !running) stopNoticeAudio()
         if (key == ClockPreset.KEY_ADD_WEATHER ||
-            key == CustomStreamPlayer.KEY_ENABLED || key == CustomStreamPlayer.KEY_URL) syncStream()
+            key == StreamLibrary.KEY_LIST || key == StreamLibrary.KEY_SELECTED) syncStream()
+        if (key == StreamLibrary.KEY_LIST) notifyChildrenChanged(ROOT_ID)
+        if (key == StreamLibrary.KEY_LIST || key == StreamLibrary.KEY_SELECTED) {
+            lastPublished = null
+            publishClock()
+        }
+        if (key == NoticeAudio.KEY_SPEAK) { stopNoticeAudio(); syncStream() }
         if (key == KEY_SHOW_LOCATION) {
             val city = WeatherStore.locality(this)
             cityAnnouncement.show(city, SystemClock.elapsedRealtime())
@@ -144,15 +147,16 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             edit.apply()
         }
         ClockSelectionStore.migrateSimplifiedIfNeeded(prefs)
+        StreamLibrary.migrate(prefs)
         session = MediaSessionCompat(this, "AutoClockMediaTestsV037").apply {
             setFlags(MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS)
             setCallback(object : MediaSessionCompat.Callback() {
                 override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
-                    if (mediaId == CLOCK_ID) setWeatherEnabled(true)
+                    if (selectSource(mediaId)) setWeatherEnabled(true)
                 }
 
                 override fun onPrepareFromMediaId(mediaId: String?, extras: Bundle?) {
-                    if (mediaId == CLOCK_ID) {
+                    if (selectSource(mediaId)) {
                         publishClock()
                         publishPlaybackState()
                     }
@@ -205,14 +209,45 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             result.sendResult(mutableListOf())
             return
         }
-        // Information only: the browser exposes no playable track or folder.
-        // Keep the active media session intact for the dashboard clock and
-        // Play/Pause. Android Auto itself still decides when to open Now Playing.
-        val description = MediaDescriptionCompat.Builder()
-            .setMediaId(AutoClockInfo.ID)
-            .setTitle(AutoClockInfo.title(installedVersion()))
-            .build()
-        result.sendResult(mutableListOf(MediaBrowserCompat.MediaItem(description, 0)))
+        val items = mutableListOf<MediaBrowserCompat.MediaItem>()
+        val alert = MediaDescriptionCompat.Builder().setMediaId(CLOCK_ID)
+            .setTitle("Alert only")
+            .setIconBitmap(sourceIcon(true)).build()
+        items.add(MediaBrowserCompat.MediaItem(alert, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
+        StreamLibrary.list(prefs).forEach { station ->
+            val desc = MediaDescriptionCompat.Builder().setMediaId(station.id)
+                .setTitle(station.name).setIconBitmap(station.bitmap() ?: sourceIcon(false)).build()
+            items.add(MediaBrowserCompat.MediaItem(desc, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
+        }
+        result.sendResult(items)
+    }
+
+    private fun sourceIcon(alert: Boolean): Bitmap {
+        val bitmap = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bitmap)
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.rgb(35, 155, 255)
+            strokeWidth = 4f
+            style = android.graphics.Paint.Style.STROKE
+        }
+        if (alert) {
+            canvas.drawCircle(32f, 32f, 23f, paint)
+            canvas.drawLine(32f, 32f, 32f, 16f, paint)
+            canvas.drawLine(32f, 32f, 45f, 32f, paint)
+        } else {
+            canvas.drawRoundRect(7f, 20f, 57f, 51f, 5f, 5f, paint)
+            canvas.drawLine(10f, 19f, 48f, 8f, paint)
+            canvas.drawCircle(21f, 35f, 8f, paint)
+            canvas.drawLine(36f, 31f, 49f, 31f, paint)
+            canvas.drawLine(36f, 39f, 49f, 39f, paint)
+        }
+        return bitmap
+    }
+
+    private fun selectSource(id: String?): Boolean {
+        if (id != CLOCK_ID && StreamLibrary.list(prefs).none { it.id == id }) return false
+        prefs.edit().putString(StreamLibrary.KEY_SELECTED, id).apply()
+        return true
     }
 
     @Suppress("DEPRECATION")
@@ -224,7 +259,6 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         if (clientActive) return
         clientActive = true
         NoticeTest.receiver = receiveTest
-        syncPhoneMode()
         syncStream()
         lastWarningRevision = prefs.getLong(WeatherStore.KEY_WARNING_REV, 0L)
         WeatherStore.start(this, WeatherStore.Client.CAR)
@@ -246,8 +280,6 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         queuedWarning = null
         stopNoticeAudio()
         streamPlayer.stop()
-        continuousPhoneAudio.stop()
-        prefs.edit().remove(ContinuousPhoneAudio.KEY_STATUS).apply()
         artworkWorker.cancel()
         requestedArtKey = null
         baseMetadata = null
@@ -448,6 +480,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             val publication = MediaPublicationKey(key, temporaryTitle, temporarySubtitle)
             if (publication != lastPublished) {
                 session.setMetadata(MediaMetadataCompat.Builder(baseMetadata!!)
+                    .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, StreamLibrary.selected(prefs)?.id ?: CLOCK_ID)
                     .putString(MediaMetadataCompat.METADATA_KEY_TITLE, temporaryTitle)
                     .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, temporarySubtitle)
                     .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, INVISIBLE_TEXT)
@@ -467,29 +500,10 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         }
     }
 
-    private fun syncPhoneMode() {
-        if (clientActive && phoneMode == PhoneAudioMode.CONTINUOUS) {
-            continuousPhoneAudio.start { active, status ->
-                prefs.edit().putString(ContinuousPhoneAudio.KEY_STATUS, status).apply()
-                if (!active) {
-                    stopNoticeAudio()
-                    streamPlayer.stop()
-                }
-                syncStream()
-            }
-        } else {
-            continuousPhoneAudio.stop()
-            prefs.edit().remove(ContinuousPhoneAudio.KEY_STATUS).apply()
-        }
-    }
-
     private fun syncStream() {
-        val shared = phoneMode == PhoneAudioMode.CONTINUOUS && continuousPhoneAudio.active
-        val url = if (clientActive && running && !noticePlaying &&
-            (phoneMode != PhoneAudioMode.CONTINUOUS || shared) &&
-            prefs.getBoolean(CustomStreamPlayer.KEY_ENABLED, false))
-            prefs.getString(CustomStreamPlayer.KEY_URL, null) else null
-        streamPlayer.sync(url, shared, shared) { error ->
+        val url = if (clientActive && running && !noticePlaying)
+            StreamLibrary.selected(prefs)?.url else null
+        streamPlayer.sync(url, phoneMode != PhoneAudioMode.OFF) { error ->
             if (clientActive && !noticePlaying && testNotice == null) {
                 testNotice = CityAnnouncement.Notice("ℹ️", error)
                 handler.removeCallbacks(hideTestNotice)
@@ -504,8 +518,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         // Release the stream's HFP route before the short alert claims it.
         streamPlayer.stop()
         val sound = NoticeSound.fromId(prefs.getString(NoticeSound.KEY, null))
-        val shared = phoneMode == PhoneAudioMode.CONTINUOUS && continuousPhoneAudio.active
-        noticeAudio.play(sound, body, phoneMode == PhoneAudioMode.ALERTS || shared, shared) {
+        noticeAudio.play(sound, body, phoneMode != PhoneAudioMode.OFF,
+            speakEnabled = prefs.getBoolean(NoticeAudio.KEY_SPEAK, true)) {
             noticePlaying = false
             syncStream()
         }
