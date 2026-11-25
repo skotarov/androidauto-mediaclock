@@ -7,7 +7,6 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Region
-import android.graphics.SweepGradient
 import android.graphics.Typeface
 import com.kotarov.autoclock.media.ClockPreset
 import com.kotarov.autoclock.media.ClockFamily
@@ -295,33 +294,28 @@ object ClockRenderer {
             if (hasTemperature) canvas.drawText(temperature, x, y + baseline, paint)
             canvas.restoreToCount(save)
         }
-        // Start at the CURRENT hourly symbol, not the first changed forecast.
-        // The sixth slot is five hourly intervals (150 degrees) farther on.
-        if (currentSlot in changes.iconEpochs &&
-            forecast.any { it.code >= 0 && it.epochSeconds > currentSlot &&
-                it.epochSeconds <= currentSlot + ForecastStore.RING_FUTURE_HOURS * 3600L }) {
-            drawForecastFadeArc(canvas, now.hour, radius, centreY, theme, arcExclusions)
+        // A solid guide ends at the last available forecast hour, not at a faded nominal endpoint.
+        val last = forecast.filter { it.code >= 0 && it.epochSeconds > currentSlot &&
+            it.epochSeconds <= currentSlot + ForecastStore.RING_FUTURE_HOURS * 3600L }
+            .maxOfOrNull { it.epochSeconds }
+        if (currentSlot in changes.iconEpochs && last != null) {
+            drawForecastArc(canvas, now.hour, radius, centreY, theme, arcExclusions,
+                (last - currentSlot) / 3600f * 30f)
         }
     }
 
-    /** A thin, continuously fading guide on the standalone temperature ring.
-     * One gradient and one arc: no per-segment paint allocations. */
     @Suppress("DEPRECATION")
-    private fun drawForecastFadeArc(
+    private fun drawForecastArc(
         canvas: Canvas, currentHour: Int, radius: Float, centreY: Float,
-        theme: ClockTheme, exclusions: Path
+        theme: ClockTheme, exclusions: Path, sweep: Float
     ) {
         val unit = radius / STANDARD_RADIUS
         val arcRadius = radius * STANDALONE_TEMPERATURE_RADIUS
-        val sweep = ForecastStore.RING_FUTURE_HOURS * 30f
-        val rgb = themed(pale, theme) and 0x00ffffff
-        val startColor = rgb or (140 shl 24)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             strokeWidth = 2.2f * unit
-            shader = SweepGradient(CENTER_X, centreY,
-                intArrayOf(startColor, rgb, rgb, startColor),
-                floatArrayOf(0f, sweep / 360f, 0.999f, 1f))
+            color = themed(pale, theme)
+            alpha = 140
         }
         val oval = RectF(CENTER_X - arcRadius, centreY - arcRadius,
             CENTER_X + arcRadius, centreY + arcRadius)
