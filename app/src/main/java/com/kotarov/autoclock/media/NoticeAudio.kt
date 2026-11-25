@@ -22,10 +22,16 @@ class NoticeAudio(context: Context) {
     private var ownsDevice = false
 
     fun play(sound: NoticeSound, text: String, phoneChannel: Boolean,
+             sharedPhoneChannel: Boolean = false,
              onFinished: () -> Unit = {}) {
         stop()
         finished = onFinished
         val token = generation
+        if (sharedPhoneChannel && phoneChannel && Build.VERSION.SDK_INT >= 31) {
+            // The continuous mode owns the route; never claim or release it here.
+            playOnRoute(token, sound, text, true)
+            return
+        }
         if (!phoneChannel || Build.VERSION.SDK_INT < 31) {
             playOnRoute(token, sound, text, false)
             return
