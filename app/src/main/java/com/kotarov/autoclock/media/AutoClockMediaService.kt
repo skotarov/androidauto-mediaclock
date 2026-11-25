@@ -504,6 +504,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val url = if (clientActive && running && !noticePlaying)
             StreamLibrary.selected(prefs)?.url else null
         streamPlayer.sync(url, phoneMode != PhoneAudioMode.OFF) { error ->
+            if (error == "File ended") setWeatherEnabled(false)
             if (clientActive && !noticePlaying && testNotice == null) {
                 testNotice = CityAnnouncement.Notice("ℹ️", error)
                 handler.removeCallbacks(hideTestNotice)
