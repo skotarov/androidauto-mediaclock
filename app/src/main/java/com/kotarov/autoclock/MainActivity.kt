@@ -75,6 +75,7 @@ class MainActivity : Activity() {
     private val playbackCallback = object : MediaControllerCompat.Callback() {
         override fun onPlaybackStateChanged(state: PlaybackStateCompat?) {
             syncTransportButtons(state)
+            if (BuildConfig.PLAY_MEDIA_MODE) syncWeatherToggle()
         }
         override fun onSessionDestroyed() {
             detachPhoneController()
@@ -206,7 +207,7 @@ class MainActivity : Activity() {
                 syncQuickButtons()
             }
         }
-        carAudioButton.isEnabled = android.os.Build.VERSION.SDK_INT >= 31
+        carAudioButton.isEnabled = !BuildConfig.PLAY_MEDIA_MODE && android.os.Build.VERSION.SDK_INT >= 31
         sizeButton = quickButton(R.drawable.ic_setting_size, "Clock size") {
             val compact = prefs.getString(AutoClockMediaService.KEY_LAYOUT, "standard") == "compact"
             prefs.edit().putString(AutoClockMediaService.KEY_LAYOUT,
@@ -236,7 +237,7 @@ class MainActivity : Activity() {
                 addView(button, FrameLayout.LayoutParams(dp(48), dp(48), android.view.Gravity.CENTER))
             }, LinearLayout.LayoutParams(0, dp(56), 1f))
         }
-        listOf(carAudioButton, sizeButton, themeButton).forEach { button ->
+        listOf(carAudioButton, sizeButton, themeButton).filter { !BuildConfig.PLAY_MEDIA_MODE || it !== carAudioButton }.forEach { button ->
             addQuickControl(quickRow, button)
         }
         // A single subtle outline links the three message-related controls.
@@ -253,7 +254,7 @@ class MainActivity : Activity() {
         listOf(speakButton, chimeButton, testButton).forEach { button ->
             addQuickControl(messageControls, button)
         }
-        quickRow.addView(messageControls, LinearLayout.LayoutParams(0, dp(56), 3f))
+        if (!BuildConfig.PLAY_MEDIA_MODE) quickRow.addView(messageControls, LinearLayout.LayoutParams(0, dp(56), 3f))
         addSpaced(root, quickRow)
         syncQuickButtons()
 
@@ -271,7 +272,14 @@ class MainActivity : Activity() {
             scaleType = ImageView.ScaleType.CENTER_INSIDE
             setOnClickListener {
                 val p = settings()
-                ClockSelectionStore.setWeatherEnabled(p, !ClockSelectionStore.weatherEnabled(p))
+                if (BuildConfig.PLAY_MEDIA_MODE) {
+                    val c = phoneController
+                    if (c != null) {
+                        if (c.playbackState?.state == PlaybackStateCompat.STATE_PLAYING ||
+                            c.playbackState?.state == PlaybackStateCompat.STATE_BUFFERING) c.transportControls.pause()
+                        else c.transportControls.play()
+                    }
+                } else ClockSelectionStore.setWeatherEnabled(p, !ClockSelectionStore.weatherEnabled(p))
                 syncWeatherToggle()
             }
         }
@@ -295,7 +303,7 @@ class MainActivity : Activity() {
         }
         root.addView(locationMessage)
 
-        val streams = settingsGroup(root, "Streams")
+        val streams = settingsGroup(root, if (BuildConfig.PLAY_MEDIA_MODE) "Audio library" else "Streams")
         val addRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         addRow.addView(Button(this).apply {
             text = "Add stream"
@@ -358,6 +366,7 @@ class MainActivity : Activity() {
                     phoneController = MediaControllerCompat(this@MainActivity, browser.sessionToken).also {
                         it.registerCallback(playbackCallback, messageHandler)
                         syncTransportButtons(it.playbackState)
+                        if (BuildConfig.PLAY_MEDIA_MODE) syncWeatherToggle()
                     }
                 }
                 override fun onConnectionSuspended() { detachPhoneController() }
@@ -436,7 +445,9 @@ class MainActivity : Activity() {
 
     private fun syncWeatherToggle() {
         if (!::weatherButton.isInitialized) return
-        val playing = ClockSelectionStore.weatherEnabled(settings())
+        val playing = if (BuildConfig.PLAY_MEDIA_MODE) phoneController?.playbackState?.state.let {
+            it == PlaybackStateCompat.STATE_PLAYING || it == PlaybackStateCompat.STATE_BUFFERING
+        } else ClockSelectionStore.weatherEnabled(settings())
         weatherButton.setImageResource(if (playing) android.R.drawable.ic_media_pause
             else android.R.drawable.ic_media_play)
         weatherButton.contentDescription = if (playing) "Pause" else "Play"
@@ -454,6 +465,7 @@ class MainActivity : Activity() {
         super.onResume()
         if (::analogImage.isInitialized) updatePreviewTiles()
         // Every opening of settings starts a current observation refresh.
+        if (BuildConfig.PLAY_MEDIA_MODE) return
         if (WeatherLocation.permitted(this)) {
             WeatherStore.start(this, WeatherStore.Client.PHONE)
         } else if (!hasRequestedLocation) {
@@ -622,7 +634,7 @@ class MainActivity : Activity() {
             addView(alert, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             setOnClickListener { selectPhoneSource(StreamLibrary.ALERT_ID) }
         }
-        addSpaced(streamRows, alertRow)
+        if (!BuildConfig.PLAY_MEDIA_MODE) addSpaced(streamRows, alertRow)
         sources.forEach { station ->
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -718,6 +730,10 @@ class MainActivity : Activity() {
 
     private fun selectPhoneSource(id: String) {
         val prefs = settings()
+        if (BuildConfig.PLAY_MEDIA_MODE) {
+            phoneController?.transportControls?.playFromMediaId(id, null)
+            return
+        }
         prefs.edit().putString(StreamLibrary.KEY_SELECTED, id).apply()
         ClockSelectionStore.setWeatherEnabled(prefs, true)
         syncWeatherToggle()

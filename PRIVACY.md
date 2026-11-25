@@ -20,7 +20,7 @@ An optional car phone audio setting selects a connected hands-free output during
 
 Custom streams are optional. Entered HTTPS audio URLs, station names and small icons are stored locally. On saving a station, the app attempts to read its stream name and same-host icon. The phone connects directly to the selected provider, which receives normal network information such as IP address. Audio is not relayed through an Auto Clock server. When using Bluetooth phone audio, an on-device silent PCM audio buffer is looped to keep the route active during alerts or active phone-channel stream playback. Speech is synthesized directly without temporary audio files. The silent buffer does not contain recorded audio.
 
-User-selected local audio/video documents are opened through Android's system document picker. The app stores the selected document URI, display name and read permission locally, without copying or uploading the file. Removing the last list entry for a document releases its saved access permission. The phone settings can connect to the same playback service while open.
+User-selected local audio/video and plain-text documents are opened through Android's system document picker. The app stores the selected document URI, display name and read permission locally, without copying or uploading the file. Removing the last list entry for a document releases its saved access permission. The phone settings can connect to the same playback service while open.
 
 ## Controls and retention
 
@@ -31,3 +31,7 @@ Revoke location permission in Android Settings to stop new location access. Prev
 ## Contact
 
 For privacy questions see the [developer profile](https://github.com/skotarov); for non-sensitive questions use the [project issue tracker](https://github.com/skotarov/androidauto-mediaclock/issues). Do not post personal information in public issues. A direct privacy contact and the commercial forecast gateway details must be confirmed before commercial distribution.
+
+## Play distribution and reading
+
+The initial Play release does not request location or contact weather providers. It uses ordinary media playback, with an Android media foreground notification while playing. Local audio and text positions are saved on the device. TXT reading creates a temporary UTF-16 text cache in private app storage, deleted when reading stops normally; stale caches are cleaned on later reading. The offline system speech engine receives text chunks for synthesis; the app does not deliberately upload the text. The test build retains optional location and weather features described above. The Play release has no payment, advertising, analytics or account system at launch. Future monetization or weather services require a revised disclosure before activation.

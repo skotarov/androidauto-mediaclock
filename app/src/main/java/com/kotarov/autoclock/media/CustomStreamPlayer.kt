@@ -56,9 +56,17 @@ class CustomStreamPlayer(context: Context) {
         return savedSeek?.takeIf { it.first == url }?.second
     }
 
+    fun isPlaying(): Boolean = if (reading) reader?.progress() != null
+        else runCatching { player?.isPlaying == true }.getOrDefault(false)
+
     fun seekBy(url: String?, deltaMs: Int): Boolean {
         val current = seekState(url) ?: return false
-        val target = (current.position.toLong() + deltaMs).coerceIn(0L, current.duration.toLong()).toInt()
+        return seekTo(url, current.position.toLong() + deltaMs)
+    }
+
+    fun seekTo(url: String?, position: Long): Boolean {
+        val current = seekState(url) ?: return false
+        val target = position.coerceIn(0L, current.duration.toLong()).toInt()
         val media = player
         if (prepared && seekable && requested?.first == url && media != null) {
             if (runCatching { media.seekTo(target) }.isFailure) return false

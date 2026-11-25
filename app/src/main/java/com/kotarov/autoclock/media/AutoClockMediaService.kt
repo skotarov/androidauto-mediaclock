@@ -1,6 +1,7 @@
 package com.kotarov.autoclock.media
 
 import android.content.Intent
+import com.kotarov.autoclock.BuildConfig
 import android.graphics.Bitmap
 import android.content.SharedPreferences
 import android.os.Bundle
@@ -29,8 +30,14 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private lateinit var session: MediaSessionCompat
     private lateinit var prefs: SharedPreferences
     private var activeSource: StreamLibrary.Station? = null
+    private val playMode = BuildConfig.PLAY_MEDIA_MODE
+    private var requestedPlayback = false
+    private var focusInterrupted = false
+    private var mediaError: String? = null
+    private val focus by lazy { PlayAudioFocus(this) { change -> onFocusChange(change) } }
+    private var foregroundAudio = false
     private val running: Boolean
-        get() = ClockSelectionStore.weatherEnabled(prefs)
+        get() = if (playMode) requestedPlayback && !focusInterrupted else ClockSelectionStore.weatherEnabled(prefs)
     private val cityAnnouncement = CityAnnouncement()
     private val noticeAudio by lazy { NoticeAudio(this) }
     private val streamPlayer by lazy { CustomStreamPlayer(this) }
@@ -163,6 +170,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 }
 
                 override fun onPrepareFromMediaId(mediaId: String?, extras: Bundle?) {
+                    if (playMode) setWeatherEnabled(false)
                     if (selectSource(mediaId)) {
                         publishClock()
                         publishPlaybackState()
@@ -177,6 +185,18 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                     }
                     val station = activeSource
                     if (station?.textFile != true && streamPlayer.seekBy(station?.url, delta)) {
+                        lastPlayback = null
+                        publishPlaybackState()
+                    }
+                }
+                override fun onPlayFromSearch(query: String?, extras: Bundle?) {
+                    val items = StreamLibrary.list(prefs)
+                    val match = if (query.isNullOrBlank()) activeSource ?: items.firstOrNull()
+                        else items.firstOrNull { it.name.contains(query, ignoreCase = true) }
+                    if (match != null && selectSource(match.id)) setWeatherEnabled(true)
+                }
+                override fun onSeekTo(pos: Long) {
+                    if (playMode && streamPlayer.seekTo(activeSource?.url, pos)) {
                         lastPlayback = null
                         publishPlaybackState()
                     }
@@ -209,8 +229,13 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         }
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int =
-        START_NOT_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (playMode && intent?.action == "autoclock.stop_playback") {
+            setPlayRequested(false)
+            stopSelf()
+        }
+        return START_NOT_STICKY
+    }
 
     override fun onGetRoot(
         clientPackageName: String,
@@ -242,7 +267,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val alert = MediaDescriptionCompat.Builder().setMediaId(CLOCK_ID)
             .setTitle("Alert only")
             .setIconBitmap(sourceIcon(R.drawable.ic_source_travel)).build()
-        items.add(MediaBrowserCompat.MediaItem(alert, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
+        if (!playMode) items.add(MediaBrowserCompat.MediaItem(alert, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
         StreamLibrary.list(prefs).forEach { station ->
             val desc = MediaDescriptionCompat.Builder().setMediaId(station.id)
                 .setTitle(station.name).setIconBitmap(station.bitmap() ?: sourceIcon(if (station.textFile) R.drawable.ic_source_text else if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast)).build()
@@ -260,8 +285,10 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private fun selectSource(id: String?): Boolean {
+        if (playMode && id == CLOCK_ID) return false
         if (id != CLOCK_ID && StreamLibrary.list(prefs).none { it.id == id }) return false
         prefs.edit().putString(StreamLibrary.KEY_SELECTED, id).apply()
+        activeSource = StreamLibrary.selected(prefs)
         return true
     }
 
@@ -275,6 +302,11 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         suspendedForProjection = false
         clientActive = true
         activeSource = StreamLibrary.selected(prefs)
+        if (playMode) {
+            publishPlayMetadata()
+            publishPlaybackState()
+            return
+        }
         NoticeTest.receiver = receiveTest
         syncStream()
         lastWarningRevision = prefs.getLong(WeatherStore.KEY_WARNING_REV, 0L)
@@ -287,6 +319,12 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private fun suspendClientWork() {
+        if (playMode) {
+            requestedPlayback = false
+            focusInterrupted = false
+            focus.abandon()
+            stopPlaybackForeground()
+        }
         clientActive = false
         if (NoticeTest.receiver === receiveTest) NoticeTest.receiver = null
         handler.removeCallbacks(hideTestNotice)
@@ -360,6 +398,10 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private fun setWeatherEnabled(enabled: Boolean) {
+        if (playMode) {
+            setPlayRequested(enabled)
+            return
+        }
         if (!enabled) {
             stopNoticeAudio()
             streamPlayer.stop()
@@ -393,6 +435,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     private fun publishClock() {
         if (!clientActive) return
+        if (playMode) { publishPlayMetadata(); return }
         val now = LocalDateTime.now()
         val visible = visiblePreset()
         val weather = if (visible.usesWeather) WeatherStore.current(this) else null
@@ -527,7 +570,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private fun refreshPositionSubtitle() {
-        if (!clientActive) return
+        if (!clientActive || playMode) return
         val caption = (testNotice ?: cityAnnouncement.notice(SystemClock.elapsedRealtime()))?.subtitle
         val position = if (caption == null) currentMediaPosition() else null
         artKey?.let { publishMediaSubtitle(it, caption, position) }
@@ -561,12 +604,19 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val station = if (clientActive && running && !noticePlaying)
             activeSource else null
         val url = station?.url
-        streamPlayer.sync(url, phoneMode != PhoneAudioMode.OFF,
+        streamPlayer.sync(url, !playMode && phoneMode != PhoneAudioMode.OFF,
             textLanguage = station?.takeIf { it.textFile }?.language, onChanged = {
-            if (station?.textFile != true) lastPlayback = null
+            if (playMode || station?.textFile != true) lastPlayback = null
             publishPlaybackState()
             refreshPositionSubtitle()
         }) { error ->
+            if (playMode) {
+                setPlayRequested(false)
+                mediaError = if (error == "Media ended") null else error
+                lastPlayback = null
+                publishPlaybackState()
+                return@sync
+            }
             lastPlayback = null
             publishPlaybackState()
             if (error == "Media ended") setWeatherEnabled(false)
@@ -582,6 +632,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private fun playNotice(body: String) {
+        if (playMode) return
         val sound = NoticeSound.fromId(prefs.getString(NoticeSound.KEY, null))
         val speak = prefs.getBoolean(NoticeAudio.KEY_SPEAK, true)
         // A visual-only notice must not touch playback or the audio route.
@@ -599,6 +650,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private fun publishPlaybackState() {
+        if (playMode) { publishPlayState(); return }
         val isRunning = running
         val station = activeSource
         val seek = if (station?.textFile == true) null else streamPlayer.seekState(station?.url)
@@ -621,6 +673,132 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         }
         session.setPlaybackState(builder.build())
         lastPlayback = key
+    }
+
+    private var playMetadataSource: StreamLibrary.Station? = null
+    private fun publishPlayMetadata() {
+        val source = activeSource
+        if (source == playMetadataSource && session.controller.metadata != null) return
+        playMetadataSource = source
+        val builder = MediaMetadataCompat.Builder()
+        if (source != null) {
+            builder.putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, source.id)
+                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, source.name)
+                .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, source.name)
+                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST,
+                    if (source.textFile) "Text reading" else if (source.local) "Local audio" else "Audio stream")
+                .putBitmap(MediaMetadataCompat.METADATA_KEY_ART,
+                    source.bitmap() ?: sourceIcon(if (source.textFile) R.drawable.ic_source_text
+                        else if (source.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast))
+        } else builder.putString(MediaMetadataCompat.METADATA_KEY_TITLE, "Select audio")
+        session.setMetadata(builder.build())
+    }
+
+    private fun setPlayRequested(enabled: Boolean) {
+        mediaError = null
+        if (!enabled || !clientActive) {
+            requestedPlayback = false
+            focusInterrupted = false
+            streamPlayer.stop()
+            focus.abandon()
+            stopPlaybackForeground()
+        } else {
+            if (activeSource == null) {
+                val first = StreamLibrary.list(prefs).firstOrNull()
+                if (first != null) selectSource(first.id)
+            }
+            if (activeSource == null) {
+                mediaError = "Add an audio or text file on your phone."
+            } else if (startPlaybackForeground() && focus.request()) {
+                requestedPlayback = true
+                focusInterrupted = false
+                streamPlayer.retryFailed()
+            } else {
+                requestedPlayback = false
+                focusInterrupted = false
+                streamPlayer.stop()
+                focus.abandon()
+                stopPlaybackForeground()
+                mediaError = "Audio focus unavailable"
+            }
+        }
+        syncStream()
+        publishPlayMetadata()
+        publishPlaybackState()
+    }
+
+    private fun onFocusChange(change: Int) {
+        if (!playMode || !requestedPlayback) return
+        when (change) {
+            android.media.AudioManager.AUDIOFOCUS_LOSS -> setPlayRequested(false)
+            android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
+            android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                focusInterrupted = true
+                streamPlayer.suspendForNotice()
+                publishPlaybackState()
+            }
+            android.media.AudioManager.AUDIOFOCUS_GAIN -> {
+                focusInterrupted = false
+                syncStream()
+            }
+        }
+    }
+
+    private fun startPlaybackForeground(): Boolean {
+        if (foregroundAudio) return true
+        return runCatching {
+            val manager = getSystemService(android.app.NotificationManager::class.java)
+            if (android.os.Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(
+                android.app.NotificationChannel("playback", "Audio playback", android.app.NotificationManager.IMPORTANCE_LOW))
+            val builder = if (android.os.Build.VERSION.SDK_INT >= 26)
+                android.app.Notification.Builder(this, "playback") else android.app.Notification.Builder(this)
+            val stop = android.app.PendingIntent.getService(this, 2,
+                Intent(this, AutoClockMediaService::class.java).setAction("autoclock.stop_playback"),
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
+            val launch = android.app.PendingIntent.getActivity(this, 1,
+                Intent(this, com.kotarov.autoclock.MainActivity::class.java),
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
+            val notification = builder.setSmallIcon(R.drawable.ic_auto_clock)
+                .setContentTitle(activeSource?.name ?: "Auto Clock 2")
+                .setContentText("Audio playback").setContentIntent(launch)
+                .addAction(android.app.Notification.Action.Builder(android.R.drawable.ic_media_pause, "Stop", stop).build())
+                .setOngoing(true).setOnlyAlertOnce(true).build()
+            startForeground(97, notification)
+            foregroundAudio = true
+            true
+        }.getOrDefault(false)
+    }
+
+    private fun stopPlaybackForeground() {
+        if (!foregroundAudio) return
+        foregroundAudio = false
+        if (android.os.Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_REMOVE)
+        else { @Suppress("DEPRECATION") stopForeground(true) }
+    }
+
+    private fun publishPlayState() {
+        val source = activeSource
+        val seek = if (source?.textFile == true) null else streamPlayer.seekState(source?.url)
+        val state = when {
+            mediaError != null -> PlaybackStateCompat.STATE_ERROR
+            source == null -> PlaybackStateCompat.STATE_NONE
+            !running -> PlaybackStateCompat.STATE_PAUSED
+            streamPlayer.isPlaying() -> PlaybackStateCompat.STATE_PLAYING
+            else -> PlaybackStateCompat.STATE_BUFFERING
+        }
+        var actions = PlaybackStateCompat.ACTION_PLAY or PlaybackStateCompat.ACTION_PAUSE or
+            PlaybackStateCompat.ACTION_STOP or PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID or
+            PlaybackStateCompat.ACTION_PREPARE_FROM_MEDIA_ID or PlaybackStateCompat.ACTION_PLAY_FROM_SEARCH
+        if (seek != null) actions = actions or PlaybackStateCompat.ACTION_SEEK_TO
+        val builder = PlaybackStateCompat.Builder().setActions(actions)
+            .setState(state, seek?.position?.toLong() ?: PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN,
+                if (state == PlaybackStateCompat.STATE_PLAYING && seek != null) 1f else 0f)
+        mediaError?.let { builder.setErrorMessage(PlaybackStateCompat.ERROR_CODE_APP_ERROR, it) }
+        if (seek != null) {
+            builder.addCustomAction(ACTION_BACK_10, "Back 10 seconds", R.drawable.ic_replay_10)
+            builder.addCustomAction(ACTION_FORWARD_10, "Forward 10 seconds", R.drawable.ic_forward_10)
+        }
+        session.setPlaybackState(builder.build())
     }
 
     companion object {

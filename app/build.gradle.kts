@@ -21,8 +21,8 @@ android {
         applicationId = "com.kotarov.autoclock2"
         minSdk = 23
         targetSdk = 36
-        versionCode = 96
-        versionName = "0.96.0-beta"
+        versionCode = 97
+        versionName = "0.97.0"
     }
 
     // The public beta workflow supplies its permanent signing identity.
@@ -44,8 +44,14 @@ android {
     buildTypes {
         getByName("release") {
             buildConfigField("String", "FORECAST_ENDPOINT", "\"$escapedEndpoint\"")
+            buildConfigField("boolean", "PLAY_MEDIA_MODE", "true")
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         getByName("debug") {
+            versionNameSuffix = "-beta"
+            buildConfigField("boolean", "PLAY_MEDIA_MODE", "false")
             buildConfigField("String", "FORECAST_ENDPOINT", "\"https://api.open-meteo.com/v1/forecast\"")
             isMinifyEnabled = true
             isShrinkResources = true
@@ -74,11 +80,11 @@ dependencies {
 tasks.matching { it.name == "preReleaseBuild" }.configureEach {
     doFirst {
         val uri = runCatching { URI(commercialForecastEndpoint) }.getOrNull()
-        require(uri != null && uri.scheme == "https" && !uri.host.isNullOrBlank() &&
+        require(commercialForecastEndpoint.isBlank() || (uri != null && uri.scheme == "https" && !uri.host.isNullOrBlank() &&
             !uri.host.equals("api.open-meteo.com", ignoreCase = true) &&
             uri.rawQuery == null && uri.rawFragment == null && uri.userInfo == null &&
-            !uri.path.isNullOrBlank()) {
-            "Commercial release requires a licensed HTTPS forecast gateway via AUTO_CLOCK_FORECAST_ENDPOINT."
+            !uri.path.isNullOrBlank())) {
+            "If configured, forecast gateway must be a licensed HTTPS endpoint. The Play media build does not request forecasts."
         }
     }
 }
