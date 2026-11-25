@@ -109,6 +109,16 @@ class MainActivity : Activity() {
             isFillViewport = true
             addView(root)
         })
+        if (android.os.Build.VERSION.SDK_INT >= 35) {
+            root.setOnApplyWindowInsetsListener { view, insets ->
+                val bars = insets.getInsets(android.view.WindowInsets.Type.systemBars() or
+                    android.view.WindowInsets.Type.displayCutout())
+                view.setPadding(dp(16) + bars.left, dp(22) + bars.top,
+                    dp(16) + bars.right, dp(24) + bars.bottom)
+                insets
+            }
+            root.requestApplyInsets()
+        }
         root.addView(text("Auto Clock 2", 27f, dp(16)))
 
         // The blue outline is the exclusive selection, as in phone display
@@ -236,7 +246,7 @@ class MainActivity : Activity() {
         root.addView(View(this), LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
         ))
-        val credit = "Weather data: NOAA / Open-Meteo (CC BY 4.0)\nAdapted for Auto Clock"
+        val credit = "Weather data: NOAA / Open-Meteo (CC BY 4.0)\nAdapted for Auto Clock\nPrivacy Policy"
         val attribution = android.text.SpannableString(credit).apply {
             fun link(label: String, url: String) {
                 val start = credit.indexOf(label)
@@ -246,6 +256,7 @@ class MainActivity : Activity() {
             link("NOAA", "https://aviationweather.gov/")
             link("Open-Meteo", "https://open-meteo.com/")
             link("CC BY 4.0", "https://creativecommons.org/licenses/by/4.0/")
+            link("Privacy Policy", "https://github.com/skotarov/androidauto-mediaclock/blob/revamp/low-power-v2/PRIVACY.md")
         }
         root.addView(TextView(this).apply {
             text = attribution
