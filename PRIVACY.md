@@ -16,9 +16,9 @@ The current beta has no accounts, advertising or analytics SDKs, or developer-op
 
 The app uses an installed offline English Android text-to-speech voice to read the displayed notice text while weather and voice alerts are enabled. It does not intentionally select a network voice or transmit notice text to a developer-operated speech service.
 
-An optional Bluetooth phone audio setting can temporarily select a connected hands-free audio output for alerts or hold that route during an active Android Auto session in the experimental continuous mode. The route is released when the mode is disabled, the media client disconnects, or the system interrupts it. The app does not place calls, read call history, record audio or request microphone access.
+An optional car phone audio setting selects a connected hands-free output during alerts and selected stream playback. The route is released when audio ends, the setting is disabled, the media client disconnects, or the system interrupts it. The app does not place calls, read call history, record audio or request microphone access.
 
-Custom stream is optional. The entered HTTPS audio URL is stored locally; the phone connects directly to the selected provider, which receives normal network information such as IP address. Audio is not relayed through an Auto Clock server. When using Bluetooth phone audio, an on-device silent PCM audio buffer is looped to keep the route active during alerts or the experimental continuous mode. Speech is synthesized directly without temporary audio files. The silent buffer does not contain recorded audio.
+Custom streams are optional. Entered HTTPS audio URLs, station names and small icons are stored locally. On saving a station, the app attempts to read its stream name and same-host icon. The phone connects directly to the selected provider, which receives normal network information such as IP address. Audio is not relayed through an Auto Clock server. When using Bluetooth phone audio, an on-device silent PCM audio buffer is looped to keep the route active during alerts or active phone-channel stream playback. Speech is synthesized directly without temporary audio files. The silent buffer does not contain recorded audio.
 
 ## Controls and retention
 
