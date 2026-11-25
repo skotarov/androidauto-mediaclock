@@ -20,15 +20,20 @@ class CustomStreamPlayer(context: Context) {
     private var generation = 0L
     private var ownsMode = false
     private var ownsDevice = false
-    private var requested: Pair<String, Boolean>? = null
+    private var requested: Triple<String, Boolean, Boolean>? = null
 
-    fun sync(url: String?, phone: Boolean, onError: (String) -> Unit) {
-        val next = url?.takeIf { valid(it) }?.let { it to phone }
+    fun sync(url: String?, phone: Boolean, sharedPhoneChannel: Boolean = false,
+             onError: (String) -> Unit) {
+        val next = url?.takeIf { valid(it) }?.let { Triple(it, phone, sharedPhoneChannel) }
         if (requested == next) return
         stop()
         if (next == null) return
         requested = next
         val token = generation
+        if (sharedPhoneChannel && phone && Build.VERSION.SDK_INT >= 31) {
+            open(token, next.first, true, onError)
+            return
+        }
         if (!phone || Build.VERSION.SDK_INT < 31) {
             open(token, next.first, false, onError)
             return
