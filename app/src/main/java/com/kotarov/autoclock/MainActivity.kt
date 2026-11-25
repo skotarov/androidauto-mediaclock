@@ -568,17 +568,20 @@ class MainActivity : Activity() {
         streamRows.removeAllViews()
         val prefs = settings()
         val selected = prefs.getString(StreamLibrary.KEY_SELECTED, StreamLibrary.ALERT_ID)
-        val alert = text("Alert only", 16f, dp(8)).apply {
+        val alert = text("Alert only", 16f, 0).apply {
             setTextColor(if (selected == StreamLibrary.ALERT_ID) accent else ink)
-            setPadding(dp(8), dp(12), dp(8), dp(12))
             setOnClickListener { selectPhoneSource(StreamLibrary.ALERT_ID) }
         }
         val alertRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(0, dp(6), 0, dp(6))
+            // Match the drag-handle slot and icon size of the stream rows,
+            // but keep Alert only fixed at the top and non-draggable.
+            addView(View(this@MainActivity), LinearLayout.LayoutParams(dp(34), dp(48)))
             addView(ImageView(this@MainActivity).apply {
                 setImageResource(R.drawable.ic_source_travel)
-            }, LinearLayout.LayoutParams(dp(36), dp(36)).apply { marginEnd = dp(8) })
+            }, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginEnd = dp(8) })
             addView(alert, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             setOnClickListener { selectPhoneSource(StreamLibrary.ALERT_ID) }
         }
