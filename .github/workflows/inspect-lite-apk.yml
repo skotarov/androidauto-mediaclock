@@ -16,10 +16,37 @@ jobs:
         shell: bash
         run: |
           python3 - <<'PY'
-          import glob, zipfile, collections, os, hashlib
+          import glob, zipfile, collections, os, hashlib, struct
           for path in sorted(glob.glob('*.apk')):
               print('\nAPK', path, os.path.getsize(path), hashlib.sha256(open(path,'rb').read()).hexdigest())
               with zipfile.ZipFile(path) as z:
+                  data = open(path,'rb').read()
+                  infos = sorted(z.infolist(), key=lambda i:i.header_offset)
+                  total = sum(i.compress_size for i in infos)
+                  print('ZIP TOTAL compressed entries',total,'central directory offset',z.start_dir,'whole APK minus compressed entries',len(data)-total)
+                  gaps = []
+                  for i in infos:
+                      offset=i.header_offset
+                      nl,xl=struct.unpack_from('<HH',data,offset+26)
+                      end=offset+30+nl+xl+i.compress_size
+                      gaps.append((offset,end,i.filename,xl))
+                  for n,(off,end,name,xl) in enumerate(gaps):
+                      nextoff=gaps[n+1][0] if n+1<len(gaps) else z.start_dir
+                      if nextoff-end>4096:
+                          gap=data[end:nextoff]
+                          print('LARGE GAP after',name,'bytes',len(gap),'zero bytes',gap.count(0),'start',gap[:24].hex(),'end',gap[-24:].hex())
+                      if xl>4096: print('LARGE EXTRA',name,xl)
+                  if z.start_dir>=24 and data[z.start_dir-16:z.start_dir]==b'APK Sig Block 42':
+                      size=struct.unpack_from('<Q',data,z.start_dir-24)[0]
+                      start=z.start_dir-size-8
+                      print('APK SIGNING BLOCK bytes',size+8,'start',start)
+                      pos=start+8
+                      while pos<z.start_dir-24:
+                          pairlen=struct.unpack_from('<Q',data,pos)[0]
+                          if pairlen<4 or pos+8+pairlen>z.start_dir-24: break
+                          pairid=struct.unpack_from('<I',data,pos+8)[0]
+                          print('SIGNING PAIR',hex(pairid),'bytes',pairlen)
+                          pos+=8+pairlen
                   groups = collections.Counter()
                   pdfassets = []
                   for i in z.infolist():
