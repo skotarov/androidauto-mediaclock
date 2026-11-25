@@ -29,6 +29,13 @@ class CustomStreamPlayer(context: Context) {
     private var seekable = false
     private var changed: () -> Unit = {}
 
+    /** Never report a stale saved seek position as currently playing media. */
+    fun activePositionMs(url: String?): Int? {
+        val media = player ?: return null
+        if (url == null || requested?.first != url || !prepared || !seekable) return null
+        return runCatching { media.currentPosition }.getOrNull()?.takeIf { it >= 0 }
+    }
+
     fun seekState(url: String?): SeekState? {
         if (url == null) return null
         val media = player

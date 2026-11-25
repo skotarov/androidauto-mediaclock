@@ -80,6 +80,9 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         }
     }
 
+    // Only text metadata is refreshed on the position tick; artwork remains cached.
+    private val positionTick = Runnable { refreshPositionSubtitle() }
+
     private val settingsRefresh = Runnable {
         if (clientActive) {
             publishClock()
@@ -271,6 +274,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         NoticeTest.publishCaption(null)
         WeatherStore.stop(WeatherStore.Client.CAR)
         handler.removeCallbacks(minuteTick)
+        handler.removeCallbacks(positionTick)
         handler.removeCallbacks(settingsRefresh)
         handler.removeCallbacks(hideCityTitle)
         queuedWarning = null
@@ -410,12 +414,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             }
         }
         val notice = cityAnnouncement.notice(tick)
-        // Keep both title fields visually blank; put the icon and message
-        // together in the subtitle for either metadata convention.
-        val temporaryTitle = INVISIBLE_TEXT
         val caption = (testNotice ?: notice)?.subtitle
         NoticeTest.publishCaption(caption)
-        val temporarySubtitle = caption ?: INVISIBLE_TEXT
         val key = artwork.toString() + "|" + miniArtwork.toString()
         if (artKey != key || baseMetadata == null) {
             if (requestedArtKey != key) {
@@ -475,18 +475,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 artworkWorker.cancel()
                 requestedArtKey = null
             }
-            val publication = MediaPublicationKey(key, temporaryTitle, temporarySubtitle)
-            if (publication != lastPublished) {
-                session.setMetadata(MediaMetadataCompat.Builder(baseMetadata!!)
-                    .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, StreamLibrary.selected(prefs)?.id ?: CLOCK_ID)
-                    .putString(MediaMetadataCompat.METADATA_KEY_TITLE, temporaryTitle)
-                    .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, temporarySubtitle)
-                    .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, INVISIBLE_TEXT)
-                    .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, temporaryTitle)
-                    .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, temporarySubtitle)
-                    .build())
-                lastPublished = publication
-            }
+            publishMediaSubtitle(key, caption, currentMediaPosition())
         }
         // Each newly created notice is a distinct object, even if the same
         // warning appears again at a later refresh. Never sound on redraw.
@@ -496,6 +485,43 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 playNotice(notice.body)
             }
         }
+        schedulePositionTick(caption, currentMediaPosition())
+    }
+
+    private fun currentMediaPosition(): Int? {
+        if (!clientActive || !running || noticePlaying) return null
+        return streamPlayer.activePositionMs(StreamLibrary.selected(prefs)?.url)
+    }
+
+    private fun schedulePositionTick(caption: String?, position: Int?) {
+        handler.removeCallbacks(positionTick)
+        if (clientActive && caption == null && position != null) {
+            handler.postDelayed(positionTick, 1000L)
+        }
+    }
+
+    private fun refreshPositionSubtitle() {
+        if (!clientActive) return
+        val caption = (testNotice ?: cityAnnouncement.notice(SystemClock.elapsedRealtime()))?.subtitle
+        val position = currentMediaPosition()
+        artKey?.let { publishMediaSubtitle(it, caption, position) }
+        schedulePositionTick(caption, position)
+    }
+
+    private fun publishMediaSubtitle(key: String, caption: String?, position: Int?) {
+        val base = baseMetadata ?: return
+        val subtitle = MediaPositionSubtitle.text(caption, position) ?: INVISIBLE_TEXT
+        val publication = MediaPublicationKey(key, INVISIBLE_TEXT, subtitle)
+        if (publication == lastPublished) return
+        session.setMetadata(MediaMetadataCompat.Builder(base)
+            .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, StreamLibrary.selected(prefs)?.id ?: CLOCK_ID)
+            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, INVISIBLE_TEXT)
+            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, subtitle)
+            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, INVISIBLE_TEXT)
+            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, INVISIBLE_TEXT)
+            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, subtitle)
+            .build())
+        lastPublished = publication
     }
 
     private fun syncStream() {
@@ -504,6 +530,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         streamPlayer.sync(url, phoneMode != PhoneAudioMode.OFF, onChanged = {
             lastPlayback = null
             publishPlaybackState()
+            refreshPositionSubtitle()
         }) { error ->
             lastPlayback = null
             publishPlaybackState()
@@ -516,10 +543,12 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             }
         }
         publishPlaybackState()
+        refreshPositionSubtitle()
     }
 
     private fun playNotice(body: String) {
         noticePlaying = true
+        handler.removeCallbacks(positionTick)
         // Release the stream's HFP route before the short alert claims it.
         streamPlayer.stop()
         val sound = NoticeSound.fromId(prefs.getString(NoticeSound.KEY, null))
