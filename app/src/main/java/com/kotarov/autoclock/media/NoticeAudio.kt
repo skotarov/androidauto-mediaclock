@@ -19,14 +19,18 @@ class NoticeAudio(context: Context) {
     private val speech = NoticeSpeech(context)
     private var generation = 0L
     private var finished: (() -> Unit)? = null
+    private var speakEnabled = true
     private var ownsMode = false
     private var ownsDevice = false
 
     fun play(sound: NoticeSound, text: String, phoneChannel: Boolean,
              sharedPhoneChannel: Boolean = false,
+             speakEnabled: Boolean = true,
              onFinished: () -> Unit = {}) {
         stop()
         finished = onFinished
+        this.speakEnabled = speakEnabled
+        if (!speakEnabled && sound == NoticeSound.SILENT) { complete(); return }
         val token = generation
         if (sharedPhoneChannel && phoneChannel && Build.VERSION.SDK_INT >= 31) {
             // The continuous mode owns the route; never claim or release it here.
@@ -123,6 +127,10 @@ class NoticeAudio(context: Context) {
     private fun playOnRoute(token: Long, sound: NoticeSound, text: String, phone: Boolean) {
         if (token != generation) return
         chime.play(sound, phone)
+        if (!speakEnabled) {
+            handler.postDelayed({ if (token == generation) complete() }, sound.durationMs.toLong() + 250L)
+            return
+        }
         speech.speak(text,
             if (sound == NoticeSound.SILENT) 0L else sound.durationMs.toLong() + 250L,
             phone) {
@@ -162,5 +170,6 @@ class NoticeAudio(context: Context) {
 
     companion object {
         const val KEY_PHONE_CHANNEL = "notice_bluetooth_phone_channel"
+        const val KEY_SPEAK = "notice_speak_enabled"
     }
 }
