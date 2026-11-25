@@ -324,17 +324,22 @@ class MainActivity : Activity() {
         root.addView(View(this), LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
         ))
-        val credit = "Weather data: NOAA / Open-Meteo (CC BY 4.0)\nAdapted for Auto Clock\nPrivacy Policy"
+        val credit = if (BuildConfig.PLAY_MEDIA_MODE) "Privacy Policy"
+            else "Weather data: NOAA / Open-Meteo (CC BY 4.0)\nAdapted for Auto Clock\nPrivacy Policy"
         val attribution = android.text.SpannableString(credit).apply {
             fun link(label: String, url: String) {
                 val start = credit.indexOf(label)
                 setSpan(android.text.style.URLSpan(url), start, start + label.length,
                     android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
-            link("NOAA", "https://aviationweather.gov/")
-            link("Open-Meteo", "https://open-meteo.com/")
-            link("CC BY 4.0", "https://creativecommons.org/licenses/by/4.0/")
-            link("Privacy Policy", "https://github.com/skotarov/androidauto-mediaclock/blob/revamp/low-power-v2/PRIVACY.md")
+            if (!BuildConfig.PLAY_MEDIA_MODE) {
+                link("NOAA", "https://aviationweather.gov/")
+                link("Open-Meteo", "https://open-meteo.com/")
+                link("CC BY 4.0", "https://creativecommons.org/licenses/by/4.0/")
+            }
+            link("Privacy Policy", if (BuildConfig.PLAY_MEDIA_MODE)
+                "https://github.com/skotarov/androidauto-mediaclock/blob/revamp/low-power-v2/PRIVACY-PLAY.md"
+                else "https://github.com/skotarov/androidauto-mediaclock/blob/revamp/low-power-v2/PRIVACY.md")
         }
         root.addView(TextView(this).apply {
             text = attribution
@@ -518,8 +523,8 @@ class MainActivity : Activity() {
         val theme = ClockTheme.fromId(prefs.getString(ClockTheme.KEY, null))
         val compact = prefs.getString(AutoClockMediaService.KEY_LAYOUT, "standard") == "compact"
         val now = LocalDateTime.now().withSecond(0).withNano(0)
-        val analog = ClockSelectionStore.forFamily(prefs, ClockFamily.ANALOG)
-        val digital = ClockSelectionStore.forFamily(prefs, ClockFamily.DIGITAL)
+        val analog = if (BuildConfig.PLAY_MEDIA_MODE) ClockPreset.ANALOG_PURE else ClockSelectionStore.forFamily(prefs, ClockFamily.ANALOG)
+        val digital = if (BuildConfig.PLAY_MEDIA_MODE) ClockPreset.DIGITAL_TIME else ClockSelectionStore.forFamily(prefs, ClockFamily.DIGITAL)
         val hasWeather = analog.usesWeather || digital.usesWeather
         val weather = if (hasWeather) WeatherStore.current(this) else null
         val locality = if (hasWeather) WeatherStore.locality(this) ?: weather?.artworkSource else null

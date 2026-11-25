@@ -29,6 +29,17 @@ jobs:
       - name: Build debug APK
         run: gradle testDebugUnitTest assembleDebug --stacktrace
 
+      - name: Build and test Play release bundle
+        run: gradle --no-daemon testReleaseUnitTest bundleRelease --stacktrace
+
+      - name: Upload unsigned Play AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: autoclock-play-unsigned-aab
+          path: app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Upload debug APK
         if: success()
         uses: actions/upload-artifact@v4

@@ -106,6 +106,16 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         if (key == StreamLibrary.KEY_LIST || key == StreamLibrary.KEY_SELECTED) {
             activeSource = StreamLibrary.selected(prefs)
         }
+        if (playMode) {
+            if (key == StreamLibrary.KEY_LIST || key == StreamLibrary.KEY_SELECTED) {
+                if (activeSource == null && requestedPlayback) setPlayRequested(false)
+                else if (requestedPlayback && !focusInterrupted) syncStream()
+                if (key == StreamLibrary.KEY_LIST) notifyChildrenChanged(ROOT_ID)
+                publishPlayMetadata()
+                publishPlaybackState()
+            }
+            return@OnSharedPreferenceChangeListener
+        }
         if (key == PhoneAudioMode.KEY || key == NoticeAudio.KEY_PHONE_CHANNEL) {
             stopNoticeAudio()
             streamPlayer.stop()

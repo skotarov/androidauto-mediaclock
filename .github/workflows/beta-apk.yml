@@ -81,11 +81,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if ! gh release view v0.97.0-beta >/dev/null 2>&1; then
-            gh release create v0.97.0-beta \
+          # Recheck after transient API errors; never leave a failed upload silently.
+          for attempt in 1 2 3 4; do
+            if ! gh release view v0.97.0-beta >/dev/null 2>&1; then
+              gh release create v0.97.0-beta \
               --target "$GITHUB_SHA" \
               --title "Auto Clock 2 — beta 0.97.0" \
               --notes "Permanent beta signing identity. Uninstall older differently signed beta builds once; subsequent signed beta updates retain settings. Prepare separate Play media release while retaining full beta clock behavior." \
-              --prerelease
-          fi
-          gh release upload v0.97.0-beta dist/AutoClock-2-v0.97-beta.apk --clobber
+              --prerelease || true
+            fi
+            if gh release upload v0.97.0-beta dist/AutoClock-2-v0.97-beta.apk --clobber &&
+              gh release view v0.97.0-beta --json assets --jq '.assets[] | select(.name == "AutoClock-2-v0.97-beta.apk" and .size > 0) | .name' | grep -Fxq "AutoClock-2-v0.97-beta.apk"; then
+              exit 0
+            fi
+            sleep $((attempt * 10))
+          done
+          exit 1
