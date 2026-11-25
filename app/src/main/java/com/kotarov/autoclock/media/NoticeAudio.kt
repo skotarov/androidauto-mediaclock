@@ -15,6 +15,7 @@ class NoticeAudio(context: Context) {
     private val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val handler = Handler(Looper.getMainLooper())
     private val chime = NoticeSoundPlayer()
+    private val keepAlive = PhoneAudioKeepAlive()
     private val speech = NoticeSpeech(context)
     private var generation = 0L
     private var finished: (() -> Unit)? = null
@@ -55,6 +56,10 @@ class NoticeAudio(context: Context) {
             ownsMode = true
             ownsDevice = audio.setCommunicationDevice(device)
             if (!ownsDevice) {
+                fallback(token, sound, text)
+                return
+            }
+            if (!keepAlive.start()) {
                 fallback(token, sound, text)
                 return
             }
@@ -143,6 +148,7 @@ class NoticeAudio(context: Context) {
     }
 
     private fun releaseRoute() {
+        keepAlive.stop()
         if (Build.VERSION.SDK_INT >= 31 && ownsDevice) {
             runCatching { audio.clearCommunicationDevice() }
         }
