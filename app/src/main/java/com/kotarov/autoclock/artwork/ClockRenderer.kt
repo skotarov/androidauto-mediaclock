@@ -36,8 +36,9 @@ object ClockRenderer {
     private const val CONTENT_CENTER_Y = 190f
     // Slightly lower the pure digital face; analog and weather-only remain.
     private const val DIGITAL_CENTER_DOWN = 10f
-    // The host overlays its transport button at the bottom of the shared artwork.
-    private const val DIGITAL_WEATHER_CENTER_Y = 116f
+    // Move the entire digital weather block down into the host's visible crop.
+    // The standalone digital face keeps its original center.
+    private const val DIGITAL_WEATHER_CENTER_Y = 156f
     private const val DIGITAL_TIME_SIZE = 96f
     // All digital forecast measurements are in the main artwork coordinate
     // space; no separate scaled forecast canvas.
@@ -341,11 +342,10 @@ object ClockRenderer {
             color = themed(pale, theme)
             textAlign = Paint.Align.CENTER
             typeface = condensedBoldFace
-            textSize = 20f * unit
+            textSize = 23f * unit
         }
-        // Keep all seven HH:mm boundary labels equally sized and separated.
-        val labels = slots.map { it.time.format(timeFormat) } +
-            listOfNotNull(slots.lastOrNull()?.time?.plusHours(1)?.format(timeFormat))
+        // Relative hourly slots are shorter and easier to read on the car card.
+        val labels = slots.mapIndexed { index, _ -> if (index == 0) "NOW" else "+${index}h" }
         val widest = labels.maxOfOrNull { label.measureText(it) } ?: 0f
         if (widest > pitch - 4f * unit)
             label.textSize *= (pitch - 4f * unit) / widest
@@ -356,8 +356,8 @@ object ClockRenderer {
             textSize = 22f * unit
         }
         labels.forEachIndexed { index, value ->
-            label.alpha = slots[minOf(index, slots.lastIndex)].alpha
-            canvas.drawText(value, firstBoundary + index * pitch, top + 16f * unit, label)
+            label.alpha = slots[index].alpha
+            canvas.drawText(value, firstBoundary + (index + 0.5f) * pitch, top + 16f * unit, label)
         }
         slots.forEachIndexed { index, slot ->
             val x = firstBoundary + (index + 0.5f) * pitch
