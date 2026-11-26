@@ -12,6 +12,19 @@ internal object BookDiskCache {
     private const val LIMIT = 64L * 1024 * 1024
     private const val MAX_AGE = 7L * 24 * 60 * 60 * 1000
     data class Hit(val file: File, val length: Int, val sample: String)
+    private val pinned = HashMap<File, Int>()
+    private fun pin(file: File) { pinned[file] = (pinned[file] ?: 0) + 1 }
+    @Synchronized fun release(file: File) {
+        val count = pinned[file] ?: return
+        if (count <= 1) pinned.remove(file) else pinned[file] = count - 1
+    }
+    private fun valid(file: File): Boolean = file.isFile && file.length() > 0 && file.length() % 2L == 0L && file.length() <= LIMIT
+    @Synchronized fun contains(dir: File, key: String): Boolean {
+        val file = File(dir, "cache-$key.utf16")
+        if (!valid(file)) return false
+        file.setLastModified(System.currentTimeMillis())
+        return true
+    }
     private fun hex(bytes: ByteArray) = bytes.joinToString("") { "%02x".format(it.toInt() and 255) }
     fun key(source: String, backend: String): String =
         hex(MessageDigest.getInstance("SHA-256").digest((source + ":" + backend).toByteArray()))
@@ -28,21 +41,25 @@ internal object BookDiskCache {
             }
         }.getOrNull()
     }
-    @Synchronized fun read(dir: File, key: String): Hit? {
+    @Synchronized fun read(dir: File, key: String, pinActive: Boolean = false): Hit? {
         prune(dir)
         val file = File(dir, "cache-$key.utf16")
-        if (!file.isFile || file.length() <= 0 || file.length() % 2L != 0L || file.length() > LIMIT) return null
+        if (!valid(file)) return null
         return runCatching {
             val length = (file.length() / 2).toInt()
             val sample = RandomAccessFile(file, "r").use { input -> String(CharArray(minOf(4000, length)) { input.readChar() }) }
             file.setLastModified(System.currentTimeMillis())
+            if (pinActive) pin(file)
             Hit(file, length, sample)
         }.getOrNull()
     }
-    @Synchronized fun store(dir: File, key: String, temp: File): File? {
+    @Synchronized fun store(dir: File, key: String, temp: File, pinActive: Boolean = false): File? {
         if (temp.length() <= 0 || temp.length() > LIMIT) return null
         val target = File(dir, "cache-$key.utf16")
-        if (!temp.renameTo(target)) return null
+        // A concurrent chapter index may have already stored the identical source.
+        if (valid(target)) temp.delete()
+        else if (!temp.renameTo(target)) return null
+        if (pinActive) pin(target)
         target.setLastModified(System.currentTimeMillis())
         prune(dir, target)
         return target
@@ -53,7 +70,7 @@ internal object BookDiskCache {
         var count = 0
         for (file in dir.listFiles().orEmpty().filter { it.name.startsWith("cache-") && it.extension == "utf16" }
             .sortedByDescending { if (it == keep) Long.MAX_VALUE else it.lastModified() }) {
-            if (file != keep && (file.lastModified() < cutoff || count >= 3 || total + file.length() > LIMIT)) file.delete()
+            if (file != keep && !pinned.containsKey(file) && (file.lastModified() < cutoff || count >= 3 || total + file.length() > LIMIT)) file.delete()
             else { total += file.length(); count++ }
         }
     }

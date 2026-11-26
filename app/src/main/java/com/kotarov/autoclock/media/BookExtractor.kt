@@ -222,7 +222,7 @@ internal object BookExtractor {
                             if (format == BookFormat.DOCX && name == "pstyle" && paragraphDepth >= 0 && headingDepth < 0) {
                                 val style = (p.getAttributeValue("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "val")
                                     ?: p.getAttributeValue(null, "val")).orEmpty()
-                                if (style.matches(Regex("(?i)(heading|title|заглавие)[ _-]*[0-9]*"))) {
+                                if (style.matches(Regex("(?iu)(heading|title|заглавие)[ _-]*[0-9]*"))) {
                                     headingDepth = paragraphDepth
                                     index.beginHeading(paragraphStart)
                                 }

@@ -30,7 +30,7 @@ internal class TextFileReader(context: Context) {
         Thread(runnable, "AutoClockText").apply { isDaemon = true }
     }
     private data class Document(val file: File, val length: Int, val sample: String, val cached: Boolean = false) {
-        fun release() { if (!cached) file.delete() }
+        fun release() { if (cached) BookDiskCache.release(file) else file.delete() }
     }
     private data class Chunk(val start: Int, val end: Int, val body: String)
     private var document: Document? = null
@@ -190,7 +190,7 @@ internal class TextFileReader(context: Context) {
                 BookDiskCache.key(it, format.name + if (format == BookFormat.PDF) (if (native) ":native" else ":pdfbox") else ":v2")
             }
             cacheKey(tryNative)?.let { key ->
-                BookDiskCache.read(dir, key)?.let { hit ->
+                BookDiskCache.read(dir, key, pinActive = true)?.let { hit ->
                     file.delete()
                     return Document(hit.file, hit.length, hit.sample, true)
                 }
@@ -238,7 +238,7 @@ internal class TextFileReader(context: Context) {
             signal.throwIfCanceled()
             // The cache is a fixed-width character index, not a synthesized audio file.
             require(file.length() == length.toLong() * 2L)
-            val cached = cacheKey(nativeUsed)?.let { BookDiskCache.store(dir, it, file) }
+            val cached = cacheKey(nativeUsed)?.let { BookDiskCache.store(dir, it, file, pinActive = true) }
             return if (cached != null) Document(cached, length, sample.toString(), true)
                 else Document(file, length, sample.toString())
         } catch (e: Throwable) {

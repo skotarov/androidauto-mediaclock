@@ -14,6 +14,11 @@ class BookContentsIndexTest {
         index.append("Second paragraph")
         assertEquals(listOf(0, 16), index.chapters().map { it.offset })
     }
+    @Test fun recognizesUppercaseCyrillicHeadings() {
+        val index = BookContentsIndex(true)
+        index.append("ГЛАВА 1\nТекст\nПРЕДГОВОР\nОще")
+        assertEquals(listOf("ГЛАВА 1", "ПРЕДГОВОР"), index.chapters().map { it.title })
+    }
     @Test fun recognizesSplitPlainTextHeadings() {
         val index = BookContentsIndex(true)
         index.append("Intro\nГла")

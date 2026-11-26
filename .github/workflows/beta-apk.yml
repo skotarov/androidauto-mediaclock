@@ -65,13 +65,13 @@ jobs:
           "$signer" sign --ks "$AUTO_CLOCK_BETA_STORE" --ks-type PKCS12 \
             --ks-key-alias autoclock-beta --ks-pass env:AUTO_CLOCK_BETA_PASSWORD \
             --key-pass env:AUTO_CLOCK_BETA_PASSWORD \
-            --out dist/SmartTrip-Clock-Lite-v0.127-beta.apk app/build/outputs/apk/debug/app-debug.apk
-          "$signer" verify --verbose --print-certs dist/SmartTrip-Clock-Lite-v0.127-beta.apk
-          lite_actual=$("$signer" verify --print-certs dist/SmartTrip-Clock-Lite-v0.127-beta.apk | awk '/certificate SHA-256 digest:/ {print $NF}' | tr -d ':\r' | tr '[:upper:]' '[:lower:]')
+            --out dist/SmartTrip-Clock-Lite-v0.128-beta.apk app/build/outputs/apk/debug/app-debug.apk
+          "$signer" verify --verbose --print-certs dist/SmartTrip-Clock-Lite-v0.128-beta.apk
+          lite_actual=$("$signer" verify --print-certs dist/SmartTrip-Clock-Lite-v0.128-beta.apk | awk '/certificate SHA-256 digest:/ {print $NF}' | tr -d ':\r' | tr '[:upper:]' '[:lower:]')
           [[ "$lite_actual" == "$fingerprint" ]]
           python3 - <<'PY'
           import zipfile, os
-          path = "dist/SmartTrip-Clock-Lite-v0.127-beta.apk"
+          path = "dist/SmartTrip-Clock-Lite-v0.128-beta.apk"
           size = os.path.getsize(path)
           with zipfile.ZipFile(path) as z:
               total = sum(i.compress_size for i in z.infolist())
@@ -81,7 +81,7 @@ jobs:
               # Media3 AAC/HLS adds about 1 MB; retain a strict Lite size and padding budget.
           assert size < 2500000 and size-total < 150000, "Unexpected Lite APK size or padding"
           PY
-          stat -c "APK size: %s bytes" dist/SmartTrip-Clock-Lite-v0.127-beta.apk
+          stat -c "APK size: %s bytes" dist/SmartTrip-Clock-Lite-v0.128-beta.apk
 
       - name: Create or update public beta download
         env:
@@ -89,15 +89,15 @@ jobs:
         run: |
           # Recheck after transient API errors; never leave a failed upload silently.
           for attempt in 1 2 3 4; do
-            if ! gh release view v0.127.0-beta >/dev/null 2>&1; then
-              gh release create v0.127.0-beta \
+            if ! gh release view v0.128.0-beta >/dev/null 2>&1; then
+              gh release create v0.128.0-beta \
               --target "$GITHUB_SHA" \
-              --title "SmartTrip Clock — beta 0.127.0" \
-              --notes "Lite only. EPUB navigation (EPUB3 nav and EPUB2 NCX), FB2/DOCX/HTML headings and recognizable plain text chapter headings. Browse chapters from phone and Auto; one bookmark per book." \
+              --title "SmartTrip Clock — beta 0.128.0" \
+              --notes "Lite only. Fix Unicode chapter recognition, avoid repeated book index jobs, protect active reading cache from eviction, and reduce unnecessary cache reads. Bluetooth unchanged." \
               --prerelease || true
             fi
-            if gh release upload v0.127.0-beta dist/SmartTrip-Clock-Lite-v0.127-beta.apk --clobber &&
-              gh release view v0.127.0-beta --json assets --jq '.assets[] | select(.name == "SmartTrip-Clock-Lite-v0.127-beta.apk" and .size > 0) | .name' | grep -Fxq "SmartTrip-Clock-Lite-v0.127-beta.apk"; then
+            if gh release upload v0.128.0-beta dist/SmartTrip-Clock-Lite-v0.128-beta.apk --clobber &&
+              gh release view v0.128.0-beta --json assets --jq '.assets[] | select(.name == "SmartTrip-Clock-Lite-v0.128-beta.apk" and .size > 0) | .name' | grep -Fxq "SmartTrip-Clock-Lite-v0.128-beta.apk"; then
               exit 0
             fi
             sleep $((attempt * 10))

@@ -12,7 +12,8 @@ internal class BookContentsIndex(private val inferLines: Boolean = false) {
     private val heading = StringBuilder()
     private var lineStart = 0
     private val line = StringBuilder()
-    private val chapterLine = Regex("(?i)^(?:#{1,6}\\s+.+|(?:глава|chapter|част|part|раздел|section|урок|lesson)\\s+(?:[0-9]+|[IVXLCDM]+)(?:\\b.*|[.:].*)|предговор|въведение|заключение|preface|introduction|conclusion)$")
+    private val whitespace = Regex("\\s+")
+    private val chapterLine = Regex("(?iu)^(?:#{1,6}\\s+.+|(?:глава|chapter|част|part|раздел|section|урок|lesson)\\s+(?:[0-9]+|[IVXLCDM]+)(?:\\b.*|[.:].*)|предговор|въведение|заключение|preface|introduction|conclusion)$")
     fun beginHeading(at: Int = offset) { headingStart = at; heading.setLength(0) }
     fun endHeading() {
         if (headingStart >= 0) addHeading(heading.toString(), headingStart)
@@ -20,7 +21,8 @@ internal class BookContentsIndex(private val inferLines: Boolean = false) {
         heading.setLength(0)
     }
     private fun addHeading(title: String, at: Int) {
-        val clean = title.trim().replace(Regex("\\s+"), " ").take(160)
+        if (headings.size >= 98) return
+        val clean = title.trim().replace(whitespace, " ").take(160)
         if (clean.isNotBlank() && headings.size < 98) headings.add(Chapter(clean, at))
     }
     fun navigation(title: String, target: String?) {
@@ -33,8 +35,9 @@ internal class BookContentsIndex(private val inferLines: Boolean = false) {
     fun append(text: String) {
         require(offset.toLong() + text.length <= TextReading.MAX_CHARS)
         if (headingStart >= 0 && heading.length < 512) heading.append(text.take(512 - heading.length))
-        if (inferLines) {
+        if (inferLines && headings.size < 98) {
             for ((i, c) in text.withIndex()) {
+                if (headings.size >= 98) break
                 if (c == '\n' || c == '\r') {
                     finishLine()
                     lineStart = offset + i + 1

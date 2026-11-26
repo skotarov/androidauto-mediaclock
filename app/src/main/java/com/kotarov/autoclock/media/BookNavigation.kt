@@ -20,6 +20,8 @@ internal object BookNavigation {
     private val worker = ThreadPoolExecutor(0, 1, 10L, TimeUnit.SECONDS, LinkedBlockingQueue<Runnable>(3))
     // Only the worker accesses this bounded cache; source modification invalidates it.
     private val cache = LinkedHashMap<String, List<BookContentsIndex.Chapter>>(8, 0.75f, true)
+    // Owner-thread requests from Auto and the phone share one extraction.
+    private val pending = HashMap<String, MutableList<(List<BookContentsIndex.Chapter>) -> Unit>>()
     fun mayHaveContents(name: String): Boolean = BookFormat.detect(name, null) != BookFormat.PDF
     fun choices(book: StreamLibrary.Station, chapters: List<BookContentsIndex.Chapter>): List<Choice> =
         listOf(Choice(book.id, "Continue reading"), Choice(BEGIN_PREFIX + book.id, "From beginning")) +
@@ -35,6 +37,9 @@ internal object BookNavigation {
     }
     fun load(context: Context, book: StreamLibrary.Station, done: (List<BookContentsIndex.Chapter>) -> Unit) {
         val app = context.applicationContext
+        val requestKey = book.url
+        pending[requestKey]?.let { it.add(done); return }
+        pending[requestKey] = mutableListOf(done)
         try {
             worker.execute {
                 val result = runCatching {
@@ -49,7 +54,7 @@ internal object BookNavigation {
                     val deadline = android.os.SystemClock.elapsedRealtime() + 45_000L
                     // Produce the same UTF-16 cache while indexing, so first Play need not extract again.
                     val key = fingerprint?.let { BookDiskCache.key(it, format.name + ":v2") }
-                    val temp = if (key != null && BookDiskCache.read(dir, key) == null)
+                    val temp = if (key != null && !BookDiskCache.contains(dir, key))
                         File.createTempFile("book-", ".utf16", dir) else null
                     try {
                         val output = temp?.outputStream()?.buffered()?.writer(Charsets.UTF_16BE)
@@ -76,8 +81,10 @@ internal object BookNavigation {
                     }
                     chapters
                 }.getOrDefault(emptyList())
-                handler.post { done(result) }
+                handler.post { pending.remove(requestKey).orEmpty().forEach { it(result) } }
             }
-        } catch (_: java.util.concurrent.RejectedExecutionException) { done(emptyList()) }
+        } catch (_: java.util.concurrent.RejectedExecutionException) {
+            pending.remove(requestKey).orEmpty().forEach { it(emptyList()) }
+        }
     }
 }
