@@ -812,15 +812,18 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private fun advanceFolder(folder: StreamLibrary.Station, ended: StreamLibrary.Station) {
-        MediaPageDirectory.load(this, folder) { outcome ->
+        fun advance(items: List<MediaPageParser.Item>) {
             if (!clientActive || !liteRequested || activeSource?.id != ended.id ||
-                StreamLibrary.selectedFolder(prefs)?.id != folder.id) return@load
-            val items = outcome.getOrNull().orEmpty()
+                StreamLibrary.selectedFolder(prefs)?.id != folder.id) return
             val index = items.indexOfFirst { it.id == ended.id }
             val next = if (index >= 0) items.getOrNull(index + 1) else null
             if (next != null && selectSource(next.id)) setWeatherEnabled(true)
             else setWeatherEnabled(false)
         }
+        // Post the transition outside the completed player's callback.
+        val snapshot = MediaPageDirectory.folderSnapshot(folder)
+        if (snapshot != null && snapshot.any { it.id == ended.id }) handler.post { advance(snapshot) }
+        else MediaPageDirectory.load(this, folder) { outcome -> advance(outcome.getOrNull().orEmpty()) }
     }
 
     private fun playNotice(body: String) {

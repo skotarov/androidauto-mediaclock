@@ -61,18 +61,22 @@ internal object MediaPageParser {
                     out.toByteArray()
                 }
                 val charset = Regex("(?i)charset\\s*=\\s*[\"']?([a-z0-9._-]+)").find(type)?.groupValues?.get(1)
-                val text = if (mime.contains("html")) Jsoup.parse(bytes.inputStream(), charset, uri.toString()).outerHtml()
-                    else String(bytes, runCatching { java.nio.charset.Charset.forName(charset ?: "UTF-8") }.getOrDefault(Charsets.UTF_8))
+                if (mime.contains("html")) {
+                    val doc = Jsoup.parse(bytes.inputStream(), charset, uri.toString())
+                    return parse(parent, uri.toString(), "", mime, doc)
+                }
+                val text = String(bytes, runCatching { java.nio.charset.Charset.forName(charset ?: "UTF-8") }.getOrDefault(Charsets.UTF_8))
                 return parse(parent, uri.toString(), text, mime)
             } finally { conn.disconnect() }
         }
         error("Too many redirects")
     }
-    internal fun parse(parent: String, base: String, content: String, mime: String = "text/html"): List<Item> {
+    internal fun parse(parent: String, base: String, content: String, mime: String = "text/html", htmlDoc: org.jsoup.nodes.Document? = null): List<Item> {
         val items = LinkedHashMap<String, Item>()
         fun add(raw: String, name: String, type: String = "", explicit: Boolean = false) {
             if (items.size >= MAX_ITEMS || raw.isBlank()) return
             val url = absolute(base, raw) ?: return
+            if (items.containsKey(url)) return
             val e = ext(url)
             val t = type.substringBefore(';').lowercase(Locale.ROOT)
             if (!explicit && e !in extensions && !t.startsWith("audio/") && !t.startsWith("video/")) return
@@ -129,7 +133,7 @@ internal object MediaPageParser {
                 }
             }
             else -> {
-                val doc = Jsoup.parse(content, base)
+                val doc = htmlDoc ?: Jsoup.parse(content, base)
                 for (el in doc.select("audio[src], video[src], audio source[src], video source[src], a[href], meta[content], [data-stream-url], [data-audio-url]")) {
                     if (el.hasAttr("data-stream-url") || el.hasAttr("data-audio-url")) {
                         val address = el.attr("data-stream-url").ifBlank { el.attr("data-audio-url") }

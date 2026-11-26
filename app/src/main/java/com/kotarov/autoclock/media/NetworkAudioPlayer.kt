@@ -28,7 +28,11 @@ internal class NetworkAudioPlayer(context: Context, phone: Boolean) {
                 .setReadTimeoutMs(10000)
         ))
         .setLoadControl(DefaultLoadControl.Builder()
-            .setBufferDurationsMs(5000, 12000, 1000, 2000).build())
+            .setBufferDurationsMs(5000, 12000, 1000, 2000)
+            // Audio-only budget; allow larger HLS segments when required to keep
+            // the minimum buffered duration instead of forcing a rebuffer.
+            .setTargetBufferBytes(1024 * 1024)
+            .setPrioritizeTimeOverSizeThresholds(true).build())
         .build().apply {
             setAudioAttributes(AudioAttributes.Builder()
                 .setUsage(if (phone) C.USAGE_VOICE_COMMUNICATION else C.USAGE_MEDIA)
@@ -67,7 +71,10 @@ internal class NetworkAudioPlayer(context: Context, phone: Boolean) {
     }.getOrDefault(false)
     fun isPlaying(): Boolean = !released && player.isPlaying
     fun speed(): Float = if (released) 1f else player.playbackParameters.speed
-    fun setSpeed(value: Float) { if (!released) runCatching { player.playbackParameters = PlaybackParameters(value, 1f) } }
+    fun setSpeed(value: Float) {
+        if (!released && kotlin.math.abs(player.playbackParameters.speed - value) > 0.001f)
+            runCatching { player.playbackParameters = PlaybackParameters(value, 1f) }
+    }
     fun play() { if (!released) player.play() }
     fun pause(): Boolean = !released && runCatching { player.pause(); true }.getOrDefault(false)
     fun release() { if (!released) { released = true; runCatching { player.release() } } }

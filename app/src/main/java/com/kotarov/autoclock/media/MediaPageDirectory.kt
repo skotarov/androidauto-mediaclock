@@ -20,6 +20,11 @@ internal object MediaPageDirectory {
         cached.items.firstOrNull { it.id == id }?.let { Hit(cached.parent, it) }
     }
 
+    // Automatic advancement uses the same ordered snapshot the user opened.
+    // Explicit opening still refreshes, and a process restart can rebuild it.
+    fun folderSnapshot(page: StreamLibrary.Station): List<MediaPageParser.Item>? =
+        if (page.localFolder) cache[page.id]?.takeIf { it.parent.url == page.url }?.items else null
+
     fun load(context: Context, page: StreamLibrary.Station, done: (Result<List<MediaPageParser.Item>>) -> Unit) {
         val app = context.applicationContext
         val key = page.id + "|" + page.url

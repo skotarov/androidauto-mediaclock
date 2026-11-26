@@ -87,7 +87,8 @@ class CustomStreamPlayer(context: Context) {
         // A pending source switch must not change the outgoing file or restart its TTS.
         if (sourceUrl == null || requested?.first != sourceUrl) return
         if (reading) reader?.setSpeed(speed)
-        if (prepared && seekable && !suspendedMedia) fallback?.setSpeed(speed)
+        if (prepared && seekable && !suspendedMedia && kotlin.math.abs(actualMediaSpeed() - speed) > 0.001f)
+            fallback?.setSpeed(speed)
         val media = player
         if (media != null && prepared && seekable && !suspendedMedia && isPlaying() &&
             kotlin.math.abs(actualMediaSpeed() - speed) > 0.001f) applyMediaSpeed(media)
