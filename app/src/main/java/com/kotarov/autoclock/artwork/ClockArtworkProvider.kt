@@ -57,7 +57,7 @@ class ClockArtworkProvider : ContentProvider() {
         val layout = if (compact) "compact" else "standard"
         val generation = uri.getQueryParameter("generation")?.toLongOrNull() ?: 0L
         val destination = File(directory,
-            "v74-$layout-${theme.id}-$clockMode-$key-$weatherRevision-$generation.png")
+            "v115-$layout-${theme.id}-$clockMode-$key-$weatherRevision-$generation.png")
 
         synchronized(lock) {
             if (!destination.isFile || destination.length() == 0L) {
@@ -161,7 +161,7 @@ class ClockArtworkProvider : ContentProvider() {
             .appendPath(mode)
             .appendPath("clock_${now.format(KEY_FORMAT)}.png")
             .appendQueryParameter("rev", weatherRevision.coerceAtLeast(0L).toString())
-            .appendQueryParameter("style", "v74")
+            .appendQueryParameter("style", "v115")
             .appendQueryParameter("theme", theme.id)
             .appendQueryParameter("generation", generation.toString())
             .appendQueryParameter("layout", if (compact) "compact" else "standard")
