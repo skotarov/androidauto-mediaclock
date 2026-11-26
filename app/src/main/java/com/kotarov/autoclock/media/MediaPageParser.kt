@@ -65,7 +65,7 @@ internal object MediaPageParser {
                     val doc = Jsoup.parse(bytes.inputStream(), charset, uri.toString())
                     return parse(parent, uri.toString(), "", mime, doc)
                 }
-                val text = String(bytes, runCatching { java.nio.charset.Charset.forName(charset ?: "UTF-8") }.getOrDefault(Charsets.UTF_8))
+                val text = RadioText.decode(bytes, charset, mime.contains("json"))
                 return parse(parent, uri.toString(), text, mime)
             } finally { conn.disconnect() }
         }
@@ -81,7 +81,7 @@ internal object MediaPageParser {
             val t = type.substringBefore(';').lowercase(Locale.ROOT)
             if (!explicit && e !in extensions && !t.startsWith("audio/") && !t.startsWith("video/")) return
             if (e in setOf("m3u","pls") && !t.contains("mpegurl")) return
-            val label = name.trim().replace(Regex("\\s+"), " ").take(128).ifBlank {
+            val label = RadioText.cleanName(name, url).trim().replace(Regex("\\s+"), " ").take(128).ifBlank {
                 runCatching { URI(url).path.orEmpty().substringAfterLast('/').ifBlank { URI(url).host } }.getOrDefault("Media").take(128)
             }
             val hash = MessageDigest.getInstance("SHA-256").digest((parent + "|" + url).toByteArray())
@@ -114,11 +114,14 @@ internal object MediaPageParser {
             trimmed.startsWith("[") && mime.contains("json") -> {
                 // Compatible with Radio Browser station API responses.
                 val array = JSONArray(content)
-                for (i in 0 until minOf(array.length(), MAX_ITEMS)) {
+                for (i in 0 until array.length()) {
+                    if (items.size >= MAX_ITEMS) break
                     val o = array.optJSONObject(i) ?: continue
                     val url = o.optString("url_resolved").ifBlank { o.optString("url") }
                     if (o.has("lastcheckok") && o.optInt("lastcheckok", 1) == 0) continue
-                    add(url, o.optString("name"), explicit = true)
+                    val codec = o.optString("codec").trim().lowercase(Locale.ROOT)
+                    val type = if (o.optInt("hls", 0) == 1) "audio/mpegurl" else if (codec in setOf("mp3","aac","aac+","ogg","opus","flac","wav")) "audio/$codec" else ""
+                    add(url, o.optString("name"), type, explicit = true)
                 }
             }
             mime.contains("xml") || trimmed.startsWith("<?xml") || trimmed.startsWith("<rss") || trimmed.startsWith("<feed") -> {

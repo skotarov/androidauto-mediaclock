@@ -249,7 +249,7 @@ class MainActivity : Activity() {
                 addView(button, FrameLayout.LayoutParams(dp(48), dp(48), android.view.Gravity.CENTER))
             }, LinearLayout.LayoutParams(0, dp(56), 1f))
         }
-        listOf(carAudioButton, sizeButton, themeButton).filter { !BuildConfig.PLAY_MEDIA_MODE || it !== carAudioButton }.forEach { button ->
+        listOf(sizeButton, themeButton).forEach { button ->
             addQuickControl(quickRow, button)
         }
         // A single subtle outline links the three message-related controls.
@@ -317,6 +317,7 @@ class MainActivity : Activity() {
         listOf(backButton, forwardButton, slowerButton, fasterButton).forEach { button ->
             transportRow.addView(button, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(4) })
         }
+        if (!BuildConfig.PLAY_MEDIA_MODE) transportRow.addView(carAudioButton, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(4) })
         addSpaced(root, transportRow)
         syncTransportButtons(null)
         syncWeatherToggle()
@@ -331,16 +332,19 @@ class MainActivity : Activity() {
         val addRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         addRow.addView(Button(this).apply {
             text = "Stream"
+            setAddIcon(this, R.drawable.ic_add_link)
             isAllCaps = false
             setOnClickListener { editStream(null) }
         }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         addRow.addView(Button(this).apply {
             text = "File"
+            setAddIcon(this, R.drawable.ic_source_file)
             isAllCaps = false
             setOnClickListener { pickFile() }
         }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(8) })
         if (!BuildConfig.PLAY_MEDIA_MODE) addRow.addView(Button(this).apply {
             text = "Folder"
+            setAddIcon(this, R.drawable.ic_source_folder)
             isAllCaps = false
             setOnClickListener { pickFolder() }
         }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(8) })
@@ -349,11 +353,13 @@ class MainActivity : Activity() {
             val webRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             webRow.addView(Button(this).apply {
                 text = "Web Article"
+                setAddIcon(this, R.drawable.ic_source_text)
                 isAllCaps = false
                 setOnClickListener { addWebPage() }
             }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             webRow.addView(Button(this).apply {
                 text = "Web Media"
+                setAddIcon(this, R.drawable.ic_source_web)
                 isAllCaps = false
                 setOnClickListener { editMediaPage(null) }
             }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(8) })
@@ -466,6 +472,16 @@ class MainActivity : Activity() {
         super.onStop()
     }
 
+    private fun setAddIcon(button: Button, resource: Int) {
+        val icon = getDrawable(resource)?.mutate() ?: return
+        icon.setBounds(0, 0, dp(20), dp(20))
+        button.setCompoundDrawablesRelative(icon, null, null, null)
+        button.compoundDrawablePadding = dp(4)
+        button.minWidth = 0
+        button.minimumWidth = 0
+        button.setPadding(dp(6), button.paddingTop, dp(6), button.paddingBottom)
+    }
+
     private fun quickButton(icon: Int, label: String, action: () -> Unit): ImageButton =
         ImageButton(this).apply {
             setImageResource(icon)
@@ -536,9 +552,19 @@ class MainActivity : Activity() {
         paintQuickButton(slowerButton, false)
         paintQuickButton(fasterButton, false)
         // Preserve the original larger play/pause button when speed actions are hidden.
-        val playWidth = dp(if (visible) 88 else 108)
+        val playWidth = dp(if (visible && !BuildConfig.PLAY_MEDIA_MODE) 64 else if (visible) 88 else 108)
         if (weatherButton.layoutParams.width != playWidth) {
             weatherButton.layoutParams = weatherButton.layoutParams.apply { width = playWidth }
+        }
+        // Six controls must fit on a narrow phone, keeping each round.
+        val small = dp(if (visible && !BuildConfig.PLAY_MEDIA_MODE) 40 else 48)
+        listOf(backButton, forwardButton, slowerButton, fasterButton, carAudioButton).forEach { button ->
+            val lp = button.layoutParams ?: return@forEach
+            if (lp.width != small || lp.height != small) {
+                lp.width = small; lp.height = small; button.layoutParams = lp
+                val padding = dp(if (small == dp(40)) 8 else 12)
+                button.setPadding(padding, padding, padding, padding)
+            }
         }
     }
 
@@ -719,7 +745,7 @@ class MainActivity : Activity() {
     private fun renderStreams() {
         if (!::streamRows.isInitialized) return
         val prefs = settings()
-        val sources = StreamLibrary.list(prefs)
+        val sources = StreamLibrary.displayOrder(StreamLibrary.list(prefs), !BuildConfig.PLAY_MEDIA_MODE)
         if (renderedSources == sources) {
             highlightSelectedSource()
             return
@@ -747,8 +773,12 @@ class MainActivity : Activity() {
             addView(alert, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             setOnClickListener { selectPhoneSource(StreamLibrary.ALERT_ID) }
         }
-        if (!BuildConfig.PLAY_MEDIA_MODE) addSpaced(streamRows, alertRow)
+        var alertAdded = BuildConfig.PLAY_MEDIA_MODE
         sources.forEach { station ->
+            if (!alertAdded && !StreamLibrary.isBrowseEntry(station, true)) {
+                addSpaced(streamRows, alertRow)
+                alertAdded = true
+            }
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = android.view.Gravity.CENTER_VERTICAL
@@ -766,7 +796,7 @@ class MainActivity : Activity() {
                                 val after = event.y > view.height / 2f
                                 // Read the latest list after drag dispatch (metadata may have updated).
                                 messageHandler.post {
-                                    StreamLibrary.save(p, StreamLibrary.move(StreamLibrary.list(p), source, station.id, after))
+                                    StreamLibrary.save(p, StreamLibrary.moveWithinGroup(StreamLibrary.list(p), source, station.id, after, !BuildConfig.PLAY_MEDIA_MODE))
                                     if (!isDestroyed) renderStreams()
                                 }
                             }
@@ -792,9 +822,7 @@ class MainActivity : Activity() {
                 }
             }, LinearLayout.LayoutParams(dp(34), dp(48)))
             row.addView(ImageView(this).apply {
-                val icon = station.bitmap()
-                if (icon != null) setImageBitmap(icon)
-                else setImageResource(if (station.localFolder) R.drawable.ic_source_folder else if (station.mediaPage) R.drawable.ic_source_web else if (station.textFile) R.drawable.ic_source_text else if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast)
+                setImageResource(if (station.localFolder) R.drawable.ic_source_folder else if (station.mediaPage) R.drawable.ic_source_web else if (station.textFile) R.drawable.ic_source_text else if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast)
                 contentDescription = station.name
                 if (station.browsable || station.textFile) setOnClickListener { if (station.browsable) openMediaPage(station) else openBook(station) }
             }, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginEnd = dp(8) })
@@ -833,6 +861,7 @@ class MainActivity : Activity() {
             })
             addSpaced(streamRows, row)
         }
+        if (!alertAdded) addSpaced(streamRows, alertRow)
     }
 
     private fun highlightSelectedSource() {
@@ -1162,7 +1191,7 @@ class MainActivity : Activity() {
                 val base = existing ?: StreamLibrary.newStation(address)
                 val saved = base.copy(url = address,
                     name = entered.ifBlank { StreamLibrary.defaultName(address) },
-                    icon = if (existing?.url == address) base.icon else "")
+                    icon = "")
                 val prefs = settings()
                 val current = StreamLibrary.list(prefs)
                 val next = if (existing == null) current + saved else current.map {
@@ -1172,14 +1201,13 @@ class MainActivity : Activity() {
                 renderStreams()
                 dialog.dismiss()
                 // A single bounded metadata lookup per explicit save, not a background polling service.
-                Thread {
+                if (autoName) Thread {
                     val info = runCatching { StreamMetadata.lookup(address) }.getOrNull()
                     if (info != null) messageHandler.post {
                         val latest = StreamLibrary.list(prefs)
                         val match = latest.firstOrNull { it.id == saved.id }
                         if (match == saved) {
-                            val updated = saved.copy(name = if (autoName) info.name ?: saved.name else saved.name,
-                                icon = info.icon.ifBlank { saved.icon })
+                            val updated = saved.copy(name = info.name ?: saved.name, icon = "")
                             StreamLibrary.save(prefs, latest.map { if (it.id == saved.id) updated else it })
                             if (!isDestroyed) renderStreams()
                         }

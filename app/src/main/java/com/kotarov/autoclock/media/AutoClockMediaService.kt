@@ -391,13 +391,18 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val alert = MediaDescriptionCompat.Builder().setMediaId(CLOCK_ID)
             .setTitle("Alert only")
             .setIconBitmap(sourceIcon(R.drawable.ic_source_travel)).build()
-        if (!playMode) items.add(MediaBrowserCompat.MediaItem(alert, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
-        StreamLibrary.list(prefs).forEach { station ->
+        var alertAdded = playMode
+        StreamLibrary.displayOrder(StreamLibrary.list(prefs), !playMode).forEach { station ->
+            if (!alertAdded && !StreamLibrary.isBrowseEntry(station, true)) {
+                items.add(MediaBrowserCompat.MediaItem(alert, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
+                alertAdded = true
+            }
             val bookFolder = !playMode && station.textFile && BookNavigation.mayHaveContents(station.name)
             val desc = MediaDescriptionCompat.Builder().setMediaId(if (bookFolder) BookNavigation.BOOK_PREFIX + station.id else station.id)
-                .setTitle(station.name).setIconBitmap(station.bitmap() ?: sourceIcon(if (station.localFolder) R.drawable.ic_source_folder else if (station.mediaPage) R.drawable.ic_source_web else if (station.textFile) R.drawable.ic_source_text else if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast)).build()
+                .setTitle(station.name).setIconBitmap(sourceIcon(if (station.localFolder) R.drawable.ic_source_folder else if (station.mediaPage) R.drawable.ic_source_web else if (station.textFile) R.drawable.ic_source_text else if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast)).build()
             items.add(MediaBrowserCompat.MediaItem(desc, if (station.browsable || bookFolder) MediaBrowserCompat.MediaItem.FLAG_BROWSABLE else MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
         }
+        if (!alertAdded) items.add(MediaBrowserCompat.MediaItem(alert, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
         result.sendResult(items)
     }
 
@@ -968,13 +973,13 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             builder.addCustomAction(ACTION_BACK_10, "Back 10 seconds", R.drawable.ic_replay_10)
             builder.addCustomAction(ACTION_FORWARD_10, "Forward 10 seconds", R.drawable.ic_forward_10)
         }
-        // Keep phone routing ahead of speed controls, even for live radio and Alert only.
+        addSpeedActions(builder, station)
+        // Phone routing is the last custom action; Auto decides available slots.
         if (android.os.Build.VERSION.SDK_INT >= 31) {
             builder.addCustomAction(ACTION_PHONE_AUDIO,
                 if (phoneAudio) "Disable phone audio" else "Enable phone audio",
                 if (phoneAudio) R.drawable.ic_auto_phone_audio_on else R.drawable.ic_auto_phone_audio_off)
         }
-        addSpeedActions(builder, station)
         setSessionPlaybackState(builder.build())
         lastPlayback = key
         lastPlaybackAt = now
@@ -1002,7 +1007,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                     if (source.textFile) "Text reading · estimated time" else if (source.local) "Local audio" else "Audio stream")
                 .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, subtitle ?: if (source.textFile) "Text reading" else "Audio")
                 .putBitmap(MediaMetadataCompat.METADATA_KEY_ART,
-                    previousArt ?: source.bitmap() ?: sourceIcon(if (source.textFile) R.drawable.ic_source_text
+                    previousArt ?: sourceIcon(if (source.textFile) R.drawable.ic_source_text
                         else if (source.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast))
         } else builder.putString(MediaMetadataCompat.METADATA_KEY_TITLE, "Select audio")
         duration?.let { builder.putLong(MediaMetadataCompat.METADATA_KEY_DURATION, it.toLong()) }

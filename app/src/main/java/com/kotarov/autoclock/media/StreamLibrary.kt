@@ -43,7 +43,7 @@ object StreamLibrary {
             val local = o.optBoolean("local", false)
             if (!(if (local) CustomStreamPlayer.validLocal(url) else CustomStreamPlayer.valid(url))) null
             else Station(o.getString("id"), o.optString("name").ifBlank { defaultName(url) },
-                url, o.optString("icon"), local, local && o.optBoolean("textFile", false), o.optString("language", "auto"), !local && o.optBoolean("mediaPage", false), local && o.optBoolean("localFolder", false))
+                url, "", local, local && o.optBoolean("textFile", false), o.optString("language", "auto"), !local && o.optBoolean("mediaPage", false), local && o.optBoolean("localFolder", false))
         }
         }.getOrDefault(emptyList())
         cachedRaw = raw
@@ -100,7 +100,7 @@ object StreamLibrary {
     fun save(prefs: SharedPreferences, stations: List<Station>) {
         val a = JSONArray()
         stations.forEach { s ->
-            a.put(JSONObject().put("id", s.id).put("name", s.name).put("url", s.url).put("icon", s.icon).put("local", s.local).put("textFile", s.textFile).put("language", s.language).put("mediaPage", s.mediaPage).put("localFolder", s.localFolder))
+            a.put(JSONObject().put("id", s.id).put("name", s.name).put("url", s.url).put("icon", "").put("local", s.local).put("textFile", s.textFile).put("language", s.language).put("mediaPage", s.mediaPage).put("localFolder", s.localFolder))
         }
         val edit = prefs.edit().putString(KEY_LIST, a.toString())
         val child = selectedChild(prefs)
@@ -116,6 +116,16 @@ object StreamLibrary {
     fun newMediaPage(url: String, name: String) = Station("page:" + UUID.randomUUID().toString(), name, url, mediaPage = true)
     fun newFile(uri: String, name: String, textFile: Boolean = false) = Station("file:" + UUID.randomUUID().toString(),
         name.take(128).ifBlank { "Local file" }, uri, local = true, textFile = textFile)
+    internal fun isBrowseEntry(station: Station, lite: Boolean): Boolean =
+        station.browsable || (lite && station.textFile && BookFormat.detect(station.name, null) != BookFormat.PDF)
+    internal fun displayOrder(stations: List<Station>, lite: Boolean): List<Station> =
+        stations.sortedBy { if (isBrowseEntry(it, lite)) 0 else 1 }
+    internal fun moveWithinGroup(stations: List<Station>, from: String, to: String, after: Boolean, lite: Boolean): List<Station> {
+        val a = stations.firstOrNull { it.id == from } ?: return stations
+        val b = stations.firstOrNull { it.id == to } ?: return stations
+        if (isBrowseEntry(a, lite) != isBrowseEntry(b, lite)) return stations
+        return move(stations, from, to, after)
+    }
     fun move(stations: List<Station>, from: String, to: String, after: Boolean): List<Station> {
         if (from == to) return stations
         val source = stations.firstOrNull { it.id == from } ?: return stations
