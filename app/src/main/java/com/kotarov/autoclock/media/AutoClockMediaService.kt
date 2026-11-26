@@ -48,6 +48,23 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private val phoneMode: PhoneAudioMode get() = PhoneAudioMode.read(prefs)
     private var noticePlaying = false
     private var testNotice: CityAnnouncement.Notice? = null
+    private val nowPlayingTitle = NowPlayingTitle()
+    private val hideNowPlayingTitle = Runnable {
+        nowPlayingTitle.clear()
+        if (clientActive) refreshPositionSubtitle()
+    }
+    private fun clearNowPlayingTitle() {
+        handler.removeCallbacks(hideNowPlayingTitle)
+        nowPlayingTitle.clear()
+    }
+    private fun showNowPlayingTitle() {
+        clearNowPlayingTitle()
+        if (!playMode && !callBlocked && nowPlayingTitle.show(activeSource?.name, SystemClock.elapsedRealtime()))
+            handler.postDelayed(hideNowPlayingTitle, NowPlayingTitle.DURATION_MS)
+    }
+    private fun currentCaption(tick: Long): String? =
+        if (callBlocked) "Call · paused" else
+            (testNotice ?: cityAnnouncement.notice(tick))?.subtitle ?: nowPlayingTitle.text(tick)
     private val hideTestNotice = Runnable {
         testNotice = null
         if (clientActive) publishClock()
@@ -151,11 +168,16 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             streamPlayer.stop()
             syncStream()
         }
-        if (key == ClockPreset.KEY_ADD_WEATHER && !running) stopNoticeAudio()
+        if (key == ClockPreset.KEY_ADD_WEATHER) {
+            if (running) showNowPlayingTitle()
+            else { clearNowPlayingTitle(); stopNoticeAudio() }
+        }
+        if (key == StreamLibrary.KEY_SELECTED && running) showNowPlayingTitle()
         if (key == ClockPreset.KEY_ADD_WEATHER ||
             key == StreamLibrary.KEY_LIST || key == StreamLibrary.KEY_SELECTED) syncStream()
         if (key == StreamLibrary.KEY_LIST) notifyChildrenChanged(ROOT_ID)
         if (key == StreamLibrary.KEY_LIST || key == StreamLibrary.KEY_SELECTED) {
+            if (activeSource == null) clearNowPlayingTitle()
             lastPublished = null
             publishClock()
         }
@@ -426,6 +448,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         if (NoticeTest.receiver === receiveTest) NoticeTest.receiver = null
         handler.removeCallbacks(hideTestNotice)
         testNotice = null
+        clearNowPlayingTitle()
         NoticeTest.publishCaption(null)
         weatherClient?.let { WeatherStore.stop(it) }
         weatherClient = null
@@ -508,6 +531,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         callBlocked = busy
         lastPlayback = null
         if (busy) {
+            clearNowPlayingTitle()
             handler.removeCallbacks(positionTick)
             stopNoticeAudio()
             // stop() checkpoints the local media/TTS position and relinquishes HFP.
@@ -527,6 +551,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             return
         }
         if (!enabled) {
+            clearNowPlayingTitle()
             stopNoticeAudio()
             streamPlayer.stop()
         } else if (running && !noticePlaying) {
@@ -537,6 +562,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         try { ClockSelectionStore.setWeatherEnabled(prefs, enabled) }
         finally { writingTransportPreference = false }
         if (enabled && !clientActive) resumeClientWork(startAudio = false)
+        if (enabled) showNowPlayingTitle()
         // The same preference listener handles phone switches. Publish now
         // for car transport commands, avoiding duplicate queued artwork.
         handler.removeCallbacks(settingsRefresh)
@@ -608,7 +634,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             }
         }
         val notice = cityAnnouncement.notice(tick)
-        val caption = if (callBlocked) "Call · paused" else (testNotice ?: notice)?.subtitle
+        val caption = currentCaption(tick)
         val position = if (caption == null) currentMediaPosition() else null
         val subtitle = informationText(caption, position)
         NoticeTest.publishCaption(subtitle)
@@ -711,7 +737,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private fun refreshPositionSubtitle() {
         if (!clientActive) return
         updateDiagnosticAudio()
-        val caption = if (playMode) null else if (callBlocked) "Call · paused" else (testNotice ?: cityAnnouncement.notice(SystemClock.elapsedRealtime()))?.subtitle
+        val caption = if (playMode) null else currentCaption(SystemClock.elapsedRealtime())
         val position = if (caption == null) currentMediaPosition() else null
         val subtitle = informationText(caption, position)
         NoticeTest.publishCaption(subtitle)
