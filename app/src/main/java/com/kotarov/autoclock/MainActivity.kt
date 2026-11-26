@@ -38,6 +38,7 @@ import com.kotarov.autoclock.media.CustomStreamPlayer
 import com.kotarov.autoclock.media.StreamLibrary
 import com.kotarov.autoclock.media.PlaybackSpeed
 import com.kotarov.autoclock.media.StreamMetadata
+import com.kotarov.autoclock.media.MediaPageDirectory
 import com.kotarov.autoclock.media.WebReader
 import com.kotarov.autoclock.media.WebTextProvider
 import com.kotarov.autoclock.media.NoticeTest
@@ -330,21 +331,30 @@ class MainActivity : Activity() {
         val streams = settingsGroup(root, if (BuildConfig.PLAY_MEDIA_MODE) "Audio library" else "Streams")
         val addRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         addRow.addView(Button(this).apply {
-            text = "Add stream"
+            text = "Stream"
             isAllCaps = false
             setOnClickListener { editStream(null) }
         }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         addRow.addView(Button(this).apply {
-            text = "Add file"
+            text = "File"
             isAllCaps = false
             setOnClickListener { pickFile() }
         }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(8) })
         addSpaced(streams, addRow)
-        if (!BuildConfig.PLAY_MEDIA_MODE) addSpaced(streams, Button(this).apply {
-            text = "Add Web Page"
-            isAllCaps = false
-            setOnClickListener { addWebPage() }
-        })
+        if (!BuildConfig.PLAY_MEDIA_MODE) {
+            val webRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            webRow.addView(Button(this).apply {
+                text = "Web Article"
+                isAllCaps = false
+                setOnClickListener { addWebPage() }
+            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            webRow.addView(Button(this).apply {
+                text = "Web Media"
+                isAllCaps = false
+                setOnClickListener { editMediaPage(null) }
+            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(8) })
+            addSpaced(streams, webRow)
+        }
         streamRows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         streams.addView(streamRows)
         renderStreams()
@@ -713,7 +723,7 @@ class MainActivity : Activity() {
         renderedSources = sources
         streamRows.removeAllViews()
         sourceTitles.clear()
-        val selected = prefs.getString(StreamLibrary.KEY_SELECTED, StreamLibrary.ALERT_ID)
+        val selected = StreamLibrary.selectedRootId(prefs)
         highlightedSource = selected
         val alert = text("Alert only", 16f, 0).apply {
             setTextColor(if (selected == StreamLibrary.ALERT_ID) accent else ink)
@@ -780,12 +790,12 @@ class MainActivity : Activity() {
             row.addView(ImageView(this).apply {
                 val icon = station.bitmap()
                 if (icon != null) setImageBitmap(icon)
-                else setImageResource(if (station.textFile) R.drawable.ic_source_text else if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast)
+                else setImageResource(if (station.mediaPage) R.drawable.ic_source_folder else if (station.textFile) R.drawable.ic_source_text else if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast)
                 contentDescription = station.name
             }, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginEnd = dp(8) })
             val title = text(station.name, 16f, 0).apply {
                 setTextColor(if (selected == station.id) accent else ink)
-                setOnClickListener { selectPhoneSource(station.id) }
+                setOnClickListener { if (station.mediaPage) openMediaPage(station) else selectPhoneSource(station.id) }
             }
             sourceTitles[station.id] = title
             row.addView(title, LinearLayout.LayoutParams(
@@ -794,7 +804,7 @@ class MainActivity : Activity() {
                 text = "Edit"
                 isAllCaps = false
                 minWidth = 0; minimumWidth = 0
-                setOnClickListener { if (station.local) editFileName(station) else editStream(station) }
+                setOnClickListener { if (station.mediaPage) editMediaPage(station) else if (station.local) editFileName(station) else editStream(station) }
             })
             row.addView(Button(this).apply {
                 text = "Delete"
@@ -802,7 +812,7 @@ class MainActivity : Activity() {
                 minWidth = 0; minimumWidth = 0
                 setOnClickListener {
                     AlertDialog.Builder(this@MainActivity).setTitle(station.name)
-                        .setMessage(if (station.local) "Remove file from list?" else "Delete stream?")
+                        .setMessage(if (station.mediaPage) "Delete media folder?" else if (station.local) "Remove file from list?" else "Delete stream?")
                         .setNegativeButton("Cancel", null)
                         .setPositiveButton("Delete") { _, _ ->
                             val prefs = settings()
@@ -821,7 +831,7 @@ class MainActivity : Activity() {
     }
 
     private fun highlightSelectedSource() {
-        val selected = settings().getString(StreamLibrary.KEY_SELECTED, StreamLibrary.ALERT_ID)
+        val selected = StreamLibrary.selectedRootId(settings())
         if (selected == highlightedSource) return
         highlightedSource?.let { sourceTitles[it]?.setTextColor(ink) }
         selected?.let { sourceTitles[it]?.setTextColor(accent) }
@@ -839,11 +849,71 @@ class MainActivity : Activity() {
         else {
             pendingPhoneSource = id
             pendingPhonePlay = true
-            prefs.edit().putString(StreamLibrary.KEY_SELECTED, id).apply()
+            if (!StreamLibrary.select(prefs, id)) { pendingPhoneSource = null; pendingPhonePlay = null; return }
             ClockSelectionStore.setWeatherEnabled(prefs, true)
         }
         syncWeatherToggle()
         highlightSelectedSource()
+    }
+
+    private fun editMediaPage(existing: StreamLibrary.Station?) {
+        val fields = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(8))
+        }
+        val url = android.widget.EditText(this).apply {
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
+            hint = "https://..."
+            setSingleLine(true)
+            setText(existing?.url.orEmpty())
+        }
+        val name = android.widget.EditText(this).apply {
+            hint = "Folder name (automatic)"
+            setSingleLine(true)
+            setText(existing?.name.orEmpty())
+        }
+        fields.addView(url)
+        fields.addView(name)
+        val dialog = AlertDialog.Builder(this).setTitle("Web Media")
+            .setView(fields).setNegativeButton("Cancel", null).setPositiveButton("Save", null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val address = url.text.toString().trim()
+                if (!WebReader.valid(address)) {
+                    url.error = "Enter a public HTTPS page or playlist URL"
+                    return@setOnClickListener
+                }
+                val title = name.text.toString().trim().take(128).ifBlank { StreamLibrary.defaultName(address) }
+                val page = existing?.copy(name = title, url = address) ?: StreamLibrary.newMediaPage(address, title)
+                val p = settings()
+                val current = StreamLibrary.list(p)
+                StreamLibrary.save(p, if (existing == null) current + page else current.map { if (it.id == page.id) page else it })
+                renderStreams()
+                dialog.dismiss()
+            }
+        }
+        dialog.show()
+    }
+
+    private fun openMediaPage(page: StreamLibrary.Station) {
+        var cancelled = false
+        val progress = AlertDialog.Builder(this).setTitle(page.name).setMessage("Finding media…")
+            .setNegativeButton("Cancel") { _, _ -> cancelled = true }
+            .setOnCancelListener { cancelled = true }.create()
+        progress.show()
+        MediaPageDirectory.load(page) { result ->
+            if (!cancelled && !isDestroyed && !isFinishing) {
+                progress.dismiss()
+                val items = result.getOrNull().orEmpty()
+                if (items.isEmpty()) AlertDialog.Builder(this).setTitle(page.name)
+                    .setMessage("No direct playable media found, or page unavailable.")
+                    .setPositiveButton("OK", null).show()
+                else AlertDialog.Builder(this).setTitle(page.name)
+                    .setItems(items.map { it.name + " · " + it.format }.toTypedArray()) { _, index ->
+                        selectPhoneSource(items[index].id)
+                    }.setNegativeButton("Cancel", null).show()
+            }
+        }
     }
 
     private var webImport: Thread? = null
@@ -855,7 +925,7 @@ class MainActivity : Activity() {
             hint = "https://..."
             setSingleLine(true)
         }
-        val dialog = AlertDialog.Builder(this).setTitle("Add Web Page")
+        val dialog = AlertDialog.Builder(this).setTitle("Web Article")
             .setView(field).setNegativeButton("Cancel", null)
             .setPositiveButton("Save", null).create()
         dialog.setOnShowListener {
@@ -1010,7 +1080,7 @@ class MainActivity : Activity() {
         }
         fields.addView(url)
         fields.addView(name)
-        val dialog = AlertDialog.Builder(this).setTitle(if (existing == null) "Add stream" else "Edit stream")
+        val dialog = AlertDialog.Builder(this).setTitle(if (existing == null) "Stream" else "Edit stream")
             .setView(fields).setNegativeButton("Cancel", null).setPositiveButton("Save", null).create()
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {

@@ -49,3 +49,7 @@ Extracted book text may remain in private app cache for reuse (up to 3 files, 64
 ## Web Reader (Lite beta)
 
 When you explicitly add a public HTTPS webpage, the phone requests that page directly from its provider, which receives normal connection information such as IP address. Redirects are HTTPS-only. No browser cookies or login credentials are supplied, scripts are not executed, and embedded images, ads and other resources are not requested. An on-device parser extracts readable article text, saved in private app storage as a local document for offline speech. The saved text is removed when its last library entry is deleted or app data is cleared. No developer server or automatic page refresh is used.
+
+## Web Media folders (Lite beta)
+
+Public HTTPS page or playlist URLs and folder names are stored locally. Opening a folder fetches the page directly and extracts public media links without executing scripts or loading embedded players. No scheduled refresh runs. Selecting an item stores its most recently selected URL locally and connects directly to that media provider using the existing player. A provider receives ordinary network information. Deleting a folder removes its local reference; it does not change remote content.

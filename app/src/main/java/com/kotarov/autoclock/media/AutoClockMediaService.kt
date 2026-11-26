@@ -241,7 +241,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                     }
                 }
                 override fun onPlayFromSearch(query: String?, extras: Bundle?) {
-                    val items = StreamLibrary.list(prefs)
+                    val items = StreamLibrary.list(prefs).filterNot { it.mediaPage }
                     val match = if (query.isNullOrBlank()) activeSource ?: items.firstOrNull()
                         else items.firstOrNull { it.name.contains(query, ignoreCase = true) }
                     if (match != null && selectSource(match.id)) setWeatherEnabled(true)
@@ -328,7 +328,19 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         result: Result<MutableList<MediaBrowserCompat.MediaItem>>
     ) {
         if (parentId != ROOT_ID) {
-            result.sendResult(mutableListOf())
+            val page = StreamLibrary.list(prefs).firstOrNull { it.mediaPage && it.id == parentId }
+            if (page == null) { result.sendResult(mutableListOf()); return }
+            result.detach()
+            MediaPageDirectory.load(page) { outcome ->
+                val valid = StreamLibrary.list(prefs).any { it.id == page.id && it.url == page.url && it.mediaPage }
+                val children = mutableListOf<MediaBrowserCompat.MediaItem>()
+                if (valid) outcome.getOrNull().orEmpty().forEach { item ->
+                    val desc = MediaDescriptionCompat.Builder().setMediaId(item.id).setTitle(item.name)
+                        .setSubtitle(item.format).setIconBitmap(sourceIcon(R.drawable.ic_source_podcast)).build()
+                    children.add(MediaBrowserCompat.MediaItem(desc, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
+                }
+                result.sendResult(children)
+            }
             return
         }
         val items = mutableListOf<MediaBrowserCompat.MediaItem>()
@@ -338,8 +350,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         if (!playMode) items.add(MediaBrowserCompat.MediaItem(alert, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
         StreamLibrary.list(prefs).forEach { station ->
             val desc = MediaDescriptionCompat.Builder().setMediaId(station.id)
-                .setTitle(station.name).setIconBitmap(station.bitmap() ?: sourceIcon(if (station.textFile) R.drawable.ic_source_text else if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast)).build()
-            items.add(MediaBrowserCompat.MediaItem(desc, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
+                .setTitle(station.name).setIconBitmap(station.bitmap() ?: sourceIcon(if (station.mediaPage) R.drawable.ic_source_folder else if (station.textFile) R.drawable.ic_source_text else if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast)).build()
+            items.add(MediaBrowserCompat.MediaItem(desc, if (station.mediaPage) MediaBrowserCompat.MediaItem.FLAG_BROWSABLE else MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
         }
         result.sendResult(items)
     }
@@ -354,8 +366,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     private fun selectSource(id: String?): Boolean {
         if (playMode && id == CLOCK_ID) return false
-        if (id != CLOCK_ID && StreamLibrary.list(prefs).none { it.id == id }) return false
-        prefs.edit().putString(StreamLibrary.KEY_SELECTED, id).apply()
+        if (!StreamLibrary.select(prefs, id)) return false
         activeSource = StreamLibrary.selected(prefs)
         return true
     }
@@ -918,7 +929,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             stopPlaybackForeground()
         } else {
             if (activeSource == null) {
-                val first = StreamLibrary.list(prefs).firstOrNull()
+                val first = StreamLibrary.list(prefs).firstOrNull { !it.mediaPage }
                 if (first != null) selectSource(first.id)
             }
             if (activeSource == null) {
