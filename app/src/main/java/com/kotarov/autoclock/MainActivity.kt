@@ -76,6 +76,8 @@ class MainActivity : Activity() {
     private lateinit var slowerButton: ImageButton
     private lateinit var fasterButton: ImageButton
     private var transportUiKey: String? = null
+    private var pendingPhonePlay: Boolean? = null
+    private var pendingPhoneSource: String? = null
     private val playbackCallback = object : MediaControllerCompat.Callback() {
         override fun onPlaybackStateChanged(state: PlaybackStateCompat?) {
             syncTransportButtons(state)
@@ -175,7 +177,9 @@ class MainActivity : Activity() {
             }
             root.requestApplyInsets()
         }
-        root.addView(text("SmartTrip Clock", 27f, dp(16)))
+        root.addView(text("SmartTrip Clock", 27f, dp(16)).apply {
+            setOnLongClickListener { showPerformanceDiagnostics(); true }
+        })
 
         // The blue outline is the exclusive selection, as in phone display
         // settings. No radio-circle UI is added next to the thumbnails.
@@ -290,7 +294,11 @@ class MainActivity : Activity() {
                     val controls = phoneController?.transportControls
                     if (controls != null) {
                         if (enabled) controls.play() else controls.pause()
-                    } else ClockSelectionStore.setWeatherEnabled(p, enabled)
+                    } else {
+                        pendingPhoneSource = null
+                        pendingPhonePlay = enabled
+                        ClockSelectionStore.setWeatherEnabled(p, enabled)
+                    }
                 }
                 syncWeatherToggle()
             }
@@ -363,7 +371,6 @@ class MainActivity : Activity() {
             gravity = android.view.Gravity.CENTER
             movementMethod = android.text.method.LinkMovementMethod.getInstance()
             setPadding(0, dp(28), 0, 0)
-            setOnLongClickListener { showPerformanceDiagnostics(); true }
         }, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
@@ -404,6 +411,13 @@ class MainActivity : Activity() {
                         syncTransportButtons(it.playbackState)
                         if (BuildConfig.PLAY_MEDIA_MODE) syncWeatherToggle()
                     }
+                    val source = pendingPhoneSource
+                    val play = pendingPhonePlay
+                    pendingPhoneSource = null
+                    pendingPhonePlay = null
+                    if (source != null) phoneController?.transportControls?.playFromMediaId(source, null)
+                    else if (play == true) phoneController?.transportControls?.play()
+                    else if (play == false) phoneController?.transportControls?.pause()
                 }
                 override fun onConnectionSuspended() { detachPhoneController() }
                 override fun onConnectionFailed() { detachPhoneController() }
@@ -420,6 +434,8 @@ class MainActivity : Activity() {
         detachPhoneController()
         phoneBrowser?.disconnect()
         phoneBrowser = null
+        pendingPhonePlay = null
+        pendingPhoneSource = null
         if (::locationMessage.isInitialized) locationMessage.visibility = View.GONE
         WeatherStore.stop(WeatherStore.Client.PHONE)
         settings().unregisterOnSharedPreferenceChangeListener(weatherPreferenceListener)
@@ -805,6 +821,8 @@ class MainActivity : Activity() {
         val controls = phoneController?.transportControls
         if (controls != null) controls.playFromMediaId(id, null)
         else {
+            pendingPhoneSource = id
+            pendingPhonePlay = true
             prefs.edit().putString(StreamLibrary.KEY_SELECTED, id).apply()
             ClockSelectionStore.setWeatherEnabled(prefs, true)
         }

@@ -59,6 +59,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private var lastSoundNotice: CityAnnouncement.Notice? = null
     private var clientActive = false
     private var externalClient = false
+    private var writingTransportPreference = false
     private var removeProjectionListener: (() -> Unit)? = null
     private var suspendedForProjection = false
     private var lastWarningRevision = 0L
@@ -104,6 +105,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (writingTransportPreference && key == ClockPreset.KEY_ADD_WEATHER) return@OnSharedPreferenceChangeListener
         if (!clientActive) {
             if (key == StreamLibrary.KEY_LIST || key == StreamLibrary.KEY_SELECTED) {
                 activeSource = StreamLibrary.selected(prefs)
@@ -415,6 +417,12 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         // onGetRoot resumes work for the accepted client.
     }
 
+    @Suppress("DEPRECATION")
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) ClockRenderer.clearStaticLayers()
+    }
+
     override fun onDestroy() {
         removeProjectionListener?.invoke()
         removeProjectionListener = null
@@ -461,7 +469,9 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             // Retry a failed request without restarting an already playing source.
             streamPlayer.retryFailed()
         }
-        ClockSelectionStore.setWeatherEnabled(prefs, enabled)
+        writingTransportPreference = true
+        try { ClockSelectionStore.setWeatherEnabled(prefs, enabled) }
+        finally { writingTransportPreference = false }
         if (enabled && !clientActive) resumeClientWork(startAudio = false)
         // The same preference listener handles phone switches. Publish now
         // for car transport commands, avoiding duplicate queued artwork.
@@ -488,6 +498,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     private fun publishClock() {
         if (!clientActive) return
+        updateDiagnosticAudio()
         if (playMode) { publishPlayMetadata(); return }
         val now = LocalDateTime.now()
         val visible = visiblePreset()
@@ -626,6 +637,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     private fun refreshPositionSubtitle() {
         if (!clientActive) return
+        updateDiagnosticAudio()
         val caption = if (playMode) null else (testNotice ?: cityAnnouncement.notice(SystemClock.elapsedRealtime()))?.subtitle
         val position = if (caption == null) currentMediaPosition() else null
         val subtitle = informationText(caption, position)
@@ -746,10 +758,17 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         session.setPlaybackState(value)
     }
 
-    private fun publishPlaybackState() {
-        if (PerfDiagnostics.enabled) PerfDiagnostics.audio = if (!clientActive || !running) "Idle" else
-            (if (noticePlaying) "Notice" else if (activeSource?.textFile == true) "Text-to-speech" else if (activeSource != null) "Media" else "Alerts only") +
+    private fun updateDiagnosticAudio() {
+        if (!PerfDiagnostics.enabled) return
+        PerfDiagnostics.audio = if (!clientActive || !running) "Idle" else
+            (if (noticePlaying) "Notice" else if (activeSource == null) "Alerts only" else
+                (if (activeSource?.textFile == true) "Text-to-speech" else "Media") +
+                    if (streamPlayer.isPlaying()) " playing" else " not playing") +
                 (if (phoneMode != PhoneAudioMode.OFF && !playMode) " / phone route requested" else "")
+    }
+
+    private fun publishPlaybackState() {
+        updateDiagnosticAudio()
         if (playMode) { publishPlayState(); return }
         val isRunning = running
         val station = activeSource

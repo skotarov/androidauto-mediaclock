@@ -49,6 +49,15 @@ class TravelRefreshPolicyTest {
         assertTrue(TravelRefreshPolicy.localityCheckpointDue(false, Double.POSITIVE_INFINITY))
     }
 
+    @Test fun failedLocationRequestsBackOffWithoutChangingWeatherInterval() {
+        assertEquals(60_000L, TravelRefreshPolicy.failedFixInterval(0))
+        assertEquals(120_000L, TravelRefreshPolicy.failedFixInterval(1))
+        assertEquals(240_000L, TravelRefreshPolicy.failedFixInterval(2))
+        assertEquals(300_000L, TravelRefreshPolicy.failedFixInterval(3))
+        assertEquals(300_000L, TravelRefreshPolicy.failedFixInterval(20))
+        assertEquals(900_000L, TravelRefreshPolicy.WEATHER_INTERVAL_MS)
+    }
+
     @Test fun unknownLocationAndFirstForecastAreDue() {
         assertTrue(TravelRefreshPolicy.localityDue(0, null, Double.POSITIVE_INFINITY, false, false))
         assertTrue(TravelRefreshPolicy.weatherDue(0, null, Double.POSITIVE_INFINITY, null, 0))
