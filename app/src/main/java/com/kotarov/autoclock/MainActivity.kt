@@ -214,9 +214,7 @@ class MainActivity : Activity() {
         carAudioButton = quickButton(R.drawable.ic_bluetooth_audio, "Use car phone audio") {
             if (android.os.Build.VERSION.SDK_INT >= 31) {
                 testAudio.stop()
-                val checked = PhoneAudioMode.read(prefs) == PhoneAudioMode.OFF
-                prefs.edit().putString(PhoneAudioMode.KEY,
-                    if (checked) PhoneAudioMode.ALERTS.id else PhoneAudioMode.OFF.id).apply()
+                PhoneAudioMode.toggle(prefs)
                 syncQuickButtons()
             }
         }

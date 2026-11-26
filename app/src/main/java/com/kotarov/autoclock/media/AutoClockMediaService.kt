@@ -71,7 +71,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private var artKey: String? = null
     private var miniKey: String? = null
     private var lastPublished: MediaPublicationKey? = null
-    private data class PlaybackKey(val running: Boolean, val id: String, val duration: Long?, val advancing: Boolean, val textSkip: Boolean, val textPosition: Long?, val speed: Float)
+    private data class PlaybackKey(val running: Boolean, val id: String, val duration: Long?, val advancing: Boolean, val textSkip: Boolean, val textPosition: Long?, val speed: Float, val phoneAudio: Boolean)
     private var lastPlayback: PlaybackKey? = null
     private var lastPlaybackAt = 0L
     private var weatherClient: WeatherStore.Client? = null
@@ -116,6 +116,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         }
         if (writingTransportPreference && key == ClockPreset.KEY_ADD_WEATHER) return@OnSharedPreferenceChangeListener
         if (!clientActive) {
+            if (!playMode && (key == PhoneAudioMode.KEY || key == NoticeAudio.KEY_PHONE_CHANNEL)) publishPlaybackState()
             if (key == StreamLibrary.KEY_LIST || key == StreamLibrary.KEY_SELECTED) {
                 activeSource = StreamLibrary.selected(prefs)
                 if (key == StreamLibrary.KEY_LIST) notifyChildrenChanged(ROOT_ID)
@@ -218,6 +219,10 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 }
 
                 override fun onCustomAction(action: String?, extras: Bundle?) {
+                    if (action == ACTION_PHONE_AUDIO) {
+                        if (!playMode && android.os.Build.VERSION.SDK_INT >= 31) PhoneAudioMode.toggle(prefs)
+                        return
+                    }
                     if (action == ACTION_SPEED_DOWN || action == ACTION_SPEED_UP) {
                         val source = activeSource ?: return
                         if (!supportsSpeed(source)) return
@@ -881,7 +886,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val book = bookTimeline()
         val duration = book?.durationMs ?: seek?.duration?.toLong()
         val speed = if (advancing) streamPlayer.actualMediaSpeed() else 0f
-        val key = PlaybackKey(isRunning, station?.id ?: CLOCK_ID, duration, advancing, textSkip, book?.positionMs, speed)
+        val phoneAudio = phoneMode != PhoneAudioMode.OFF
+        val key = PlaybackKey(isRunning, station?.id ?: CLOCK_ID, duration, advancing, textSkip, book?.positionMs, speed, phoneAudio)
         val previous = lastPlayback
         if (previous == key) return
         val now = SystemClock.elapsedRealtime()
@@ -905,6 +911,12 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         if (seek != null || textSkip) {
             builder.addCustomAction(ACTION_BACK_10, "Back 10 seconds", R.drawable.ic_replay_10)
             builder.addCustomAction(ACTION_FORWARD_10, "Forward 10 seconds", R.drawable.ic_forward_10)
+        }
+        // Keep phone routing ahead of speed controls, even for live radio and Alert only.
+        if (android.os.Build.VERSION.SDK_INT >= 31) {
+            builder.addCustomAction(ACTION_PHONE_AUDIO,
+                if (phoneAudio) "Disable phone audio" else "Enable phone audio",
+                if (phoneAudio) R.drawable.ic_auto_phone_audio_on else R.drawable.ic_auto_phone_audio_off)
         }
         addSpeedActions(builder, station)
         setSessionPlaybackState(builder.build())
@@ -1052,6 +1064,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     companion object {
+        const val ACTION_PHONE_AUDIO = "autoclock.phone_audio_toggle"
         const val ACTION_BACK_10 = "autoclock.back_10"
         const val ACTION_FORWARD_10 = "autoclock.forward_10"
         const val ACTION_SPEED_DOWN = "autoclock.speed_down_v114"

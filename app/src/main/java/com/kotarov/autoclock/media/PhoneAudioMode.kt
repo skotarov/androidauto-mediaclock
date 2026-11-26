@@ -9,6 +9,10 @@ enum class PhoneAudioMode(val id: String, val label: String) {
 
     companion object {
         const val KEY = "bluetooth_phone_audio_mode"
+        fun toggle(prefs: SharedPreferences) {
+            val next = if (read(prefs) == OFF) ALERTS else OFF
+            prefs.edit().putString(KEY, next.id).apply()
+        }
         fun read(prefs: SharedPreferences): PhoneAudioMode =
             when (prefs.getString(KEY, null)) {
                 OFF.id -> OFF
