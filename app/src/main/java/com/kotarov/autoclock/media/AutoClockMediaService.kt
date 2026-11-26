@@ -630,8 +630,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private fun addSpeedActions(builder: PlaybackStateCompat.Builder, source: StreamLibrary.Station?) {
         if (!supportsSpeed(source)) return
         // Keep these after the existing skip controls so Auto can prioritize them.
-        builder.addCustomAction(ACTION_SPEED_DOWN, "Decrease speed by 0.1", R.drawable.ic_speed_slower)
-        builder.addCustomAction(ACTION_SPEED_UP, "Increase speed by 0.1", R.drawable.ic_speed_faster)
+        builder.addCustomAction(ACTION_SPEED_DOWN, "Decrease speed by 0.1", R.drawable.ic_auto_speed_minus_v114)
+        builder.addCustomAction(ACTION_SPEED_UP, "Increase speed by 0.1", R.drawable.ic_auto_speed_plus_v114)
     }
 
     private fun publishMediaSubtitle(key: String, caption: String?, position: Int?) {
@@ -889,8 +889,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     companion object {
         const val ACTION_BACK_10 = "autoclock.back_10"
         const val ACTION_FORWARD_10 = "autoclock.forward_10"
-        const val ACTION_SPEED_DOWN = "autoclock.speed_down_v112"
-        const val ACTION_SPEED_UP = "autoclock.speed_up_v112"
+        const val ACTION_SPEED_DOWN = "autoclock.speed_down_v114"
+        const val ACTION_SPEED_UP = "autoclock.speed_up_v114"
         const val PREFERENCES = "clock_settings"
         const val KEY_LAYOUT = "clock_layout"
         const val KEY_SHOW_LOCATION = "show_location_message_v48"
