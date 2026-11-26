@@ -229,12 +229,12 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             setFlags(MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS)
             setCallback(object : MediaSessionCompat.Callback() {
                 override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
-                    if (selectSource(mediaId)) setWeatherEnabled(true)
+                    if (prepareBookChoice(mediaId) || selectSource(mediaId)) setWeatherEnabled(true)
                 }
 
                 override fun onPrepareFromMediaId(mediaId: String?, extras: Bundle?) {
                     if (playMode) setWeatherEnabled(false)
-                    if (selectSource(mediaId)) {
+                    if (prepareBookChoice(mediaId) || selectSource(mediaId)) {
                         publishClock()
                         publishPlaybackState()
                     }
@@ -354,6 +354,22 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         parentId: String,
         result: Result<MutableList<MediaBrowserCompat.MediaItem>>
     ) {
+        if (!playMode && parentId.startsWith(BookNavigation.BOOK_PREFIX)) {
+            val book = StreamLibrary.book(prefs, parentId.removePrefix(BookNavigation.BOOK_PREFIX))
+            if (book == null) { result.sendResult(mutableListOf()); return }
+            result.detach()
+            BookNavigation.load(this, book) { chapters ->
+                val children = mutableListOf<MediaBrowserCompat.MediaItem>()
+                if (StreamLibrary.book(prefs, book.id)?.url == book.url) {
+                    BookNavigation.choices(book, chapters).forEach { choice ->
+                        val desc = MediaDescriptionCompat.Builder().setMediaId(choice.id).setTitle(choice.title).build()
+                        children.add(MediaBrowserCompat.MediaItem(desc, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
+                    }
+                }
+                result.sendResult(children)
+            }
+            return
+        }
         if (parentId != ROOT_ID) {
             val page = StreamLibrary.list(prefs).firstOrNull { it.browsable && it.id == parentId }
             if (page == null) { result.sendResult(mutableListOf()); return }
@@ -362,9 +378,10 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 val valid = StreamLibrary.list(prefs).any { it.id == page.id && it.url == page.url && it.browsable }
                 val children = mutableListOf<MediaBrowserCompat.MediaItem>()
                 if (valid) outcome.getOrNull().orEmpty().forEach { item ->
-                    val desc = MediaDescriptionCompat.Builder().setMediaId(item.id).setTitle(item.name)
+                    val bookFolder = !playMode && item.textFile && BookNavigation.mayHaveContents(item.name)
+                    val desc = MediaDescriptionCompat.Builder().setMediaId(if (bookFolder) BookNavigation.BOOK_PREFIX + item.id else item.id).setTitle(item.name)
                         .setSubtitle(item.format).build()
-                    children.add(MediaBrowserCompat.MediaItem(desc, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
+                    children.add(MediaBrowserCompat.MediaItem(desc, if (bookFolder) MediaBrowserCompat.MediaItem.FLAG_BROWSABLE else MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
                 }
                 result.sendResult(children)
             }
@@ -376,9 +393,10 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             .setIconBitmap(sourceIcon(R.drawable.ic_source_travel)).build()
         if (!playMode) items.add(MediaBrowserCompat.MediaItem(alert, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
         StreamLibrary.list(prefs).forEach { station ->
-            val desc = MediaDescriptionCompat.Builder().setMediaId(station.id)
+            val bookFolder = !playMode && station.textFile && BookNavigation.mayHaveContents(station.name)
+            val desc = MediaDescriptionCompat.Builder().setMediaId(if (bookFolder) BookNavigation.BOOK_PREFIX + station.id else station.id)
                 .setTitle(station.name).setIconBitmap(station.bitmap() ?: sourceIcon(if (station.localFolder) R.drawable.ic_source_folder else if (station.mediaPage) R.drawable.ic_source_web else if (station.textFile) R.drawable.ic_source_text else if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast)).build()
-            items.add(MediaBrowserCompat.MediaItem(desc, if (station.browsable) MediaBrowserCompat.MediaItem.FLAG_BROWSABLE else MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
+            items.add(MediaBrowserCompat.MediaItem(desc, if (station.browsable || bookFolder) MediaBrowserCompat.MediaItem.FLAG_BROWSABLE else MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
         }
         result.sendResult(items)
     }
@@ -389,6 +407,18 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         drawable?.setBounds(4, 4, 60, 60)
         drawable?.draw(android.graphics.Canvas(bitmap))
         return bitmap
+    }
+
+    private fun prepareBookChoice(id: String?): Boolean {
+        if (playMode) return false
+        val choice = BookNavigation.parseChoice(id) ?: return false
+        val book = StreamLibrary.book(prefs, choice.first) ?: return false
+        // Checkpoint the outgoing document before replacing the shared bookmark.
+        // No new audio route is created until the normal Play command.
+        setWeatherEnabled(false)
+        if (!selectSource(book.id)) return false
+        getSharedPreferences("text_bookmarks", MODE_PRIVATE).edit().putInt(book.url, choice.second).apply()
+        return true
     }
 
     private fun selectSource(id: String?): Boolean {

@@ -74,6 +74,13 @@ object StreamLibrary {
     }
     fun selectedRootId(prefs: SharedPreferences): String =
         selectedChild(prefs)?.first ?: prefs.getString(KEY_SELECTED, ALERT_ID).orEmpty()
+    internal fun book(prefs: SharedPreferences, id: String): Station? {
+        list(prefs).firstOrNull { it.id == id && it.textFile && !it.browsable }?.let { return it }
+        selected(prefs)?.takeIf { it.id == id && it.textFile }?.let { return it }
+        val hit = MediaPageDirectory.find(id) ?: return null
+        if (!hit.item.textFile || !list(prefs).any { it.localFolder && it.id == hit.parent.id && it.url == hit.parent.url }) return null
+        return Station(id, hit.item.name, hit.item.url, local = true, textFile = true)
+    }
     fun select(prefs: SharedPreferences, id: String?): Boolean {
         if (id == null) return false
         if (id == ALERT_ID || list(prefs).any { it.id == id && !it.browsable }) {

@@ -39,6 +39,7 @@ import com.kotarov.autoclock.media.StreamLibrary
 import com.kotarov.autoclock.media.PlaybackSpeed
 import com.kotarov.autoclock.media.StreamMetadata
 import com.kotarov.autoclock.media.MediaPageDirectory
+import com.kotarov.autoclock.media.BookNavigation
 import com.kotarov.autoclock.media.WebReader
 import com.kotarov.autoclock.media.WebTextProvider
 import com.kotarov.autoclock.media.NoticeTest
@@ -795,11 +796,11 @@ class MainActivity : Activity() {
                 if (icon != null) setImageBitmap(icon)
                 else setImageResource(if (station.localFolder) R.drawable.ic_source_folder else if (station.mediaPage) R.drawable.ic_source_web else if (station.textFile) R.drawable.ic_source_text else if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast)
                 contentDescription = station.name
-                if (station.browsable) setOnClickListener { openMediaPage(station) }
+                if (station.browsable || station.textFile) setOnClickListener { if (station.browsable) openMediaPage(station) else openBook(station) }
             }, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginEnd = dp(8) })
             val title = text(station.name, 16f, 0).apply {
                 setTextColor(if (selected == station.id) accent else ink)
-                setOnClickListener { if (station.browsable) openMediaPage(station) else selectPhoneSource(station.id) }
+                setOnClickListener { if (station.browsable) openMediaPage(station) else if (station.textFile) openBook(station) else selectPhoneSource(station.id) }
             }
             sourceTitles[station.id] = title
             row.addView(title, LinearLayout.LayoutParams(
@@ -853,8 +854,10 @@ class MainActivity : Activity() {
         else {
             pendingPhoneSource = id
             pendingPhonePlay = true
-            if (!StreamLibrary.select(prefs, id)) { pendingPhoneSource = null; pendingPhonePlay = null; return }
-            ClockSelectionStore.setWeatherEnabled(prefs, true)
+            if (BookNavigation.parseChoice(id) == null) {
+                if (!StreamLibrary.select(prefs, id)) { pendingPhoneSource = null; pendingPhonePlay = null; return }
+                ClockSelectionStore.setWeatherEnabled(prefs, true)
+            }
         }
         syncWeatherToggle()
         highlightSelectedSource()
@@ -914,8 +917,34 @@ class MainActivity : Activity() {
                     .setPositiveButton("OK", null).show()
                 else AlertDialog.Builder(this).setTitle(page.name)
                     .setItems((if (page.localFolder) listOf("▶ Play folder") + items.map { it.name } else items.map { it.name + " · " + it.format }).toTypedArray()) { _, index ->
-                        selectPhoneSource(items[if (page.localFolder) (index - 1).coerceAtLeast(0) else index].id)
+                        val item = items[if (page.localFolder) (index - 1).coerceAtLeast(0) else index]
+                        val book = if (item.textFile && !(page.localFolder && index == 0)) StreamLibrary.book(settings(), item.id) else null
+                        if (book != null) openBook(book) else selectPhoneSource(item.id)
                     }.setNegativeButton("Cancel", null).show()
+            }
+        }
+    }
+
+    private fun openBook(book: StreamLibrary.Station) {
+        if (BuildConfig.PLAY_MEDIA_MODE || !BookNavigation.mayHaveContents(book.name)) {
+            selectPhoneSource(book.id)
+            return
+        }
+        var cancelled = false
+        val progress = AlertDialog.Builder(this).setTitle(book.name).setMessage("Finding chapters…")
+            .setNegativeButton("Cancel") { _, _ -> cancelled = true }
+            .setOnCancelListener { cancelled = true }.create()
+        progress.show()
+        BookNavigation.load(this, book) { chapters ->
+            if (!cancelled && !isDestroyed && !isFinishing) {
+                progress.dismiss()
+                if (chapters.isEmpty()) selectPhoneSource(book.id)
+                else {
+                    val choices = BookNavigation.choices(book, chapters)
+                    AlertDialog.Builder(this).setTitle(book.name)
+                        .setItems(choices.map { it.title }.toTypedArray()) { _, i -> selectPhoneSource(choices[i].id) }
+                        .setNegativeButton("Cancel", null).show()
+                }
             }
         }
     }

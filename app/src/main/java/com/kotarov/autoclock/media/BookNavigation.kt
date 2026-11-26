@@ -1,0 +1,66 @@
+package com.kotarov.autoclock.media
+
+import android.content.Context
+import android.net.Uri
+import android.os.CancellationSignal
+import android.os.Handler
+import android.os.Looper
+import java.io.File
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+
+/** On-demand indexing without starting TTS, no full text retained. */
+internal object BookNavigation {
+    const val BOOK_PREFIX = "book:"
+    private const val CHAPTER_PREFIX = "chapter:"
+    data class Choice(val id: String, val title: String)
+    private val handler = Handler(Looper.getMainLooper())
+    private val worker = ThreadPoolExecutor(0, 1, 10L, TimeUnit.SECONDS, LinkedBlockingQueue<Runnable>(3))
+    // Only the worker accesses this bounded cache; source modification invalidates it.
+    private val cache = LinkedHashMap<String, List<BookContentsIndex.Chapter>>(8, 0.75f, true)
+    fun mayHaveContents(name: String): Boolean = BookFormat.detect(name, null) != BookFormat.PDF
+    fun choices(book: StreamLibrary.Station, chapters: List<BookContentsIndex.Chapter>): List<Choice> =
+        listOf(Choice(book.id, "Continue reading"), Choice(CHAPTER_PREFIX + book.id + ":0", "From beginning")) +
+            chapters.map { Choice(CHAPTER_PREFIX + book.id + ":" + it.offset, it.title) }
+    fun parseChoice(id: String?): Pair<String, Int>? {
+        if (id == null || !id.startsWith(CHAPTER_PREFIX)) return null
+        val value = id.removePrefix(CHAPTER_PREFIX)
+        val book = value.substringBeforeLast(':', "")
+        val offset = value.substringAfterLast(':').toIntOrNull() ?: return null
+        return if (book.isNotBlank() && offset in 0..TextReading.MAX_CHARS) book to offset else null
+    }
+    fun load(context: Context, book: StreamLibrary.Station, done: (List<BookContentsIndex.Chapter>) -> Unit) {
+        val app = context.applicationContext
+        try {
+            worker.execute {
+                val result = runCatching {
+                    val uri = Uri.parse(book.url)
+                    val format = BookFormat.detect(book.name, app.contentResolver.getType(uri)) ?: BookFormat.PLAIN
+                    if (format == BookFormat.PDF) return@runCatching emptyList<BookContentsIndex.Chapter>()
+                    val signal = CancellationSignal()
+                    val fingerprint = BookDiskCache.fingerprint(app, uri, signal)
+                    if (fingerprint != null) cache[fingerprint]?.let { return@runCatching it }
+                    val dir = File(app.cacheDir, "text-reading").apply { mkdirs() }
+                    val index = BookContentsIndex(format == BookFormat.PLAIN || format == BookFormat.RTF)
+                    val deadline = android.os.SystemClock.elapsedRealtime() + 45_000L
+                    val descriptor = app.contentResolver.openAssetFileDescriptor(uri, "r", signal) ?: error("No file")
+                    descriptor.use { afd ->
+                        afd.createInputStream().use { input ->
+                            BookExtractor.extract(format, input, dir, {
+                                require(!Thread.currentThread().isInterrupted && android.os.SystemClock.elapsedRealtime() < deadline)
+                            }, index = index, emit = index::append)
+                        }
+                    }
+                    val chapters = index.chapters()
+                    if (fingerprint != null) {
+                        cache[fingerprint] = chapters
+                        while (cache.size > 8) cache.remove(cache.keys.first())
+                    }
+                    chapters
+                }.getOrDefault(emptyList())
+                handler.post { done(result) }
+            }
+        } catch (_: java.util.concurrent.RejectedExecutionException) { done(emptyList()) }
+    }
+}
