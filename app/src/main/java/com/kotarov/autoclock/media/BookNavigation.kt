@@ -14,6 +14,7 @@ import java.util.concurrent.TimeUnit
 internal object BookNavigation {
     const val BOOK_PREFIX = "book:"
     private const val CHAPTER_PREFIX = "chapter:"
+    private const val BEGIN_PREFIX = "bookbegin:"
     data class Choice(val id: String, val title: String)
     private val handler = Handler(Looper.getMainLooper())
     private val worker = ThreadPoolExecutor(0, 1, 10L, TimeUnit.SECONDS, LinkedBlockingQueue<Runnable>(3))
@@ -21,10 +22,12 @@ internal object BookNavigation {
     private val cache = LinkedHashMap<String, List<BookContentsIndex.Chapter>>(8, 0.75f, true)
     fun mayHaveContents(name: String): Boolean = BookFormat.detect(name, null) != BookFormat.PDF
     fun choices(book: StreamLibrary.Station, chapters: List<BookContentsIndex.Chapter>): List<Choice> =
-        listOf(Choice(book.id, "Continue reading"), Choice(CHAPTER_PREFIX + book.id + ":0", "From beginning")) +
+        listOf(Choice(book.id, "Continue reading"), Choice(BEGIN_PREFIX + book.id, "From beginning")) +
             chapters.map { Choice(CHAPTER_PREFIX + book.id + ":" + it.offset, it.title) }
     fun parseChoice(id: String?): Pair<String, Int>? {
-        if (id == null || !id.startsWith(CHAPTER_PREFIX)) return null
+        if (id == null) return null
+        if (id.startsWith(BEGIN_PREFIX)) return id.removePrefix(BEGIN_PREFIX).takeIf { it.isNotBlank() }?.let { it to 0 }
+        if (!id.startsWith(CHAPTER_PREFIX)) return null
         val value = id.removePrefix(CHAPTER_PREFIX)
         val book = value.substringBeforeLast(':', "")
         val offset = value.substringAfterLast(':').toIntOrNull() ?: return null
@@ -44,14 +47,28 @@ internal object BookNavigation {
                     val dir = File(app.cacheDir, "text-reading").apply { mkdirs() }
                     val index = BookContentsIndex(format == BookFormat.PLAIN || format == BookFormat.RTF)
                     val deadline = android.os.SystemClock.elapsedRealtime() + 45_000L
-                    val descriptor = app.contentResolver.openAssetFileDescriptor(uri, "r", signal) ?: error("No file")
-                    descriptor.use { afd ->
-                        afd.createInputStream().use { input ->
-                            BookExtractor.extract(format, input, dir, {
-                                require(!Thread.currentThread().isInterrupted && android.os.SystemClock.elapsedRealtime() < deadline)
-                            }, index = index, emit = index::append)
-                        }
-                    }
+                    // Produce the same UTF-16 cache while indexing, so first Play need not extract again.
+                    val key = fingerprint?.let { BookDiskCache.key(it, format.name + ":v2") }
+                    val temp = if (key != null && BookDiskCache.read(dir, key) == null)
+                        File.createTempFile("book-", ".utf16", dir) else null
+                    try {
+                        val output = temp?.outputStream()?.buffered()?.writer(Charsets.UTF_16BE)
+                        try {
+                            val descriptor = app.contentResolver.openAssetFileDescriptor(uri, "r", signal) ?: error("No file")
+                            descriptor.use { afd ->
+                                afd.createInputStream().use { input ->
+                                    BookExtractor.extract(format, input, dir, {
+                                        require(!Thread.currentThread().isInterrupted && android.os.SystemClock.elapsedRealtime() < deadline)
+                                    }, index = index) { text ->
+                                        index.append(text)
+                                        output?.write(text)
+                                    }
+                                }
+                            }
+                        } finally { output?.close() }
+                        if (temp != null && key != null && temp.length() == index.offset.toLong() * 2L)
+                            BookDiskCache.store(dir, key, temp)
+                    } finally { temp?.delete() }
                     val chapters = index.chapters()
                     if (fingerprint != null) {
                         cache[fingerprint] = chapters
