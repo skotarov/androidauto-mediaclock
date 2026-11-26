@@ -27,7 +27,8 @@ internal object HtmlBookExtractor {
             android.text.Html.fromHtml(match.value, 0).toString().takeIf { it.isNotEmpty() } ?: match.value
         }.getOrDefault(match.value)
     }
-    fun extract(input: InputStream, check: () -> Unit, emit: (String) -> Unit) {
+    fun extract(input: InputStream, check: () -> Unit, emit: (String) -> Unit) = extract(input, check, emit, null)
+    fun extract(input: InputStream, check: () -> Unit, emit: (String) -> Unit, index: BookContentsIndex?) {
         val bytes = input.readBytes()
         check()
         val probe = String(bytes, 0, minOf(bytes.size, 4096), Charsets.ISO_8859_1)
@@ -40,6 +41,8 @@ internal object HtmlBookExtractor {
         var i = 0
         val suppressed = ArrayDeque<String>()
         var raw: String? = null
+        val headings = setOf("h1","h2","h3","h4","h5","h6")
+        var heading: String? = null
         val out = StringBuilder(4096)
         fun flush() { if (out.isNotEmpty()) { emit(out.toString()); out.setLength(0) } }
         fun add(value: String) { out.append(value); if (out.length >= 4096) flush() }
@@ -83,7 +86,10 @@ internal object HtmlBookExtractor {
                     if (name in suppressed) {
                         while (suppressed.isNotEmpty()) { if (suppressed.removeLast() == name) break }
                     }
-                } else if (name in blocks) add("\n")
+                } else if (name in blocks) {
+                    if (index != null && heading == name) { flush(); index.endHeading(); heading = null }
+                    add("\n")
+                }
                 continue
             }
             val self = token.endsWith("/") || name in voids
@@ -93,7 +99,10 @@ internal object HtmlBookExtractor {
                     suppressed.addLast(name)
                     if (name == "script" || name == "style") raw = name
                 }
-            } else if (name in blocks) add("\n")
+            } else if (name in blocks) {
+                add("\n")
+                if (index != null && name in headings) { flush(); index.beginHeading(); heading = name }
+            }
         }
         flush()
     }

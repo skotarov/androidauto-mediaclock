@@ -33,7 +33,7 @@ internal object BookExtractor {
     }
 
     fun extract(format: BookFormat, input: InputStream, directory: File,
-                check: () -> Unit, nativePdf: Boolean = false, emit: (String) -> Unit) {
+                check: () -> Unit, nativePdf: Boolean = false, index: BookContentsIndex? = null, emit: (String) -> Unit) {
         val budget = Budget(MAX_BYTES)
         when (format) {
             BookFormat.PLAIN -> plain(Limited(input, budget, MAX_BYTES, check), check, emit)
@@ -43,9 +43,9 @@ internal object BookExtractor {
                     PdfBookExtractor.extractNative(bounded, directory, check, emit)
                 else LegacyPdfExtractor.extract(bounded, directory, check, emit)
             }
-            BookFormat.HTML -> HtmlBookExtractor.extract(Limited(input, budget, 4L * 1024 * 1024, check), check, emit)
+            BookFormat.HTML -> HtmlBookExtractor.extract(Limited(input, budget, 4L * 1024 * 1024, check), check, emit, index)
             BookFormat.RTF -> RtfBookExtractor.extract(Limited(input, budget, MAX_BYTES, check), check, emit)
-            BookFormat.FB2 -> xmlText(Limited(input, budget, MAX_BYTES, check), format, check, emit)
+            BookFormat.FB2 -> xmlText(Limited(input, budget, MAX_BYTES, check), format, check, emit, index)
             BookFormat.EPUB, BookFormat.DOCX -> {
                 val archive = File.createTempFile("book-", ".zip", directory)
                 try {
@@ -61,7 +61,7 @@ internal object BookExtractor {
                             return Limited(zip.getInputStream(e), budget, MAX_ENTRY, check)
                         }
                         if (format == BookFormat.DOCX) {
-                            entry("word/document.xml").use { xmlText(it, format, check, emit) }
+                            entry("word/document.xml").use { xmlText(it, format, check, emit, index) }
                         } else {
                             val packagePath = entry("META-INF/container.xml").use { stream ->
                                 var path: String? = null
@@ -74,6 +74,8 @@ internal object BookExtractor {
                             val opf = resolve("", packagePath)
                             val manifest = LinkedHashMap<String, Pair<String, String>>()
                             val spine = ArrayList<String>()
+                            var navPath: String? = null
+                            var ncxPath: String? = null
                             entry(opf).use { stream ->
                                 events(stream, check) { p ->
                                     if (p.eventType == XmlPullParser.START_TAG) when (p.name) {
@@ -81,7 +83,11 @@ internal object BookExtractor {
                                             val id = p.getAttributeValue(null, "id")
                                             val href = p.getAttributeValue(null, "href")
                                             val mime = p.getAttributeValue(null, "media-type").orEmpty()
-                                            if (id != null && href != null) manifest[id] = href to mime
+                                            if (id != null && href != null) {
+                                                manifest[id] = href to mime
+                                                if (p.getAttributeValue(null, "properties").orEmpty().split(Regex("\\s+")).contains("nav")) navPath = href
+                                                if (mime == "application/x-dtbncx+xml") ncxPath = href
+                                            }
                                             require(manifest.size <= 10000)
                                         }
                                         "itemref" -> {
@@ -93,12 +99,36 @@ internal object BookExtractor {
                                 }
                             }
                             require(spine.isNotEmpty()) { "Empty EPUB spine" }
+                            if (index != null) {
+                                fun readNavigation(href: String, ncx: Boolean) {
+                                    val path = resolve(opf, href)
+                                    entry(path).use { stream ->
+                                        val bytes = stream.readBytesBounded(2 * 1024 * 1024)
+                                        val doc = org.jsoup.Jsoup.parse(bytes.inputStream(), null, "", org.jsoup.parser.Parser.xmlParser())
+                                        if (ncx) {
+                                            for (point in doc.getElementsByTag("navPoint")) {
+                                                val label = point.children().firstOrNull { it.tagName().equals("navLabel", true) }?.text().orEmpty()
+                                                val src = point.children().firstOrNull { it.tagName().equals("content", true) }?.attr("src").orEmpty()
+                                                index.navigation(label, navigationTarget(path, src))
+                                            }
+                                        } else {
+                                            val nav = doc.getElementsByTag("nav").firstOrNull { it.attr("epub:type").split(' ').contains("toc") || it.attr("role") == "doc-toc" }
+                                            for (link in nav?.getElementsByTag("a").orEmpty())
+                                                index.navigation(link.text(), navigationTarget(path, link.attr("href")))
+                                        }
+                                    }
+                                }
+                                navPath?.let { runCatching { readNavigation(it, false) }; check() }
+                                if (!index.hasNavigation()) ncxPath?.let { runCatching { readNavigation(it, true) }; check() }
+                            }
                             var chapters = 0
                             for (id in spine) {
                                 check()
                                 val item = manifest[id] ?: error("Missing EPUB spine item")
                                 if (item.second !in listOf("application/xhtml+xml", "text/html")) continue
-                                entry(resolve(opf, item.first)).use { xmlText(it, format, check, emit) }
+                                val chapterPath = resolve(opf, item.first)
+                                index?.anchor(chapterPath)
+                                entry(chapterPath).use { xmlText(it, format, check, emit, index, chapterPath) }
                                 emit("\n\n")
                                 chapters++
                             }
@@ -109,6 +139,25 @@ internal object BookExtractor {
             }
         }
     }
+
+    private fun InputStream.readBytesBounded(limit: Int): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        val buffer = ByteArray(8192)
+        while (true) {
+            val n = read(buffer)
+            if (n < 0) break
+            require(out.size() + n <= limit)
+            out.write(buffer, 0, n)
+        }
+        return out.toByteArray()
+    }
+
+    private fun navigationTarget(base: String, href: String): String? = runCatching {
+        if (href.isBlank()) return@runCatching null
+        val uri = URI(href)
+        val path = if (uri.path.isNullOrEmpty()) base else resolve(base, href)
+        path + (uri.fragment?.let { "#" + it } ?: "")
+    }.getOrNull()
 
     private fun resolve(base: String, href: String): String {
         val uri = URI(href)
@@ -133,11 +182,14 @@ internal object BookExtractor {
         }
     }
 
-    private fun xmlText(input: InputStream, format: BookFormat, check: () -> Unit, emit: (String) -> Unit) {
+    private fun xmlText(input: InputStream, format: BookFormat, check: () -> Unit, emit: (String) -> Unit, index: BookContentsIndex? = null, chapterPath: String? = null) {
         var bodyDepth = -1
         var skipDepth = -1
         var textDepth = -1
         var emitted = false
+        var headingDepth = -1
+        var paragraphDepth = -1
+        var paragraphStart = 0
         val blocks = setOf("p", "div", "section", "article", "h1", "h2", "h3", "h4", "h5", "h6", "li",
             "title", "subtitle", "v", "stanza", "tr", "td", "br", "empty-line")
         val skip = setOf("script", "style", "svg", "math", "binary", "nav")
@@ -153,6 +205,29 @@ internal object BookExtractor {
                         skipDepth = p.depth
                     }
                     if (bodyDepth >= 0 && skipDepth < 0) {
+                        if (index != null) {
+                            if (chapterPath != null) {
+                                val id = p.getAttributeValue(null, "id") ?: p.getAttributeValue("http://www.w3.org/XML/1998/namespace", "id")
+                                if (!id.isNullOrBlank()) index.anchor("$chapterPath#$id")
+                            }
+                            if (headingDepth < 0 && ((format == BookFormat.FB2 && name == "title") ||
+                                    (format == BookFormat.EPUB && name in setOf("h1","h2","h3","h4","h5","h6")))) {
+                                headingDepth = p.depth
+                                index.beginHeading()
+                            }
+                            if (format == BookFormat.DOCX && name == "p") {
+                                paragraphDepth = p.depth
+                                paragraphStart = index.offset
+                            }
+                            if (format == BookFormat.DOCX && name == "pstyle" && paragraphDepth >= 0 && headingDepth < 0) {
+                                val style = (p.getAttributeValue("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "val")
+                                    ?: p.getAttributeValue(null, "val")).orEmpty()
+                                if (style.matches(Regex("(?i)(heading|title|заглавие)[ _-]*[0-9]*"))) {
+                                    headingDepth = paragraphDepth
+                                    index.beginHeading(paragraphStart)
+                                }
+                            }
+                        }
                         if (format == BookFormat.DOCX && name == "t") textDepth = p.depth
                         if (name == "br" || name == "empty-line" || name == "tab") emit("\n")
                     }
@@ -168,6 +243,8 @@ internal object BookExtractor {
                     if (skipDepth >= 0) {
                         if (p.depth == skipDepth) skipDepth = -1
                     } else if (bodyDepth >= 0) {
+                        if (p.depth == headingDepth) { index?.endHeading(); headingDepth = -1 }
+                        if (p.depth == paragraphDepth) paragraphDepth = -1
                         if (name in blocks) emit("\n")
                         if (p.depth == textDepth) textDepth = -1
                         if (p.depth == bodyDepth) bodyDepth = -1
