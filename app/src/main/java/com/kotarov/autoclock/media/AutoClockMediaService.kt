@@ -767,6 +767,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             // The route callback may arrive just before the call-state event.
             // Treat a confirmed phone call as an interruption, not a stream failure.
             if (!playMode && callMonitor.isCallNow()) {
+                // Synchronize the monitor's reported state as well, so IDLE can resume.
+                callMonitor.refreshPermission()
                 onCallChanged(true)
                 return@sync
             }

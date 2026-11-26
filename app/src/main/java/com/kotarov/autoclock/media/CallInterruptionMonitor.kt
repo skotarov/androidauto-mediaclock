@@ -78,7 +78,7 @@ internal class CallInterruptionMonitor(
         registerPhone()
         if (Build.VERSION.SDK_INT >= 31 && audio != null) {
             removeMode = runCatching {
-                val manager = audio
+                val manager = requireNotNull(audio)
                 val listener = AudioManager.OnModeChangedListener { update() }
                 manager.addOnModeChangedListener(Executor { task -> handler.post(task) }, listener)
                 val cancel: () -> Unit = { manager.removeOnModeChangedListener(listener) }
