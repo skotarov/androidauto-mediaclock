@@ -290,7 +290,7 @@ class CustomStreamPlayer(context: Context) {
             if (validLocal(url)) media.setDataSource(app, android.net.Uri.parse(url))
             else if (URI(url).scheme.equals("https", true)) {
                 // Prevent HTTPS streams from forwarding private URL parameters to HTTP.
-                media.setDataSource(url, mapOf("android-allow-cross-domain-redirect" to "0"))
+                media.setDataSource(app, android.net.Uri.parse(url), mapOf("android-allow-cross-domain-redirect" to "0"))
             } else media.setDataSource(url)
             handler.postDelayed(timeout, 20000L)
             media.prepareAsync()
