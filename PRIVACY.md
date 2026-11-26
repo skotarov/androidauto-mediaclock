@@ -53,3 +53,7 @@ When you explicitly add a public HTTPS webpage, the phone requests that page dir
 ## Web Media folders (Lite beta)
 
 Public HTTPS page or playlist URLs and folder names are stored locally. Opening a folder fetches the page directly and extracts public media links without executing scripts or loading embedded players. No scheduled refresh runs. Selecting an item stores its most recently selected URL locally and connects directly to that media provider using the existing player. A provider receives ordinary network information. Deleting a folder removes its local reference; it does not change remote content.
+
+## Local folders (Lite beta)
+
+The system folder picker grants read access only to the directory you choose. Its reference and permission are stored on the device. Opening the folder lists supported immediate audio/video files and can play them sequentially. File contents are not uploaded or copied by the folder feature. Removing the folder releases the stored access permission when no other entry uses that URI.

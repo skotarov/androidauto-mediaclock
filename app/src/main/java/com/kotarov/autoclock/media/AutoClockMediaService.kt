@@ -328,11 +328,11 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         result: Result<MutableList<MediaBrowserCompat.MediaItem>>
     ) {
         if (parentId != ROOT_ID) {
-            val page = StreamLibrary.list(prefs).firstOrNull { it.mediaPage && it.id == parentId }
+            val page = StreamLibrary.list(prefs).firstOrNull { it.browsable && it.id == parentId }
             if (page == null) { result.sendResult(mutableListOf()); return }
             result.detach()
-            MediaPageDirectory.load(page) { outcome ->
-                val valid = StreamLibrary.list(prefs).any { it.id == page.id && it.url == page.url && it.mediaPage }
+            MediaPageDirectory.load(this, page) { outcome ->
+                val valid = StreamLibrary.list(prefs).any { it.id == page.id && it.url == page.url && it.browsable }
                 val children = mutableListOf<MediaBrowserCompat.MediaItem>()
                 if (valid) outcome.getOrNull().orEmpty().forEach { item ->
                     val desc = MediaDescriptionCompat.Builder().setMediaId(item.id).setTitle(item.name)
@@ -350,8 +350,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         if (!playMode) items.add(MediaBrowserCompat.MediaItem(alert, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
         StreamLibrary.list(prefs).forEach { station ->
             val desc = MediaDescriptionCompat.Builder().setMediaId(station.id)
-                .setTitle(station.name).setIconBitmap(station.bitmap() ?: sourceIcon(if (station.mediaPage) R.drawable.ic_source_folder else if (station.textFile) R.drawable.ic_source_text else if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast)).build()
-            items.add(MediaBrowserCompat.MediaItem(desc, if (station.mediaPage) MediaBrowserCompat.MediaItem.FLAG_BROWSABLE else MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
+                .setTitle(station.name).setIconBitmap(station.bitmap() ?: sourceIcon(if (station.localFolder) R.drawable.ic_source_folder else if (station.mediaPage) R.drawable.ic_source_web else if (station.textFile) R.drawable.ic_source_text else if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast)).build()
+            items.add(MediaBrowserCompat.MediaItem(desc, if (station.browsable) MediaBrowserCompat.MediaItem.FLAG_BROWSABLE else MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
         }
         result.sendResult(items)
     }
@@ -792,7 +792,14 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             }
             lastPlayback = null
             publishPlaybackState()
-            if (error == "Media ended") setWeatherEnabled(false)
+            if (error == "Media ended") {
+                val folder = StreamLibrary.selectedFolder(prefs)
+                if (folder != null && station != null && liteRequested) {
+                    advanceFolder(folder, station)
+                    return@sync
+                }
+                setWeatherEnabled(false)
+            }
             if (clientActive && !noticePlaying && testNotice == null) {
                 testNotice = CityAnnouncement.Notice("ℹ️", error)
                 handler.removeCallbacks(hideTestNotice)
@@ -802,6 +809,18 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         }
         publishPlaybackState()
         refreshPositionSubtitle()
+    }
+
+    private fun advanceFolder(folder: StreamLibrary.Station, ended: StreamLibrary.Station) {
+        MediaPageDirectory.load(this, folder) { outcome ->
+            if (!clientActive || !liteRequested || activeSource?.id != ended.id ||
+                StreamLibrary.selectedFolder(prefs)?.id != folder.id) return@load
+            val items = outcome.getOrNull().orEmpty()
+            val index = items.indexOfFirst { it.id == ended.id }
+            val next = if (index >= 0) items.getOrNull(index + 1) else null
+            if (next != null && selectSource(next.id)) setWeatherEnabled(true)
+            else setWeatherEnabled(false)
+        }
     }
 
     private fun playNotice(body: String) {
@@ -929,7 +948,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             stopPlaybackForeground()
         } else {
             if (activeSource == null) {
-                val first = StreamLibrary.list(prefs).firstOrNull { !it.mediaPage }
+                val first = StreamLibrary.list(prefs).firstOrNull { !it.browsable }
                 if (first != null) selectSource(first.id)
             }
             if (activeSource == null) {

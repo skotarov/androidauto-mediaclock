@@ -15,7 +15,8 @@ object StreamLibrary {
     private const val KEY_CHILD = "stream_selected_web_child_v120"
     const val ALERT_ID = "autoclock_clock"
     data class Station(val id: String, val name: String, val url: String, val icon: String = "", val local: Boolean = false,
-        val textFile: Boolean = false, val language: String = "auto", val mediaPage: Boolean = false) {
+        val textFile: Boolean = false, val language: String = "auto", val mediaPage: Boolean = false, val localFolder: Boolean = false) {
+        val browsable: Boolean get() = mediaPage || localFolder
         fun bitmap(): Bitmap? = if (icon.isBlank()) null else runCatching {
             val bytes = Base64.decode(icon, Base64.DEFAULT)
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
@@ -42,7 +43,7 @@ object StreamLibrary {
             val local = o.optBoolean("local", false)
             if (!(if (local) CustomStreamPlayer.validLocal(url) else CustomStreamPlayer.valid(url))) null
             else Station(o.getString("id"), o.optString("name").ifBlank { defaultName(url) },
-                url, o.optString("icon"), local, local && o.optBoolean("textFile", false), o.optString("language", "auto"), !local && o.optBoolean("mediaPage", false))
+                url, o.optString("icon"), local, local && o.optBoolean("textFile", false), o.optString("language", "auto"), !local && o.optBoolean("mediaPage", false), local && o.optBoolean("localFolder", false))
         }
         }.getOrDefault(emptyList())
         cachedRaw = raw
@@ -51,8 +52,8 @@ object StreamLibrary {
     fun selected(prefs: SharedPreferences): Station? {
         val id = prefs.getString(KEY_SELECTED, ALERT_ID)
         if (id == ALERT_ID) return null
-        list(prefs).firstOrNull { it.id == id && !it.mediaPage }?.let { return it }
-        return if (id?.startsWith("webmedia:") == true) selectedChild(prefs)?.second else null
+        list(prefs).firstOrNull { it.id == id && !it.browsable }?.let { return it }
+        return if (id?.startsWith("webmedia:") == true || id?.startsWith("foldermedia:") == true) selectedChild(prefs)?.second else null
     }
     private fun selectedChild(prefs: SharedPreferences): Pair<String, Station>? = runCatching {
         val raw = prefs.getString(KEY_CHILD, "").orEmpty()
@@ -60,22 +61,25 @@ object StreamLibrary {
         val o = JSONObject(raw)
         val id = o.getString("id")
         if (id != prefs.getString(KEY_SELECTED, ALERT_ID)) return@runCatching null
-        val folder = list(prefs).firstOrNull { it.mediaPage && it.id == o.getString("parent") &&
+        val folder = list(prefs).firstOrNull { it.browsable && it.id == o.getString("parent") &&
             it.url == o.getString("pageUrl") } ?: return@runCatching null
         val url = o.getString("url")
-        if (!CustomStreamPlayer.valid(url)) return@runCatching null
-        folder.id to Station(id, o.getString("name"), url)
+        if (!(if (folder.localFolder) CustomStreamPlayer.validLocal(url) else CustomStreamPlayer.valid(url))) return@runCatching null
+        folder.id to Station(id, o.getString("name"), url, local = folder.localFolder)
     }.getOrNull()
+    fun selectedFolder(prefs: SharedPreferences): Station? = selectedChild(prefs)?.first?.let { id ->
+        list(prefs).firstOrNull { it.id == id && it.localFolder }
+    }
     fun selectedRootId(prefs: SharedPreferences): String =
         selectedChild(prefs)?.first ?: prefs.getString(KEY_SELECTED, ALERT_ID).orEmpty()
     fun select(prefs: SharedPreferences, id: String?): Boolean {
         if (id == null) return false
-        if (id == ALERT_ID || list(prefs).any { it.id == id && !it.mediaPage }) {
+        if (id == ALERT_ID || list(prefs).any { it.id == id && !it.browsable }) {
             prefs.edit().remove(KEY_CHILD).putString(KEY_SELECTED, id).apply()
             return true
         }
         val hit = MediaPageDirectory.find(id)
-        if (hit != null && list(prefs).any { it.mediaPage && it.id == hit.parent.id && it.url == hit.parent.url }) {
+        if (hit != null && list(prefs).any { it.browsable && it.id == hit.parent.id && it.url == hit.parent.url }) {
             val item = hit.item
             val o = JSONObject().put("id", item.id).put("parent", hit.parent.id).put("pageUrl", hit.parent.url)
                 .put("url", item.url).put("name", item.name)
@@ -87,18 +91,19 @@ object StreamLibrary {
     fun save(prefs: SharedPreferences, stations: List<Station>) {
         val a = JSONArray()
         stations.forEach { s ->
-            a.put(JSONObject().put("id", s.id).put("name", s.name).put("url", s.url).put("icon", s.icon).put("local", s.local).put("textFile", s.textFile).put("language", s.language).put("mediaPage", s.mediaPage))
+            a.put(JSONObject().put("id", s.id).put("name", s.name).put("url", s.url).put("icon", s.icon).put("local", s.local).put("textFile", s.textFile).put("language", s.language).put("mediaPage", s.mediaPage).put("localFolder", s.localFolder))
         }
         val edit = prefs.edit().putString(KEY_LIST, a.toString())
         val child = selectedChild(prefs)
         val keepChild = child != null && stations.any { next ->
-            next.mediaPage && next.id == child.first && list(prefs).any { old -> old.id == next.id && old.url == next.url }
+            next.browsable && next.id == child.first && list(prefs).any { old -> old.id == next.id && old.url == next.url }
         }
-        if (!keepChild && stations.none { it.id == prefs.getString(KEY_SELECTED, ALERT_ID) && !it.mediaPage })
+        if (!keepChild && stations.none { it.id == prefs.getString(KEY_SELECTED, ALERT_ID) && !it.browsable })
             edit.remove(KEY_CHILD).putString(KEY_SELECTED, ALERT_ID)
         edit.apply()
     }
     fun newStation(url: String) = Station("stream:" + UUID.randomUUID().toString(), defaultName(url), url)
+    fun newFolder(url: String, name: String) = Station("folder:" + UUID.randomUUID().toString(), name, url, local = true, localFolder = true)
     fun newMediaPage(url: String, name: String) = Station("page:" + UUID.randomUUID().toString(), name, url, mediaPage = true)
     fun newFile(uri: String, name: String, textFile: Boolean = false) = Station("file:" + UUID.randomUUID().toString(),
         name.take(128).ifBlank { "Local file" }, uri, local = true, textFile = textFile)

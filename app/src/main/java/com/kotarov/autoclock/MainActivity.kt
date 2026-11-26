@@ -340,6 +340,11 @@ class MainActivity : Activity() {
             isAllCaps = false
             setOnClickListener { pickFile() }
         }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(8) })
+        if (!BuildConfig.PLAY_MEDIA_MODE) addRow.addView(Button(this).apply {
+            text = "Folder"
+            isAllCaps = false
+            setOnClickListener { pickFolder() }
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(8) })
         addSpaced(streams, addRow)
         if (!BuildConfig.PLAY_MEDIA_MODE) {
             val webRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -790,13 +795,13 @@ class MainActivity : Activity() {
             row.addView(ImageView(this).apply {
                 val icon = station.bitmap()
                 if (icon != null) setImageBitmap(icon)
-                else setImageResource(if (station.mediaPage) R.drawable.ic_source_folder else if (station.textFile) R.drawable.ic_source_text else if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast)
+                else setImageResource(if (station.localFolder) R.drawable.ic_source_folder else if (station.mediaPage) R.drawable.ic_source_web else if (station.textFile) R.drawable.ic_source_text else if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast)
                 contentDescription = station.name
-                if (station.mediaPage) setOnClickListener { openMediaPage(station) }
+                if (station.browsable) setOnClickListener { openMediaPage(station) }
             }, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginEnd = dp(8) })
             val title = text(station.name, 16f, 0).apply {
                 setTextColor(if (selected == station.id) accent else ink)
-                setOnClickListener { if (station.mediaPage) openMediaPage(station) else selectPhoneSource(station.id) }
+                setOnClickListener { if (station.browsable) openMediaPage(station) else selectPhoneSource(station.id) }
             }
             sourceTitles[station.id] = title
             row.addView(title, LinearLayout.LayoutParams(
@@ -805,7 +810,7 @@ class MainActivity : Activity() {
                 text = "Edit"
                 isAllCaps = false
                 minWidth = 0; minimumWidth = 0
-                setOnClickListener { if (station.mediaPage) editMediaPage(station) else if (station.local) editFileName(station) else editStream(station) }
+                setOnClickListener { if (station.localFolder) editFileName(station) else if (station.mediaPage) editMediaPage(station) else if (station.local) editFileName(station) else editStream(station) }
             })
             row.addView(Button(this).apply {
                 text = "Delete"
@@ -813,7 +818,7 @@ class MainActivity : Activity() {
                 minWidth = 0; minimumWidth = 0
                 setOnClickListener {
                     AlertDialog.Builder(this@MainActivity).setTitle(station.name)
-                        .setMessage(if (station.mediaPage) "Delete media folder?" else if (station.local) "Remove file from list?" else "Delete stream?")
+                        .setMessage(if (station.browsable) "Remove folder from list?" else if (station.local) "Remove file from list?" else "Delete stream?")
                         .setNegativeButton("Cancel", null)
                         .setPositiveButton("Delete") { _, _ ->
                             val prefs = settings()
@@ -902,16 +907,16 @@ class MainActivity : Activity() {
             .setNegativeButton("Cancel") { _, _ -> cancelled = true }
             .setOnCancelListener { cancelled = true }.create()
         progress.show()
-        MediaPageDirectory.load(page) { result ->
+        MediaPageDirectory.load(this, page) { result ->
             if (!cancelled && !isDestroyed && !isFinishing) {
                 progress.dismiss()
                 val items = result.getOrNull().orEmpty()
                 if (items.isEmpty()) AlertDialog.Builder(this).setTitle(page.name)
-                    .setMessage("No direct playable media found, or page unavailable.")
+                    .setMessage(if (page.localFolder) "No audio or video files found, or folder unavailable." else "No direct playable media found, or page unavailable.")
                     .setPositiveButton("OK", null).show()
                 else AlertDialog.Builder(this).setTitle(page.name)
-                    .setItems(items.map { it.name + " · " + it.format }.toTypedArray()) { _, index ->
-                        selectPhoneSource(items[index].id)
+                    .setItems((if (page.localFolder) listOf("▶ Play folder") + items.map { it.name } else items.map { it.name + " · " + it.format }).toTypedArray()) { _, index ->
+                        selectPhoneSource(items[if (page.localFolder) (index - 1).coerceAtLeast(0) else index].id)
                     }.setNegativeButton("Cancel", null).show()
             }
         }
@@ -988,6 +993,39 @@ class MainActivity : Activity() {
         dialog.show()
     }
 
+    private fun pickFolder() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        }
+        runCatching { startActivityForResult(intent, FOLDER_REQUEST) }.onFailure {
+            android.widget.Toast.makeText(this, "Folder picker unavailable", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun addLocalFolder(uri: Uri) {
+        val granted = runCatching {
+            require(android.provider.DocumentsContract.isTreeUri(uri))
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }.isSuccess
+        if (!granted) {
+            android.widget.Toast.makeText(this, "Persistent folder access unavailable", android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
+        val name = runCatching {
+            val id = android.provider.DocumentsContract.getTreeDocumentId(uri)
+            val root = android.provider.DocumentsContract.buildDocumentUriUsingTree(uri, id)
+            contentResolver.query(root, arrayOf(android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME),
+                null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+                ?: id.substringAfterLast('/').substringAfterLast(':')
+        }.getOrNull().orEmpty().ifBlank { "Folder" }
+        val p = settings()
+        val current = StreamLibrary.list(p)
+        if (current.none { it.localFolder && it.url == uri.toString() }) {
+            StreamLibrary.save(p, current + StreamLibrary.newFolder(uri.toString(), name.take(128)))
+            renderStreams()
+        }
+    }
+
     private fun pickFile() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
@@ -1006,7 +1044,9 @@ class MainActivity : Activity() {
     @Deprecated("Android document picker callback")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != FILE_REQUEST || resultCode != RESULT_OK) return
+        if (resultCode != RESULT_OK) return
+        if (requestCode == FOLDER_REQUEST) { data?.data?.let { addLocalFolder(it) }; return }
+        if (requestCode != FILE_REQUEST) return
         val uri = data?.data ?: return
         if (!CustomStreamPlayer.validLocal(uri.toString())) return
         val mime = runCatching { contentResolver.getType(uri) }.getOrNull()
@@ -1295,5 +1335,6 @@ class MainActivity : Activity() {
         private const val LOCATION_REQUEST = 7401
         private const val CALL_PERMISSION_REQUEST = 7403
         private const val FILE_REQUEST = 7402
+        private const val FOLDER_REQUEST = 7404
     }
 }

@@ -1,5 +1,6 @@
 package com.kotarov.autoclock.media
 
+import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import java.util.concurrent.LinkedBlockingQueue
@@ -19,13 +20,14 @@ internal object MediaPageDirectory {
         cached.items.firstOrNull { it.id == id }?.let { Hit(cached.parent, it) }
     }
 
-    fun load(page: StreamLibrary.Station, done: (Result<List<MediaPageParser.Item>>) -> Unit) {
+    fun load(context: Context, page: StreamLibrary.Station, done: (Result<List<MediaPageParser.Item>>) -> Unit) {
+        val app = context.applicationContext
         val key = page.id + "|" + page.url
         pending[key]?.let { it.add(done); return }
         pending[key] = mutableListOf(done)
         try {
             worker.execute {
-                val result = runCatching { MediaPageParser.fetch(page.id, page.url) }
+                val result = runCatching { if (page.localFolder) LocalMediaFolder.list(app, page) else MediaPageParser.fetch(page.id, page.url) }
                 handler.post {
                     result.getOrNull()?.let { items ->
                         cache.remove(page.id)
