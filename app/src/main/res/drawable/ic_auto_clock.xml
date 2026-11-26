@@ -4,29 +4,28 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Transparent canvas. The clock arc is open where the road emerges;
-         no filled plate or opaque mask is needed. -->
-    <path android:strokeColor="#FFFFFF"
-        android:strokeWidth="4.8"
+    <path android:fillColor="#0A0A0C"
+        android:pathData="M54,4 A50,50 0,1 1,54,104 A50,50 0,1 1,54,4 Z" />
+    <path android:fillColor="#1C2732"
+        android:pathData="M54,13 A41,41 0,1 1,54,95 A41,41 0,1 1,54,13 Z" />
+    <path android:strokeColor="#70869A"
+        android:strokeWidth="4"
         android:strokeLineCap="round"
-        android:pathData="M29,84 A44,44 0,1 1,79,84" />
-    <path android:strokeColor="#FFFFFF"
-        android:strokeWidth="2.6"
-        android:strokeLineCap="round"
-        android:pathData="M54,10 V16 M92,48 H86 M16,48 H22 M73,15 L70,20 M35,15 L38,20 M87,29 L82,32 M21,29 L26,32 M87,67 L82,64 M21,67 L26,64" />
-    <path android:strokeColor="#FFFFFF"
-        android:strokeWidth="4.8"
-        android:strokeLineCap="round"
-        android:pathData="M46,55 L19,104 M62,55 L89,104" />
-    <path android:strokeColor="#FFFFFF"
-        android:strokeWidth="3.1"
-        android:strokeLineCap="round"
-        android:pathData="M54,61 V68 M54,76 V84 M54,93 V103" />
-    <path android:strokeColor="#FFFFFF"
-        android:strokeWidth="5.2"
+        android:pathData="M54,18 L54,25 M54,83 L54,90 M18,54 L25,54 M83,54 L90,54" />
+    <path android:strokeColor="#8297A8"
+        android:strokeWidth="4.5"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M32,32 L54,48 L77,29" />
-    <path android:fillColor="#FFFFFF"
-        android:pathData="M54,43 A5,5 0,1 1,54,53 A5,5 0,1 1,54,43 Z" />
+        android:pathData="M54,30 L54,54 L72,66" />
+    <path android:fillColor="#4F8AA8"
+        android:pathData="M54,49 A5,5 0,1 1,54,59 A5,5 0,1 1,54,49 Z" />
+    <!-- Original clock geometry and alpha silhouette, with a blue road inside the face. -->
+    <path android:strokeColor="#269EFF"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:pathData="M48,67 L35,89 M60,67 L73,89" />
+    <path android:strokeColor="#269EFF"
+        android:strokeWidth="2.8"
+        android:strokeLineCap="round"
+        android:pathData="M54,70 V75 M54,79 V83" />
 </vector>
