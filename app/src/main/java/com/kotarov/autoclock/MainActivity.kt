@@ -552,13 +552,21 @@ class MainActivity : Activity() {
         if (BuildConfig.PLAY_MEDIA_MODE) return
         if (WeatherLocation.permitted(this)) {
             WeatherStore.start(this, WeatherStore.Client.PHONE)
+            requestCallPermissionOnce()
         } else if (!hasRequestedLocation) {
             hasRequestedLocation = true
             requestLocation()
-        }
+        } else requestCallPermissionOnce()
     }
 
     private var hasRequestedLocation = false
+    private fun requestCallPermissionOnce() {
+        if (BuildConfig.PLAY_MEDIA_MODE || checkSelfPermission(Manifest.permission.READ_PHONE_STATE) == android.content.pm.PackageManager.PERMISSION_GRANTED) return
+        val prefs = settings()
+        if (prefs.getBoolean("call_permission_asked_v118", false)) return
+        prefs.edit().putBoolean("call_permission_asked_v118", true).apply()
+        requestPermissions(arrayOf(Manifest.permission.READ_PHONE_STATE), CALL_PERMISSION_REQUEST)
+    }
 
     private fun settings() =
         getSharedPreferences(AutoClockMediaService.PREFERENCES, Context.MODE_PRIVATE)
@@ -1023,10 +1031,16 @@ class MainActivity : Activity() {
         requestCode: Int, permissions: Array<out String>, grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == CALL_PERMISSION_REQUEST) {
+            settings().edit().putLong(com.kotarov.autoclock.media.CallInterruptionMonitor.PERMISSION_REFRESH,
+                android.os.SystemClock.elapsedRealtime()).apply()
+            return
+        }
         if (requestCode != LOCATION_REQUEST) return
         if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
             requestLocation()
         }
+        requestCallPermissionOnce()
     }
 
     /**
@@ -1127,6 +1141,7 @@ class MainActivity : Activity() {
 
     companion object {
         private const val LOCATION_REQUEST = 7401
+        private const val CALL_PERMISSION_REQUEST = 7403
         private const val FILE_REQUEST = 7402
     }
 }

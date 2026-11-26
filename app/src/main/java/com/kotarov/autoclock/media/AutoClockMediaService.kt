@@ -37,8 +37,11 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private var mediaError: String? = null
     private val focus by lazy { PlayAudioFocus(this) { change -> onFocusChange(change) } }
     private var foregroundAudio = false
+    private val callMonitor by lazy { CallInterruptionMonitor(this, handler) { busy -> onCallChanged(busy) } }
+    private var callBlocked = false
+    private val liteRequested: Boolean get() = ClockSelectionStore.weatherEnabled(prefs)
     private val running: Boolean
-        get() = if (playMode) requestedPlayback && !focusInterrupted else ClockSelectionStore.weatherEnabled(prefs)
+        get() = if (playMode) requestedPlayback && !focusInterrupted else liteRequested && !callBlocked
     private val cityAnnouncement = CityAnnouncement()
     private val noticeAudio by lazy { NoticeAudio(this) }
     private val streamPlayer by lazy { CustomStreamPlayer(this) }
@@ -107,6 +110,10 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == CallInterruptionMonitor.PERMISSION_REFRESH) {
+            if (!playMode && clientActive) callMonitor.refreshPermission()
+            return@OnSharedPreferenceChangeListener
+        }
         if (writingTransportPreference && key == ClockPreset.KEY_ADD_WEATHER) return@OnSharedPreferenceChangeListener
         if (!clientActive) {
             if (key == StreamLibrary.KEY_LIST || key == StreamLibrary.KEY_SELECTED) {
@@ -368,6 +375,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             publishPlaybackState()
             return
         }
+        callBlocked = callMonitor.start()
         NoticeTest.receiver = receiveTest
         if (startAudio) syncStream()
         lastWarningRevision = prefs.getLong(WeatherStore.KEY_WARNING_REV, 0L)
@@ -396,6 +404,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             stopPlaybackForeground()
         }
         clientActive = false
+        if (!playMode) callMonitor.stop()
+        callBlocked = false
         if (PerfDiagnostics.enabled) PerfDiagnostics.audio = "Idle"
         if (NoticeTest.receiver === receiveTest) NoticeTest.receiver = null
         handler.removeCallbacks(hideTestNotice)
@@ -476,6 +486,25 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         noticeAudio.stop()
     }
 
+    /** A call is a temporary interruption, not a change to the user's Play/Pause preference. */
+    private fun onCallChanged(busy: Boolean) {
+        if (!clientActive || playMode || callBlocked == busy) return
+        callBlocked = busy
+        lastPlayback = null
+        if (busy) {
+            handler.removeCallbacks(positionTick)
+            stopNoticeAudio()
+            // stop() checkpoints the local media/TTS position and relinquishes HFP.
+            streamPlayer.stop()
+        } else if (liteRequested) {
+            streamPlayer.retryFailed()
+            syncStream()
+        }
+        publishClock()
+        publishPlaybackState()
+        refreshPositionSubtitle()
+    }
+
     private fun setWeatherEnabled(enabled: Boolean) {
         if (playMode) {
             setPlayRequested(enabled)
@@ -513,7 +542,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private fun visiblePreset(): ClockPreset =
-        PlaybackDisplay.visiblePreset(selectedPreset(), running)
+        PlaybackDisplay.visiblePreset(selectedPreset(), if (playMode) running else liteRequested)
 
     private fun publishClock() {
         if (!clientActive) return
@@ -563,7 +592,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             }
         }
         val notice = cityAnnouncement.notice(tick)
-        val caption = (testNotice ?: notice)?.subtitle
+        val caption = if (callBlocked) "Call · paused" else (testNotice ?: notice)?.subtitle
         val position = if (caption == null) currentMediaPosition() else null
         val subtitle = informationText(caption, position)
         NoticeTest.publishCaption(subtitle)
@@ -666,7 +695,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private fun refreshPositionSubtitle() {
         if (!clientActive) return
         updateDiagnosticAudio()
-        val caption = if (playMode) null else (testNotice ?: cityAnnouncement.notice(SystemClock.elapsedRealtime()))?.subtitle
+        val caption = if (playMode) null else if (callBlocked) "Call · paused" else (testNotice ?: cityAnnouncement.notice(SystemClock.elapsedRealtime()))?.subtitle
         val position = if (caption == null) currentMediaPosition() else null
         val subtitle = informationText(caption, position)
         NoticeTest.publishCaption(subtitle)
@@ -715,6 +744,11 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private fun syncStream() {
+        if (!playMode && callBlocked) {
+            publishPlaybackState()
+            refreshPositionSubtitle()
+            return
+        }
         if (noticePlaying && running) {
             publishPlaybackState()
             refreshPositionSubtitle()
@@ -730,6 +764,12 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             publishPlaybackState()
             refreshPositionSubtitle()
         }) { error ->
+            // The route callback may arrive just before the call-state event.
+            // Treat a confirmed phone call as an interruption, not a stream failure.
+            if (!playMode && callMonitor.isCallNow()) {
+                onCallChanged(true)
+                return@sync
+            }
             if (playMode) {
                 setPlayRequested(false)
                 mediaError = if (error == "Media ended") null else error
@@ -752,7 +792,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private fun playNotice(body: String) {
-        if (playMode) return
+        if (playMode || callBlocked) return
         val sound = NoticeSound.fromId(prefs.getString(NoticeSound.KEY, null))
         val speak = prefs.getBoolean(NoticeAudio.KEY_SPEAK, true)
         // A visual-only notice must not touch playback or the audio route.
@@ -788,7 +828,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     private fun updateDiagnosticAudio() {
         if (!PerfDiagnostics.enabled) return
-        PerfDiagnostics.audio = if (!clientActive || !running) "Idle" else
+        PerfDiagnostics.audio = if (clientActive && callBlocked) "Paused for call" else if (!clientActive || !running) "Idle" else
             (if (noticePlaying) "Notice" else if (activeSource == null) "Alerts only" else
                 (if (activeSource?.textFile == true) "Text-to-speech" else "Media") +
                     if (streamPlayer.isPlaying()) " playing" else " not playing") +
