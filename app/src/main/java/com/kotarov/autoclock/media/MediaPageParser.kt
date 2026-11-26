@@ -86,7 +86,7 @@ internal object MediaPageParser {
             }
             val hash = MessageDigest.getInstance("SHA-256").digest((parent + "|" + url).toByteArray())
                 .take(16).joinToString("") { "%02x".format(it.toInt() and 255) }
-            val format = if (e in extensions) e.uppercase(Locale.ROOT) else t.substringAfter('/', "").uppercase(Locale.ROOT).ifBlank { "STREAM" }
+            val format = if (e in extensions) e.uppercase(Locale.ROOT) else if (t.contains("mpegurl")) "M3U8" else t.substringAfter('/', "").uppercase(Locale.ROOT).ifBlank { "STREAM" }
             items.putIfAbsent(url, Item("webmedia:" + hash, label, url, format))
         }
         val trimmed = content.trimStart('\uFEFF', ' ', '\r', '\n', '\t')

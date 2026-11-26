@@ -253,7 +253,7 @@ class MainActivity : Activity() {
             addQuickControl(quickRow, button)
         }
         // A single subtle outline links the three message-related controls.
-        // Equal weights preserve the original six button positions.
+        // Equal weights keep the three message controls together.
         val messageControls = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER
@@ -765,7 +765,7 @@ class MainActivity : Activity() {
             gravity = android.view.Gravity.CENTER_VERTICAL
             setPadding(0, dp(6), 0, dp(6))
             // Match the drag-handle slot and icon size of the stream rows,
-            // but keep Alert only fixed at the top and non-draggable.
+            // but keep Alert only fixed after browsable entries and non-draggable.
             addView(View(this@MainActivity), LinearLayout.LayoutParams(dp(34), dp(48)))
             addView(ImageView(this@MainActivity).apply {
                 setImageResource(R.drawable.ic_source_travel)

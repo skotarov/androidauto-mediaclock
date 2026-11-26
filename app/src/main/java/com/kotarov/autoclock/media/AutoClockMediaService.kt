@@ -377,10 +377,11 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             MediaPageDirectory.load(this, page) { outcome ->
                 val valid = StreamLibrary.list(prefs).any { it.id == page.id && it.url == page.url && it.browsable }
                 val children = mutableListOf<MediaBrowserCompat.MediaItem>()
+                val streamIcon = if (valid && page.mediaPage) sourceIcon(R.drawable.ic_source_podcast, 32) else null
                 if (valid) outcome.getOrNull().orEmpty().forEach { item ->
                     val bookFolder = !playMode && item.textFile && BookNavigation.mayHaveContents(item.name)
                     val desc = MediaDescriptionCompat.Builder().setMediaId(if (bookFolder) BookNavigation.BOOK_PREFIX + item.id else item.id).setTitle(item.name)
-                        .setSubtitle(item.format).build()
+                        .setSubtitle(item.format).apply { streamIcon?.let { setIconBitmap(it) } }.build()
                     children.add(MediaBrowserCompat.MediaItem(desc, if (bookFolder) MediaBrowserCompat.MediaItem.FLAG_BROWSABLE else MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
                 }
                 result.sendResult(children)
@@ -406,10 +407,11 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         result.sendResult(items)
     }
 
-    private fun sourceIcon(resource: Int): Bitmap {
-        val bitmap = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
+    private fun sourceIcon(resource: Int, size: Int = 64): Bitmap {
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val drawable = getDrawable(resource)
-        drawable?.setBounds(4, 4, 60, 60)
+        val padding = size / 16
+        drawable?.setBounds(padding, padding, size - padding, size - padding)
         drawable?.draw(android.graphics.Canvas(bitmap))
         return bitmap
     }
