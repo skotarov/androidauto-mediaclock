@@ -46,7 +46,7 @@ internal object WebReader {
                 require(status in 200..299) { "Page unavailable" }
                 val type = c.contentType.orEmpty()
                 require(type.substringBefore(';').trim().lowercase(Locale.ROOT) in listOf("text/html", "application/xhtml+xml")) { "Not a webpage" }
-                require(c.contentLengthLong <= MAX_BYTES)
+                require((c.getHeaderField("Content-Length")?.toLongOrNull() ?: -1L) <= MAX_BYTES)
                 val bytes = c.inputStream.use { input ->
                     val out = ByteArrayOutputStream()
                     val buffer = ByteArray(8192)
@@ -78,13 +78,13 @@ internal object WebReader {
             .ifBlank { doc.title() }.ifBlank { fallback }.take(128)
         doc.select("script, style, noscript, template, svg, iframe, object, nav, aside, footer, form, button, input, select, textarea, dialog, [hidden], [aria-hidden=true], [role=navigation], [role=banner], [role=complementary], [role=contentinfo]").remove()
         // Keep article headers (title/byline), but remove site-wide headers.
-        doc.select("header").filter { it.closest("article, main, [role=main]") == null }.forEach { it.remove() }
-        doc.select("[class], [id]").filter {
+        doc.select("header").toList().filter { it.closest("article, main, [role=main]") == null }.forEach { it.remove() }
+        doc.select("[class], [id]").toList().filter {
             it.tagName() !in setOf("html", "body", "main", "article") &&
                 clutter.containsMatchIn(it.id() + " " + it.className())
         }.forEach { it.remove() }
         val body = doc.body()
-        val candidates = body.select("article, main, [role=main], section, div")
+        val candidates = body.select("article, main, [role=main], section, div").toList()
         fun score(el: Element): Double {
             val text = el.text()
             if (text.length < 80) return 0.0
@@ -103,7 +103,7 @@ internal object WebReader {
             .take(100).maxByOrNull { score(it) }
         val content = semantic?.takeIf { score(it) >= 100 } ?:
             candidates.take(350).maxByOrNull { score(it) }?.takeIf { score(it) >= 100 } ?: body
-        val blocks = content.select("h1, h2, h3, h4, h5, h6, p, li, blockquote, pre, td")
+        val blocks = content.select("h1, h2, h3, h4, h5, h6, p, li, blockquote, pre, td").toList()
         val lines = blocks.filter { e -> e.select("h1,h2,h3,h4,h5,h6,p,li,blockquote,pre,td").none { it !== e } }
             .map { it.text().trim() }.filter { it.isNotBlank() }
         val bodyText = if (lines.sumOf { it.length } >= 80) lines.joinToString("\n\n") else content.text().trim()
