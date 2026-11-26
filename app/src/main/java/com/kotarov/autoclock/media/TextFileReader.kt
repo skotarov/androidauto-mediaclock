@@ -10,8 +10,6 @@ import android.os.SystemClock
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import java.io.File
-import java.io.RandomAccessFile
-import java.nio.ByteBuffer
 import java.util.Locale
 import java.util.concurrent.Future
 import java.util.concurrent.LinkedBlockingQueue
@@ -29,7 +27,9 @@ internal class TextFileReader(context: Context) {
         LinkedBlockingQueue<Runnable>()) { runnable ->
         Thread(runnable, "AutoClockText").apply { isDaemon = true }
     }
-    private data class Document(val file: File, val length: Int, val sample: String, val cached: Boolean = false) {
+    private class Document(val file: File, val length: Int, var sample: String, val cached: Boolean = false) {
+        // Worker-owned; discarded with this document. Never retains the entire book.
+        val window = BookReadWindow(file, length)
         fun release() { if (cached) BookDiskCache.release(file) else file.delete() }
     }
     private data class Chunk(val start: Int, val end: Int, val body: String)
@@ -51,21 +51,44 @@ internal class TextFileReader(context: Context) {
     private var sequence = 0L
     private var lastSaved = -1
     private var lastCheckpoint = 0L
-    private var lastPercent = -1
     private var lastProgressReport = Long.MIN_VALUE
     private var changed: () -> Unit = {}
     private var finished: ((String?) -> Unit)? = null
     private val timeout = Runnable { finish("Text-to-speech timed out") }
+    private val ranges = SpeechRangeMailbox()
+    // Binder callbacks update only the latest offset. No per-word main-thread work.
+    private val rangeUpdate = Runnable {
+        val relative = ranges.drain()
+        if (!paused && activeId != null && relative != null) {
+            offset = absoluteRange(relative)
+            checkpoint()
+            reportProgress()
+        }
+    }
+    private val scheduleRangeUpdate: () -> Unit = {
+        handler.postDelayed(rangeUpdate, 5_000L)
+    }
+
+    private fun absoluteRange(relative: Int): Int =
+        utteranceStart + relative.coerceIn(0, utteranceEnd - utteranceStart)
+    private fun currentOffset(): Int =
+        if (activeId != null) ranges.latest()?.let(::absoluteRange) ?: offset else offset
+    private fun closeRange() {
+        val latest = ranges.end()
+        if (activeId != null && latest != null) offset = absoluteRange(latest)
+        activeId = null
+        handler.removeCallbacks(rangeUpdate)
+    }
 
     fun matches(source: String, language: String): Boolean =
         ready && document != null && url == source && languageChoice == language
 
     fun progress(): String? = document?.takeIf { ready && !paused }?.let {
-        "${TextReading.percent(offset, it.length)}%"
+        "${TextReading.percent(currentOffset(), it.length)}%"
     }
 
     fun timeline(source: String): TextReading.Timeline? = document?.takeIf { ready && url == source }
-        ?.let { TextReading.timeline(offset, it.length) }
+        ?.let { TextReading.timeline(currentOffset(), it.length) }
 
     /** Relative speech seek uses text offsets. */
     fun canSkip(source: String): Boolean = ready && document != null && url == source
@@ -73,7 +96,7 @@ internal class TextFileReader(context: Context) {
     fun skipBy(source: String, deltaMs: Int): Boolean {
         val doc = document ?: return false
         if (!canSkip(source)) return false
-        return seekOffset(TextReading.skipOffset(offset, doc.length, deltaMs))
+        return seekOffset(TextReading.skipOffset(currentOffset(), doc.length, deltaMs))
     }
 
     fun seekEstimatedTime(source: String, positionMs: Long): Boolean {
@@ -83,13 +106,12 @@ internal class TextFileReader(context: Context) {
     }
 
     private fun seekOffset(target: Int): Boolean {
-        if (target == offset) return true
-        activeId = null
+        if (target == currentOffset()) return true
+        closeRange()
         cancelJob()
         runCatching { engine?.stop() }
         offset = target
         checkpoint(force = true)
-        lastPercent = -1
         reportProgress(force = true)
         if (!paused) next(alignWord = true)
         return true
@@ -103,7 +125,7 @@ internal class TextFileReader(context: Context) {
         if (!ready) return
         if (tts.setSpeechRate(speed) != TextToSpeech.SUCCESS) return
         if (!paused) {
-            activeId = null
+            closeRange()
             cancelJob()
             runCatching { tts.stop() }
             checkpoint(force = true)
@@ -117,7 +139,6 @@ internal class TextFileReader(context: Context) {
             changed = onChanged
             finished = onFinished
             paused = false
-            lastPercent = -1
             val tts = engine ?: run { finish("Text-to-speech unavailable"); return }
             try {
                 setRoute(tts, phone)
@@ -152,8 +173,9 @@ internal class TextFileReader(context: Context) {
                             offset = prefs.getInt(source, 0).coerceIn(0, doc.length)
                             lastSaved = offset
                             lastCheckpoint = SystemClock.elapsedRealtime()
-                            initialize(generation,
-                                TextReading.language(doc.sample, language, Locale.getDefault().language), phone)
+                            val detected = TextReading.language(doc.sample, language, Locale.getDefault().language)
+                            doc.sample = ""
+                            initialize(generation, detected, phone)
                         }
                     }
                 }
@@ -280,19 +302,13 @@ internal class TextFileReader(context: Context) {
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) = Unit
                 override fun onRangeStart(utteranceId: String?, start: Int, end: Int, frame: Int) {
-                    handler.post {
-                        if (generation == token && !paused && activeId == utteranceId) {
-                            offset = (utteranceStart + start).coerceIn(utteranceStart, utteranceEnd)
-                            checkpoint()
-                            reportProgress()
-                        }
-                    }
+                    ranges.offer(utteranceId, start, scheduleRangeUpdate)
                 }
                 override fun onDone(utteranceId: String?) {
                     handler.post {
                         if (generation == token && !paused && activeId == utteranceId) {
                             handler.removeCallbacks(timeout)
-                            activeId = null
+                            closeRange()
                             offset = utteranceEnd
                             checkpoint()
                             reportProgress()
@@ -315,38 +331,9 @@ internal class TextFileReader(context: Context) {
         } catch (_: Exception) { finish("Text-to-speech unavailable") }
     }
 
-    /** Read only a small window on a worker; skipped whitespace never fills RAM. */
+    /** Reuse one small decoded window across consecutive utterances. */
     private fun readChunk(doc: Document, position: Int, alignWord: Boolean): Chunk? =
-        RandomAccessFile(doc.file, "r").use { input ->
-            var start = position
-            if (alignWord && start in 1 until doc.length) {
-                val from = (start - 64).coerceAtLeast(0)
-                val count = minOf(start - from + 1, doc.length - from)
-                input.seek(from.toLong() * 2L)
-                val around = CharArray(count) { input.readChar() }
-                start = from + TextReading.wordStart(String(around), start - from)
-            }
-            while (start < doc.length) {
-                if (Thread.currentThread().isInterrupted) error("Cancelled")
-                input.seek(start.toLong() * 2L)
-                if (start > 0 && Character.isLowSurrogate(input.readChar())) start--
-                input.seek(start.toLong() * 2L)
-                val count = minOf(4096, doc.length - start)
-                val bytes = ByteArray(count * 2)
-                input.readFully(bytes)
-                val chars = CharArray(count)
-                ByteBuffer.wrap(bytes).asCharBuffer().get(chars)
-                val body = String(chars)
-                val first = body.indexOfFirst { !it.isWhitespace() }
-                if (first < 0) {
-                    start += count
-                    continue
-                }
-                val end = TextReading.chunkEnd(body, first)
-                return@use Chunk(start + first, start + end, body.substring(first, end))
-            }
-            null
-        }
+        doc.window.read(position, alignWord)?.let { Chunk(it.start, it.end, it.body) }
 
     private fun next(alignWord: Boolean = false) {
         val doc = document ?: return
@@ -381,6 +368,7 @@ internal class TextFileReader(context: Context) {
         utteranceEnd = chunk.end
         val id = "autoclock-text-$token-${++sequence}"
         activeId = id
+        ranges.begin(id)
         reportProgress()
         handler.postDelayed(timeout, 120_000L)
         try {
@@ -391,19 +379,19 @@ internal class TextFileReader(context: Context) {
 
     private fun reportProgress(force: Boolean = false) {
         val doc = document ?: return
-        val percent = TextReading.percent(offset, doc.length)
         val now = SystemClock.elapsedRealtime()
         // Event driven; do not start a periodic timer. At most one position
         // callback per five seconds, except explicit seek/start/end.
         if (!force && lastProgressReport != Long.MIN_VALUE && now - lastProgressReport < 5_000L && offset < doc.length) return
-        lastPercent = percent
         lastProgressReport = now
         changed()
     }
 
     private fun checkpoint(force: Boolean = false) {
         val source = url ?: return
-        if (document == null || offset == lastSaved) return
+        if (document == null) return
+        offset = currentOffset()
+        if (offset == lastSaved) return
         val now = SystemClock.elapsedRealtime()
         if (!force && now - lastCheckpoint < 45_000L) return
         prefs.edit().putInt(source, offset).apply()
@@ -424,9 +412,9 @@ internal class TextFileReader(context: Context) {
     fun pause() {
         if (paused) return
         if (!ready) { stop(); return }
+        closeRange()
         checkpoint(force = true)
         paused = true
-        activeId = null
         cancelJob()
         finished = null
         changed = {}
@@ -435,12 +423,13 @@ internal class TextFileReader(context: Context) {
 
     private fun finish(error: String?) {
         val callback = finished
-        if (error == null) offset = 0
+        if (error == null) { closeRange(); offset = 0 }
         stop()
         callback?.invoke(error)
     }
 
     fun stop() {
+        closeRange()
         checkpoint(force = true)
         token++
         cancelJob()
@@ -461,7 +450,6 @@ internal class TextFileReader(context: Context) {
         languageChoice = null
         offset = 0
         lastSaved = -1
-        lastPercent = -1
         lastProgressReport = Long.MIN_VALUE
     }
 
