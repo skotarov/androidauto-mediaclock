@@ -200,6 +200,7 @@ object ForecastStore {
      * Return the data without publishing it, so weather and location can be
      * committed together in one SharedPreferences transaction. */
     fun fetchOnWorker(latitude: Double, longitude: Double): String? {
+        com.kotarov.autoclock.PerfDiagnostics.network()
         val now = System.currentTimeMillis()
         val url = com.kotarov.autoclock.BuildConfig.FORECAST_ENDPOINT + "?" +
             "latitude=${String.format(Locale.US, "%.4f", latitude)}&" +

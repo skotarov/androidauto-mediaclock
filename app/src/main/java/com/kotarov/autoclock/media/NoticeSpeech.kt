@@ -54,13 +54,7 @@ class NoticeSpeech(context: Context) {
 
     private fun start(token: Long, tts: TextToSpeech, text: String, phoneChannel: Boolean) {
         try {
-            val voice = tts.voices.orEmpty().filter {
-                it.locale.language == "en" && !it.isNetworkConnectionRequired &&
-                    TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED !in it.features.orEmpty()
-            }.sortedWith(compareByDescending<android.speech.tts.Voice> {
-                it.locale.country == "US" || it.locale.country == "GB"
-            }.thenByDescending { it.quality }.thenBy { it.latency }).firstOrNull()
-            if (voice == null || tts.setVoice(voice) != TextToSpeech.SUCCESS) {
+            if (!OfflineVoiceCache.select(tts, "en", notice = true)) {
                 Log.w("AutoClock", "No installed offline English speech voice")
                 stop()
                 return

@@ -75,6 +75,7 @@ class MainActivity : Activity() {
     private lateinit var forwardButton: ImageButton
     private lateinit var slowerButton: ImageButton
     private lateinit var fasterButton: ImageButton
+    private var transportUiKey: String? = null
     private val playbackCallback = object : MediaControllerCompat.Callback() {
         override fun onPlaybackStateChanged(state: PlaybackStateCompat?) {
             syncTransportButtons(state)
@@ -284,7 +285,13 @@ class MainActivity : Activity() {
                             c.playbackState?.state == PlaybackStateCompat.STATE_BUFFERING) c.transportControls.pause()
                         else c.transportControls.play()
                     }
-                } else ClockSelectionStore.setWeatherEnabled(p, !ClockSelectionStore.weatherEnabled(p))
+                } else {
+                    val enabled = !ClockSelectionStore.weatherEnabled(p)
+                    val controls = phoneController?.transportControls
+                    if (controls != null) {
+                        if (enabled) controls.play() else controls.pause()
+                    } else ClockSelectionStore.setWeatherEnabled(p, enabled)
+                }
                 syncWeatherToggle()
             }
         }
@@ -356,10 +363,27 @@ class MainActivity : Activity() {
             gravity = android.view.Gravity.CENTER
             movementMethod = android.text.method.LinkMovementMethod.getInstance()
             setPadding(0, dp(28), 0, 0)
+            setOnLongClickListener { showPerformanceDiagnostics(); true }
         }, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
         ))
+    }
+
+    private fun showPerformanceDiagnostics() {
+        if (!PerfDiagnostics.enabled) PerfDiagnostics.start()
+        val dialog = AlertDialog.Builder(this).setTitle("Performance diagnostics")
+            .setMessage(PerfDiagnostics.snapshot())
+            .setPositiveButton("Refresh", null).setNeutralButton("Reset", null)
+            .setNegativeButton("Stop") { _, _ -> PerfDiagnostics.stop() }.create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener { dialog.setMessage(PerfDiagnostics.snapshot()) }
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                PerfDiagnostics.start()
+                dialog.setMessage(PerfDiagnostics.snapshot())
+            }
+        }
+        dialog.show()
     }
 
     override fun onStart() {
@@ -441,6 +465,9 @@ class MainActivity : Activity() {
         val selectedSource = StreamLibrary.selected(settings())
         val alertOnly = selectedSource == null
         val actions = state?.customActions.orEmpty()
+        val key = "${selectedSource?.id}|${actions.joinToString { it.action }}|${PlaybackSpeed.read(settings(), selectedSource)}"
+        if (transportUiKey == key) return
+        transportUiKey = key
         backButton.visibility = if (alertOnly) View.GONE else View.VISIBLE
         forwardButton.visibility = if (alertOnly) View.GONE else View.VISIBLE
         backButton.isEnabled = !alertOnly && actions.any { it.action == AutoClockMediaService.ACTION_BACK_10 }
@@ -775,8 +802,12 @@ class MainActivity : Activity() {
             phoneController?.transportControls?.playFromMediaId(id, null)
             return
         }
-        prefs.edit().putString(StreamLibrary.KEY_SELECTED, id).apply()
-        ClockSelectionStore.setWeatherEnabled(prefs, true)
+        val controls = phoneController?.transportControls
+        if (controls != null) controls.playFromMediaId(id, null)
+        else {
+            prefs.edit().putString(StreamLibrary.KEY_SELECTED, id).apply()
+            ClockSelectionStore.setWeatherEnabled(prefs, true)
+        }
         syncWeatherToggle()
         highlightSelectedSource()
     }

@@ -2,6 +2,7 @@ package com.kotarov.autoclock.media
 
 import android.content.Intent
 import com.kotarov.autoclock.BuildConfig
+import com.kotarov.autoclock.PerfDiagnostics
 import android.graphics.Bitmap
 import android.content.SharedPreferences
 import android.os.Bundle
@@ -57,6 +58,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
     private var lastSoundNotice: CityAnnouncement.Notice? = null
     private var clientActive = false
+    private var externalClient = false
     private var removeProjectionListener: (() -> Unit)? = null
     private var suspendedForProjection = false
     private var lastWarningRevision = 0L
@@ -102,7 +104,14 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (!clientActive) return@OnSharedPreferenceChangeListener
+        if (!clientActive) {
+            if (key == StreamLibrary.KEY_LIST || key == StreamLibrary.KEY_SELECTED) {
+                activeSource = StreamLibrary.selected(prefs)
+                if (key == StreamLibrary.KEY_LIST) notifyChildrenChanged(ROOT_ID)
+                publishPlaybackState()
+            }
+            return@OnSharedPreferenceChangeListener
+        }
         if (PlaybackSpeed.isSourceKey(key)) {
             val source = activeSource ?: return@OnSharedPreferenceChangeListener
             if (key != PlaybackSpeed.sourceKey(source.url)) return@OnSharedPreferenceChangeListener
@@ -254,11 +263,13 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         // Do not start periodic work until an accepted media client connects.
         removeProjectionListener = CarProjectionMonitor.subscribe(this) { connected ->
             if (!connected) {
+                externalClient = false
                 suspendedForProjection = clientActive
                 if (clientActive) suspendClientWork()
                 stopSelf()
             } else if (suspendedForProjection) {
                 suspendedForProjection = false
+                externalClient = true
                 resumeClientWork()
             }
         }
@@ -286,7 +297,11 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         if (!AutoClockBrowseRouting.allowLibrary(
                 clientPackageName, requestedSuggestions
             )) return null
-        resumeClientWork()
+        // Merely opening our phone panel must not start the car's media/clock loop.
+        if (clientPackageName != packageName || playMode) {
+            if (clientPackageName != packageName) externalClient = true
+            resumeClientWork()
+        }
         return BrowserRoot(ROOT_ID, null)
     }
 
@@ -332,7 +347,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         try { packageManager.getPackageInfo(packageName, 0).versionName }
         catch (_: Exception) { null }
 
-    private fun resumeClientWork() {
+    private fun resumeClientWork(startAudio: Boolean = true) {
         if (clientActive) return
         suspendedForProjection = false
         clientActive = true
@@ -343,7 +358,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             return
         }
         NoticeTest.receiver = receiveTest
-        syncStream()
+        if (startAudio) syncStream()
         lastWarningRevision = prefs.getLong(WeatherStore.KEY_WARNING_REV, 0L)
         cityAnnouncement.reset(WeatherStore.locality(this))
         WeatherStore.start(this, WeatherStore.Client.CAR)
@@ -361,6 +376,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             stopPlaybackForeground()
         }
         clientActive = false
+        if (PerfDiagnostics.enabled) PerfDiagnostics.audio = "Idle"
         if (NoticeTest.receiver === receiveTest) NoticeTest.receiver = null
         handler.removeCallbacks(hideTestNotice)
         testNotice = null
@@ -384,10 +400,11 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         weatherArtworkRevision = 0L
         lastSoundNotice = null
         PublishedArtwork.clear()
-        session.setMetadata(null)
+        setSessionMetadata(null)
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
+        externalClient = false
         suspendedForProjection = false
         suspendClientWork()
         return true
@@ -445,6 +462,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             streamPlayer.retryFailed()
         }
         ClockSelectionStore.setWeatherEnabled(prefs, enabled)
+        if (enabled && !clientActive) resumeClientWork(startAudio = false)
         // The same preference listener handles phone switches. Publish now
         // for car transport commands, avoiding duplicate queued artwork.
         handler.removeCallbacks(settingsRefresh)
@@ -452,7 +470,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             syncStream()
             publishClock()
             publishPlaybackState()
-
+            if (!enabled && !externalClient) suspendClientWork()
         }
     }
 
@@ -519,7 +537,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val notice = cityAnnouncement.notice(tick)
         val caption = (testNotice ?: notice)?.subtitle
         val position = if (caption == null) currentMediaPosition() else null
-        NoticeTest.publishCaption(informationText(caption, position))
+        val subtitle = informationText(caption, position)
+        NoticeTest.publishCaption(subtitle)
         val key = artwork.toString() + "|" + miniArtwork.toString()
         if (artKey != key || baseMetadata == null) {
             if (requestedArtKey != key) {
@@ -579,7 +598,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 artworkWorker.cancel()
                 requestedArtKey = null
             }
-            publishMediaSubtitle(key, caption, position)
+            publishMediaSubtitle(key, subtitle)
         }
         // Each newly created notice is a distinct object, even if the same
         // warning appears again at a later refresh. Never sound on redraw.
@@ -600,7 +619,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private fun schedulePositionTick(caption: String?, position: Int?) {
         handler.removeCallbacks(positionTick)
         if (clientActive && caption == null && position != null) {
-            handler.postDelayed(positionTick, (1000L - position % 1000L).coerceAtLeast(100L))
+            // The host's own progress bar advances independently of this text.
+            handler.postDelayed(positionTick, 5_000L)
         }
     }
 
@@ -608,8 +628,9 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         if (!clientActive) return
         val caption = if (playMode) null else (testNotice ?: cityAnnouncement.notice(SystemClock.elapsedRealtime()))?.subtitle
         val position = if (caption == null) currentMediaPosition() else null
-        NoticeTest.publishCaption(informationText(caption, position))
-        if (playMode) publishPlayMetadata() else artKey?.let { publishMediaSubtitle(it, caption, position) }
+        val subtitle = informationText(caption, position)
+        NoticeTest.publishCaption(subtitle)
+        if (playMode) publishPlayMetadata() else artKey?.let { publishMediaSubtitle(it, subtitle) }
         schedulePositionTick(caption, position)
     }
 
@@ -634,14 +655,14 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         builder.addCustomAction(ACTION_SPEED_UP, "Increase speed by 0.1", R.drawable.ic_auto_speed_plus_v114)
     }
 
-    private fun publishMediaSubtitle(key: String, caption: String?, position: Int?) {
+    private fun publishMediaSubtitle(key: String, value: String?) {
         val base = baseMetadata ?: return
         val book = bookTimeline()
-        val subtitle = informationText(caption, position) ?: INVISIBLE_TEXT
+        val subtitle = value ?: INVISIBLE_TEXT
         val duration = book?.durationMs ?: mediaSeek()?.duration?.toLong()
         val publication = MediaPublicationKey(key, INVISIBLE_TEXT, subtitle, activeSource?.id ?: CLOCK_ID, duration)
         if (publication == lastPublished) return
-        session.setMetadata(MediaMetadataCompat.Builder(base)
+        setSessionMetadata(MediaMetadataCompat.Builder(base)
             .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, activeSource?.id ?: CLOCK_ID)
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, INVISIBLE_TEXT)
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, subtitle)
@@ -715,7 +736,20 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private fun mediaSeek(): CustomStreamPlayer.SeekState? = activeSource?.takeUnless { it.textFile }
         ?.let { streamPlayer.seekState(it.url) }
 
+    private fun setSessionMetadata(value: MediaMetadataCompat?) {
+        PerfDiagnostics.metadata()
+        session.setMetadata(value)
+    }
+
+    private fun setSessionPlaybackState(value: PlaybackStateCompat) {
+        PerfDiagnostics.playback()
+        session.setPlaybackState(value)
+    }
+
     private fun publishPlaybackState() {
+        if (PerfDiagnostics.enabled) PerfDiagnostics.audio = if (!clientActive || !running) "Idle" else
+            (if (noticePlaying) "Notice" else if (activeSource?.textFile == true) "Text-to-speech" else if (activeSource != null) "Media" else "Alerts only") +
+                (if (phoneMode != PhoneAudioMode.OFF && !playMode) " / phone route requested" else "")
         if (playMode) { publishPlayState(); return }
         val isRunning = running
         val station = activeSource
@@ -743,7 +777,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             builder.addCustomAction(ACTION_FORWARD_10, "Forward 10 seconds", R.drawable.ic_forward_10)
         }
         addSpeedActions(builder, station)
-        session.setPlaybackState(builder.build())
+        setSessionPlaybackState(builder.build())
         lastPlayback = key
     }
 
@@ -773,7 +807,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                         else if (source.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast))
         } else builder.putString(MediaMetadataCompat.METADATA_KEY_TITLE, "Select audio")
         duration?.let { builder.putLong(MediaMetadataCompat.METADATA_KEY_DURATION, it.toLong()) }
-        session.setMetadata(builder.build())
+        setSessionMetadata(builder.build())
     }
 
     private fun setPlayRequested(enabled: Boolean) {
@@ -883,7 +917,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             builder.addCustomAction(ACTION_FORWARD_10, "Forward 10 seconds", R.drawable.ic_forward_10)
         }
         addSpeedActions(builder, source)
-        session.setPlaybackState(builder.build())
+        setSessionPlaybackState(builder.build())
     }
 
     companion object {

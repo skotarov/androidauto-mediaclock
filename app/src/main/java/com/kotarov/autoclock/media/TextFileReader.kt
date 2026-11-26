@@ -271,13 +271,7 @@ internal class TextFileReader(context: Context) {
     private fun configure(tts: TextToSpeech, generation: Long, language: String, phone: Boolean) {
         handler.removeCallbacks(timeout)
         try {
-            val voice = tts.voices.orEmpty().filter {
-                it.locale.language == language && !it.isNetworkConnectionRequired &&
-                    TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED !in it.features.orEmpty()
-            }.sortedWith(compareByDescending<android.speech.tts.Voice> {
-                it.locale == Locale.getDefault()
-            }.thenByDescending { it.quality }.thenBy { it.latency }).firstOrNull()
-            if (voice == null || tts.setVoice(voice) != TextToSpeech.SUCCESS) {
+            if (!OfflineVoiceCache.select(tts, language, notice = false)) {
                 finish("Install an offline TTS voice for " + language)
                 return
             }
@@ -400,8 +394,8 @@ internal class TextFileReader(context: Context) {
         val percent = TextReading.percent(offset, doc.length)
         val now = SystemClock.elapsedRealtime()
         // Event driven; do not start a periodic timer. At most one position
-        // callback per second, except explicit seek/start/end.
-        if (!force && lastProgressReport != Long.MIN_VALUE && now - lastProgressReport < 1000L && offset < doc.length) return
+        // callback per five seconds, except explicit seek/start/end.
+        if (!force && lastProgressReport != Long.MIN_VALUE && now - lastProgressReport < 5_000L && offset < doc.length) return
         lastPercent = percent
         lastProgressReport = now
         changed()

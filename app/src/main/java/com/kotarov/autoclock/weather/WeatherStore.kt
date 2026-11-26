@@ -1,6 +1,7 @@
 package com.kotarov.autoclock.weather
 
 import android.content.Context
+import com.kotarov.autoclock.PerfDiagnostics
 import android.location.Location
 import android.location.Geocoder
 import android.os.Handler
@@ -40,6 +41,7 @@ object WeatherStore {
     private var fixInFlight = false
     private var latest: Location? = null
     private var lastFallback: Long? = null
+    private var failedFixes = 0
     private var stationarySince: Long? = null
     private var lastLocalityFixNanos = Long.MIN_VALUE
     private var weatherThread: Thread? = null
@@ -59,7 +61,11 @@ object WeatherStore {
         override fun run() {
             if (clients.isEmpty()) return
             checkLocation()
-            handler.postDelayed(this, TravelRefreshPolicy.LOCATION_TICK_MS)
+            val now = SystemClock.elapsedRealtime()
+            val quiet = stationarySince?.let { now - it >= TravelRefreshPolicy.STATIONARY_AFTER_MS } == true &&
+                lastWeatherSuccess?.let { now - it < TravelRefreshPolicy.WEATHER_INTERVAL_MS } == true &&
+                !localityConfirmation.pending && !localityFailed
+            handler.postDelayed(this, if (quiet) TravelRefreshPolicy.QUIET_TICK_MS else TravelRefreshPolicy.LOCATION_TICK_MS)
         }
     }
 
@@ -162,6 +168,7 @@ object WeatherStore {
             stationarySince = null
             lastLocalityFixNanos = Long.MIN_VALUE
             lastFallback = null
+            failedFixes = 0
             val prefs = app!!.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             val lat = Double.fromBits(prefs.getLong(KEY_LAT, Double.NaN.toBits()))
             val lon = Double.fromBits(prefs.getLong(KEY_LON, Double.NaN.toBits()))
@@ -196,6 +203,7 @@ object WeatherStore {
         if (!WeatherLocation.permitted(context)) return
         lastLocalityAttempt = null
         lastFallback = null
+        failedFixes = 0
         start(context, Client.PHONE)
     }
 
@@ -208,7 +216,7 @@ object WeatherStore {
 
     private fun checkLocation() {
         val context = app ?: return
-        if (!WeatherLocation.permitted(context)) {
+        if (!WeatherLocation.permitted(context) || !WeatherLocation.enabled(context)) {
             passiveCancel?.invoke()
             passiveCancel = null
             fallbackCancel?.invoke()
@@ -226,8 +234,9 @@ object WeatherStore {
         val now = SystemClock.elapsedRealtime()
         val stationary = stationarySince?.let { now - it >= TravelRefreshPolicy.STATIONARY_AFTER_MS } == true
         val weatherNeedsFix = lastWeatherSuccess?.let { now - it >= TravelRefreshPolicy.WEATHER_INTERVAL_MS } ?: true
-        val fallbackInterval = TravelRefreshPolicy.fallbackInterval(stationary,
-            weatherNeedsFix || localityConfirmation.pending || localityFailed)
+        val fallbackInterval = maxOf(TravelRefreshPolicy.fallbackInterval(stationary,
+            weatherNeedsFix || localityConfirmation.pending || localityFailed),
+            TravelRefreshPolicy.failedFixInterval(failedFixes))
         if (WeatherLocation.fresh(latest)) {
             processFix(latest!!)
         } else if (!fixInFlight &&
@@ -235,11 +244,12 @@ object WeatherStore {
             lastFallback = now
             fixInFlight = true
             val token = generation
+            PerfDiagnostics.location()
             val cancel = WeatherLocation.requestOnce(context) {
                 if (token == generation) {
                     fixInFlight = false
                     fallbackCancel = null
-                    if (it != null) acceptFix(it)
+                    if (it != null) acceptFix(it) else failedFixes = (failedFixes + 1).coerceAtMost(3)
                 }
             }
             if (fixInFlight) fallbackCancel = cancel
@@ -254,6 +264,7 @@ object WeatherStore {
         val now = SystemClock.elapsedRealtime()
         stationarySince = if (prior != null && prior.distanceTo(location) <= 100f &&
             (!location.hasSpeed() || location.speed <= 1f)) stationarySince ?: now else null
+        failedFixes = 0
         latest = Location(location)
         processFix(location)
     }
@@ -408,6 +419,7 @@ object WeatherStore {
     private fun resolveLocality(context: Context, latitude: Double, longitude: Double): String? {
         return try {
             if (!Geocoder.isPresent()) return null
+            PerfDiagnostics.geocode()
             val addresses = Geocoder(context, Locale.ENGLISH)
                 .getFromLocation(latitude, longitude, 3).orEmpty()
             // Some providers omit locality on the first address.
@@ -499,6 +511,7 @@ object WeatherStore {
     }
 
     private fun fetchText(url: String, agent: String): String? {
+        PerfDiagnostics.network()
         val connection = (URL(url).openConnection() as javax.net.ssl.HttpsURLConnection).apply {
             instanceFollowRedirects = false
             requestMethod = "GET"

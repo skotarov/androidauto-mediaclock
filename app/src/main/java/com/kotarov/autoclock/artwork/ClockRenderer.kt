@@ -4,6 +4,8 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Picture
+import com.kotarov.autoclock.PerfDiagnostics
 import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Region
@@ -89,6 +91,20 @@ object ClockRenderer {
     }
     private val standardLines by lazy { dialLines(STANDARD_RADIUS, STANDARD_ANALOG_CENTER_Y) }
     private val compactLines by lazy { dialLines(COMPACT_RADIUS, COMPACT_ANALOG_CENTER_Y) }
+    // Cache vector drawing commands, not full-size bitmaps; share across output sizes.
+    private data class StaticKey(val kind: String, val compact: Boolean, val theme: ClockTheme,
+                                 val hour: LocalDateTime? = null, val forecast: List<ForecastStore.Hour> = emptyList())
+    private val staticLayers = LinkedHashMap<StaticKey, Picture>(4, 0.75f, true)
+    @Synchronized private fun drawStatic(canvas: Canvas, key: StaticKey, draw: (Canvas) -> Unit) {
+        val picture = staticLayers[key] ?: Picture().also { p ->
+            val recording = p.beginRecording(SIZE, SIZE)
+            try { draw(recording) } finally { p.endRecording() }
+            staticLayers[key] = p
+            while (staticLayers.size > 4) staticLayers.remove(staticLayers.keys.first())
+        }
+        canvas.drawPicture(picture)
+    }
+    @Synchronized fun clearStaticLayers() { staticLayers.clear() }
     private val white = Color.rgb(255, 255, 255)
     private val pale = Color.rgb(224, 239, 247)
     private val cyan = Color.rgb(108, 218, 255)
@@ -102,6 +118,7 @@ object ClockRenderer {
         theme: ClockTheme = ClockTheme.DARK,
         forecast: List<ForecastStore.Hour> = emptyList()
     ): Bitmap {
+        PerfDiagnostics.artwork()
         require(outputSize in 192..SIZE) { "Unsupported artwork size" }
         val bitmap = Bitmap.createBitmap(outputSize, outputSize, Bitmap.Config.RGB_565)
         val canvas = Canvas(bitmap)
@@ -118,14 +135,18 @@ object ClockRenderer {
 
         if (preset.hasAnalog) {
             drawDial(canvas, time, radius, clockY, theme)
-            if (preset.usesWeather) drawForecastRing(canvas, time, radius, clockY,
-                forecast, theme)
+            if (preset.usesWeather) drawStatic(canvas, StaticKey("ring", compact, theme,
+                time.withMinute(0).withSecond(0).withNano(0), forecast)) {
+                drawForecastRing(it, time, radius, clockY, forecast, theme)
+            }
         } else {
             // Preserve the pure clock layout; playing weather sits above host controls.
             drawText(canvas, time.format(timeFormat), CENTER_X, clockY,
                 DIGITAL_TIME_SIZE * unit, white, unit, theme)
-            if (preset.usesWeather)
-                drawDigitalForecast(canvas, time, clockY, unit, forecast, theme)
+            if (preset.usesWeather) drawStatic(canvas, StaticKey("digital", compact, theme,
+                time.withMinute(0).withSecond(0).withNano(0), forecast)) {
+                drawDigitalForecast(it, time, clockY, unit, forecast, theme)
+            }
         }
         if (preset.usesWeather && !sourceLabel.isNullOrBlank()) {
             val sourceY = if (preset.hasAnalog) clockY + radius * 1.28f + 65f * unit
@@ -145,6 +166,7 @@ object ClockRenderer {
         theme: ClockTheme = ClockTheme.DARK,
         outputSize: Int = 160
     ): Bitmap {
+        PerfDiagnostics.artwork()
         require(outputSize in 64..256)
         val image = Bitmap.createBitmap(outputSize, outputSize, Bitmap.Config.RGB_565)
         val canvas = Canvas(image)
@@ -428,15 +450,9 @@ object ClockRenderer {
         val unit = radius / STANDARD_RADIUS
         val x = CENTER_X
         val y = centreY
-        canvas.drawCircle(x, y, radius + 1f, fill(themed(Color.rgb(8, 17, 27), theme)))
-        canvas.drawCircle(x, y, radius, stroke(themed(pale, theme), 4.8f * unit))
-        canvas.drawCircle(x, y, radius - 9f * unit,
-            stroke(themed(Color.rgb(53, 92, 115), theme), 1.8f * unit))
-        val major = stroke(themed(white, theme), 6.5f * unit)
-        val minor = stroke(themed(Color.rgb(157, 193, 210), theme), 2.3f * unit)
-        val lines = if (radius == COMPACT_RADIUS) compactLines else standardLines
-        canvas.drawLines(lines.major, major)
-        canvas.drawLines(lines.minor, minor)
+        drawStatic(canvas, StaticKey("dial", radius == COMPACT_RADIUS, theme)) {
+            drawStaticDial(it, radius, centreY, theme)
+        }
         val hourAngle = Math.toRadians(
             (now.hour % 12) * 30.0 + now.minute * 0.5 - 90.0
         )
@@ -449,6 +465,21 @@ object ClockRenderer {
             x + cos(minuteAngle).toFloat() * radius * 0.83f,
             y + sin(minuteAngle).toFloat() * radius * 0.83f,
             stroke(themed(cyan, theme), 6.5f * unit))
+    }
+
+    private fun drawStaticDial(canvas: Canvas, radius: Float, centreY: Float, theme: ClockTheme) {
+        val unit = radius / STANDARD_RADIUS
+        val x = CENTER_X
+        val y = centreY
+        canvas.drawCircle(x, y, radius + 1f, fill(themed(Color.rgb(8, 17, 27), theme)))
+        canvas.drawCircle(x, y, radius, stroke(themed(pale, theme), 4.8f * unit))
+        canvas.drawCircle(x, y, radius - 9f * unit,
+            stroke(themed(Color.rgb(53, 92, 115), theme), 1.8f * unit))
+        val major = stroke(themed(white, theme), 6.5f * unit)
+        val minor = stroke(themed(Color.rgb(157, 193, 210), theme), 2.3f * unit)
+        val lines = if (radius == COMPACT_RADIUS) compactLines else standardLines
+        canvas.drawLines(lines.major, major)
+        canvas.drawLines(lines.minor, minor)
     }
 
     /** Actual icon bounds, not a constant empty slot around every symbol.

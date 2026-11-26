@@ -6,6 +6,9 @@ object TravelRefreshPolicy {
     const val FALLBACK_INTERVAL_MS = 60_000L
     const val STATIONARY_INTERVAL_MS = 5 * 60_000L
     const val STATIONARY_AFTER_MS = 2 * 60_000L
+    const val QUIET_TICK_MS = 60_000L
+    fun failedFixInterval(failures: Int): Long =
+        if (failures <= 0) FALLBACK_INTERVAL_MS else (FALLBACK_INTERVAL_MS * (1L shl failures.coerceAtMost(3))).coerceAtMost(STATIONARY_INTERVAL_MS)
 
     fun fallbackInterval(stationary: Boolean, urgent: Boolean): Long =
         if (stationary && !urgent) STATIONARY_INTERVAL_MS else FALLBACK_INTERVAL_MS
