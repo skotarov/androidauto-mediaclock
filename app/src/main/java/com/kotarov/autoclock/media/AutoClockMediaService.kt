@@ -70,6 +70,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private var lastPublished: MediaPublicationKey? = null
     private data class PlaybackKey(val running: Boolean, val id: String, val duration: Long?, val advancing: Boolean, val textSkip: Boolean, val textPosition: Long?, val speed: Float)
     private var lastPlayback: PlaybackKey? = null
+    private var lastPlaybackAt = 0L
+    private var weatherClient: WeatherStore.Client? = null
     private data class WeatherArtwork(val locality: String?, val forecast: List<ForecastStore.Hour>)
     private var lastWeatherArtwork: WeatherArtwork? = null
     private var weatherArtworkRevision = 0L
@@ -301,8 +303,15 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             )) return null
         // Merely opening our phone panel must not start the car's media/clock loop.
         if (clientPackageName != packageName || playMode) {
+            val upgrade = clientPackageName != packageName && !externalClient && clientActive
             if (clientPackageName != packageName) externalClient = true
             resumeClientWork()
+            if (upgrade && !playMode) {
+                updateWeatherClient()
+                lastPlayback = null
+                publishClock()
+                publishPlaybackState()
+            }
         }
         return BrowserRoot(ROOT_ID, null)
     }
@@ -363,11 +372,20 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         if (startAudio) syncStream()
         lastWarningRevision = prefs.getLong(WeatherStore.KEY_WARNING_REV, 0L)
         cityAnnouncement.reset(WeatherStore.locality(this))
-        WeatherStore.start(this, WeatherStore.Client.CAR)
+        updateWeatherClient()
         publishClock()
         publishPlaybackState()
 
         scheduleNextMinute()
+    }
+
+    private fun updateWeatherClient() {
+        val next = if (externalClient) WeatherStore.Client.CAR else WeatherStore.Client.PHONE_MEDIA
+        if (weatherClient == next) return
+        // Add the new owner before releasing the old one; preserve shared cached data.
+        WeatherStore.start(this, next)
+        weatherClient?.let { WeatherStore.stop(it) }
+        weatherClient = next
     }
 
     private fun suspendClientWork() {
@@ -383,7 +401,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         handler.removeCallbacks(hideTestNotice)
         testNotice = null
         NoticeTest.publishCaption(null)
-        WeatherStore.stop(WeatherStore.Client.CAR)
+        weatherClient?.let { WeatherStore.stop(it) }
+        weatherClient = null
         handler.removeCallbacks(minuteTick)
         handler.removeCallbacks(positionTick)
         handler.removeCallbacks(settingsRefresh)
@@ -502,9 +521,10 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         if (playMode) { publishPlayMetadata(); return }
         val now = LocalDateTime.now()
         val visible = visiblePreset()
-        val weather = if (visible.usesWeather) WeatherStore.current(this) else null
+        val showArtwork = externalClient
+        val weather = if (showArtwork && visible.usesWeather) WeatherStore.current(this) else null
         val theme = selectedTheme()
-        val showClockForecast = visible.usesWeather
+        val showClockForecast = showArtwork && visible.usesWeather
         // Freshness timestamps alone do not change artwork. Reuse the
         // existing revision when the actual six forecast slots and label
         // are unchanged, while still processing all warnings separately.
@@ -520,15 +540,12 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 (weather?.observedAtMs ?: 0L) + prefs.getLong("weather_locality_revision_v68", 0L)
         }
         val revision = weatherArtworkRevision
-        val artwork = ClockArtworkProvider.artworkUri(
-            visible.id, now, revision,
-            compactLayout(), 0L, theme
-        )
-        val miniArtwork = ClockArtworkProvider.miniArtworkUri(
-            visible.family, now,
-            0L,
-            theme
-        )
+        val artwork = if (showArtwork) ClockArtworkProvider.artworkUri(
+            visible.id, now, revision, compactLayout(), 0L, theme
+        ) else null
+        val miniArtwork = if (showArtwork) ClockArtworkProvider.miniArtworkUri(
+            visible.family, now, 0L, theme
+        ) else null
         val tick = SystemClock.elapsedRealtime()
         // Observe locality even when the clock's weather option is off.
         if (cityAnnouncement.update(locality, tick)) scheduleCityTitleHide()
@@ -550,8 +567,19 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val position = if (caption == null) currentMediaPosition() else null
         val subtitle = informationText(caption, position)
         NoticeTest.publishCaption(subtitle)
-        val key = artwork.toString() + "|" + miniArtwork.toString()
-        if (artKey != key || baseMetadata == null) {
+        val key = if (artwork != null && miniArtwork != null) artwork.toString() + "|" + miniArtwork.toString() else "phone-only"
+        if (artwork == null || miniArtwork == null) {
+            // Phone previews already draw both clocks. Do not generate invisible car artwork.
+            if (artKey != key || baseMetadata == null) {
+                artworkWorker.cancel()
+                requestedArtKey = null
+                miniKey = null
+                PublishedArtwork.clear()
+                baseMetadata = MediaMetadataCompat.Builder().build()
+                artKey = key
+            }
+            publishMediaSubtitle(key, subtitle)
+        } else if (artKey != key || baseMetadata == null) {
             if (requestedArtKey != key) {
                 requestedArtKey = key
                 // Snapshot every render input on the owner thread. Never read
@@ -779,7 +807,15 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val duration = book?.durationMs ?: seek?.duration?.toLong()
         val speed = if (advancing) streamPlayer.actualMediaSpeed() else 0f
         val key = PlaybackKey(isRunning, station?.id ?: CLOCK_ID, duration, advancing, textSkip, book?.positionMs, speed)
-        if (lastPlayback == key) return
+        val previous = lastPlayback
+        if (previous == key) return
+        val now = SystemClock.elapsedRealtime()
+        // TTS reports its estimated position every five seconds. Publish the exact
+        // current estimate at most every 15s when ONLY the position changed.
+        // A seek/speed command clears lastPlayback; transitions are immediate.
+        if (book != null && isRunning && !noticePlaying && previous != null &&
+            previous.copy(textPosition = key.textPosition) == key &&
+            now - lastPlaybackAt < 15_000L) return
         var actions = PlaybackStateCompat.ACTION_PLAY or
             PlaybackStateCompat.ACTION_PAUSE or PlaybackStateCompat.ACTION_STOP or
             PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID or
@@ -798,6 +834,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         addSpeedActions(builder, station)
         setSessionPlaybackState(builder.build())
         lastPlayback = key
+        lastPlaybackAt = now
     }
 
     private var playMetadataSource: StreamLibrary.Station? = null

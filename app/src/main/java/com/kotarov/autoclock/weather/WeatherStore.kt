@@ -31,7 +31,7 @@ object WeatherStore {
     private const val MAX_AGE_MS = 3L * 60L * 60L * 1000L
     private const val MAX_OBSERVATION_AGE_MS = 3L * 60L * 60L * 1000L
 
-    enum class Client { CAR, PHONE }
+    enum class Client { CAR, PHONE, PHONE_MEDIA }
     private val clients = mutableSetOf<Client>()
     private val handler by lazy { Handler(Looper.getMainLooper()) }
     private var app: Context? = null
@@ -65,7 +65,7 @@ object WeatherStore {
             val quiet = stationarySince?.let { now - it >= TravelRefreshPolicy.STATIONARY_AFTER_MS } == true &&
                 lastWeatherSuccess?.let { now - it < TravelRefreshPolicy.WEATHER_INTERVAL_MS } == true &&
                 !localityConfirmation.pending && !localityFailed
-            handler.postDelayed(this, if (quiet) TravelRefreshPolicy.QUIET_TICK_MS else TravelRefreshPolicy.LOCATION_TICK_MS)
+            handler.postDelayed(this, TravelRefreshPolicy.locationTick(Client.CAR in clients, quiet))
         }
     }
 
@@ -160,6 +160,7 @@ object WeatherStore {
     fun start(context: Context, client: Client) {
         app = context.applicationContext
         val first = clients.isEmpty()
+        val upgradeToCar = client == Client.CAR && Client.CAR !in clients
         clients.add(client)
         if (first) {
             generation++
@@ -174,6 +175,12 @@ object WeatherStore {
             val lon = Double.fromBits(prefs.getLong(KEY_LON, Double.NaN.toBits()))
             lastLocalityPoint = if (lat.isFinite() && lon.isFinite())
                 TravelRefreshPolicy.Point(lat, lon) else null
+            handler.removeCallbacks(tick)
+            tick.run()
+        } else if (upgradeToCar) {
+            // Return to the travel cadence immediately on car connection.
+            lastFallback = null
+            failedFixes = 0
             handler.removeCallbacks(tick)
             tick.run()
         } else checkLocation()
@@ -234,9 +241,8 @@ object WeatherStore {
         val now = SystemClock.elapsedRealtime()
         val stationary = stationarySince?.let { now - it >= TravelRefreshPolicy.STATIONARY_AFTER_MS } == true
         val weatherNeedsFix = lastWeatherSuccess?.let { now - it >= TravelRefreshPolicy.WEATHER_INTERVAL_MS } ?: true
-        val fallbackInterval = maxOf(TravelRefreshPolicy.fallbackInterval(stationary,
-            weatherNeedsFix || localityConfirmation.pending || localityFailed),
-            TravelRefreshPolicy.failedFixInterval(failedFixes))
+        val fallbackInterval = TravelRefreshPolicy.locationFallback(Client.CAR in clients,
+            stationary, weatherNeedsFix || localityConfirmation.pending || localityFailed, failedFixes)
         if (WeatherLocation.fresh(latest)) {
             processFix(latest!!)
         } else if (!fixInFlight &&

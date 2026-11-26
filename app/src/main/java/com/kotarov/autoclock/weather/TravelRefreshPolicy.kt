@@ -7,6 +7,14 @@ object TravelRefreshPolicy {
     const val STATIONARY_INTERVAL_MS = 5 * 60_000L
     const val STATIONARY_AFTER_MS = 2 * 60_000L
     const val QUIET_TICK_MS = 60_000L
+    const val PHONE_TICK_MS = 60_000L
+    const val PHONE_FALLBACK_MS = 5 * 60_000L
+
+    fun locationTick(car: Boolean, quiet: Boolean): Long =
+        if (!car) PHONE_TICK_MS else if (quiet) QUIET_TICK_MS else LOCATION_TICK_MS
+
+    fun locationFallback(car: Boolean, stationary: Boolean, urgent: Boolean, failures: Int): Long =
+        if (!car) PHONE_FALLBACK_MS else maxOf(fallbackInterval(stationary, urgent), failedFixInterval(failures))
     fun failedFixInterval(failures: Int): Long =
         if (failures <= 0) FALLBACK_INTERVAL_MS else (FALLBACK_INTERVAL_MS * (1L shl failures.coerceAtMost(3))).coerceAtMost(STATIONARY_INTERVAL_MS)
 

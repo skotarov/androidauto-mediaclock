@@ -58,6 +58,15 @@ class TravelRefreshPolicyTest {
         assertEquals(900_000L, TravelRefreshPolicy.WEATHER_INTERVAL_MS)
     }
 
+    @Test fun phoneLocationIsThrottledButCarKeepsTravelCadence() {
+        assertEquals(60_000L, TravelRefreshPolicy.locationTick(false, false))
+        assertEquals(30_000L, TravelRefreshPolicy.locationTick(true, false))
+        assertEquals(60_000L, TravelRefreshPolicy.locationTick(true, true))
+        assertEquals(300_000L, TravelRefreshPolicy.locationFallback(false, false, true, 0))
+        assertEquals(60_000L, TravelRefreshPolicy.locationFallback(true, false, true, 0))
+        assertEquals(300_000L, TravelRefreshPolicy.locationFallback(true, true, false, 0))
+    }
+
     @Test fun unknownLocationAndFirstForecastAreDue() {
         assertTrue(TravelRefreshPolicy.localityDue(0, null, Double.POSITIVE_INFINITY, false, false))
         assertTrue(TravelRefreshPolicy.weatherDue(0, null, Double.POSITIVE_INFINITY, null, 0))
