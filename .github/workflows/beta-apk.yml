@@ -67,8 +67,8 @@ jobs:
           "$signer" sign --ks "$AUTO_CLOCK_BETA_STORE" --ks-type PKCS12 \
             --ks-key-alias autoclock-beta --ks-pass env:AUTO_CLOCK_BETA_PASSWORD \
             --key-pass env:AUTO_CLOCK_BETA_PASSWORD \
-            --out dist/SmartTrip-Clock-v0.108-beta.apk app/build/outputs/apk/debug/app-debug.apk
-          verification=$("$signer" verify --verbose --print-certs dist/SmartTrip-Clock-v0.108-beta.apk)
+            --out dist/SmartTrip-Clock-v0.109-beta.apk app/build/outputs/apk/debug/app-debug.apk
+          verification=$("$signer" verify --verbose --print-certs dist/SmartTrip-Clock-v0.109-beta.apk)
           printf '%s\n' "$verification"
           actual=$(printf '%s\n' "$verification" | awk '/^(Signer #[0-9]+|V[0-9]+([.][0-9]+)? Signer):? certificate SHA-256 digest:/ {print $NF}' | tr -d ':\r' | tr '[:upper:]' '[:lower:]')
           if ! printf '%s\n' "$verification" | grep -Eq '^Number of signers: 1[[:space:]]*$' || [[ "$actual" != "$fingerprint" ]]; then
@@ -80,13 +80,13 @@ jobs:
           "$signer" sign --ks "$AUTO_CLOCK_BETA_STORE" --ks-type PKCS12 \
             --ks-key-alias autoclock-beta --ks-pass env:AUTO_CLOCK_BETA_PASSWORD \
             --key-pass env:AUTO_CLOCK_BETA_PASSWORD \
-            --out dist/SmartTrip-Clock-Lite-v0.108-beta.apk app/build/outputs/apk/debug/app-debug.apk
-          "$signer" verify --verbose --print-certs dist/SmartTrip-Clock-Lite-v0.108-beta.apk
-          lite_actual=$("$signer" verify --print-certs dist/SmartTrip-Clock-Lite-v0.108-beta.apk | awk '/certificate SHA-256 digest:/ {print $NF}' | tr -d ':\r' | tr '[:upper:]' '[:lower:]')
+            --out dist/SmartTrip-Clock-Lite-v0.109-beta.apk app/build/outputs/apk/debug/app-debug.apk
+          "$signer" verify --verbose --print-certs dist/SmartTrip-Clock-Lite-v0.109-beta.apk
+          lite_actual=$("$signer" verify --print-certs dist/SmartTrip-Clock-Lite-v0.109-beta.apk | awk '/certificate SHA-256 digest:/ {print $NF}' | tr -d ':\r' | tr '[:upper:]' '[:lower:]')
           [[ "$lite_actual" == "$fingerprint" ]]
           python3 - <<'PY'
           import zipfile, os
-          path = "dist/SmartTrip-Clock-Lite-v0.108-beta.apk"
+          path = "dist/SmartTrip-Clock-Lite-v0.109-beta.apk"
           size = os.path.getsize(path)
           with zipfile.ZipFile(path) as z:
               total = sum(i.compress_size for i in z.infolist())
@@ -95,8 +95,8 @@ jobs:
               print("Lite APK size:", size, "ZIP overhead:", size-total)
               assert size < 1300000 and size-total < 150000, "Unexpected Lite APK size or padding"
           PY
-          stat -c "APK size: %s bytes" dist/SmartTrip-Clock-v0.108-beta.apk
-          unzip -l dist/SmartTrip-Clock-v0.108-beta.apk | tail -n 1
+          stat -c "APK size: %s bytes" dist/SmartTrip-Clock-v0.109-beta.apk
+          unzip -l dist/SmartTrip-Clock-v0.109-beta.apk | tail -n 1
 
       - name: Create or update public beta download
         env:
@@ -104,16 +104,16 @@ jobs:
         run: |
           # Recheck after transient API errors; never leave a failed upload silently.
           for attempt in 1 2 3 4; do
-            if ! gh release view v0.108.0-beta >/dev/null 2>&1; then
-              gh release create v0.108.0-beta \
+            if ! gh release view v0.109.0-beta >/dev/null 2>&1; then
+              gh release create v0.109.0-beta \
               --target "$GITHUB_SHA" \
-              --title "SmartTrip Clock — beta 0.108.0" \
-              --notes "Permanent beta signing identity. Uninstall older differently signed beta builds once; subsequent signed beta updates retain settings. Restore original v0.97 vector clock geometry with blue road overlay; clean independent Lite packaging." \
+              --title "SmartTrip Clock — beta 0.109.0" \
+              --notes "Permanent beta signing identity. Uninstall older differently signed beta builds once; subsequent signed beta updates retain settings. Remember playback speed separately for each file; preserve the existing selected item's speed on upgrade. Icon unchanged." \
               --prerelease || true
             fi
-            if gh release upload v0.108.0-beta dist/SmartTrip-Clock-v0.108-beta.apk dist/SmartTrip-Clock-Lite-v0.108-beta.apk --clobber &&
-              gh release view v0.108.0-beta --json assets --jq '.assets[] | select(.name == "SmartTrip-Clock-v0.108-beta.apk" and .size > 0) | .name' | grep -Fxq "SmartTrip-Clock-v0.108-beta.apk" &&
-              gh release view v0.108.0-beta --json assets --jq '.assets[] | select(.name == "SmartTrip-Clock-Lite-v0.108-beta.apk" and .size > 0) | .name' | grep -Fxq "SmartTrip-Clock-Lite-v0.108-beta.apk"; then
+            if gh release upload v0.109.0-beta dist/SmartTrip-Clock-v0.109-beta.apk dist/SmartTrip-Clock-Lite-v0.109-beta.apk --clobber &&
+              gh release view v0.109.0-beta --json assets --jq '.assets[] | select(.name == "SmartTrip-Clock-v0.109-beta.apk" and .size > 0) | .name' | grep -Fxq "SmartTrip-Clock-v0.109-beta.apk" &&
+              gh release view v0.109.0-beta --json assets --jq '.assets[] | select(.name == "SmartTrip-Clock-Lite-v0.109-beta.apk" and .size > 0) | .name' | grep -Fxq "SmartTrip-Clock-Lite-v0.109-beta.apk"; then
               exit 0
             fi
             sleep $((attempt * 10))

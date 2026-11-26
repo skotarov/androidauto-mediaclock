@@ -103,8 +103,10 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (!clientActive) return@OnSharedPreferenceChangeListener
-        if (key == PlaybackSpeed.KEY) {
-            streamPlayer.setSpeed(PlaybackSpeed.read(prefs))
+        if (PlaybackSpeed.isSourceKey(key)) {
+            val source = activeSource ?: return@OnSharedPreferenceChangeListener
+            if (key != PlaybackSpeed.sourceKey(source.url)) return@OnSharedPreferenceChangeListener
+            streamPlayer.setSpeed(PlaybackSpeed.read(prefs, source), source.url)
             lastPlayback = null
             publishPlaybackState()
             refreshPositionSubtitle()
@@ -178,6 +180,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         }
         ClockSelectionStore.migrateSimplifiedIfNeeded(prefs)
         StreamLibrary.migrate(prefs)
+        PlaybackSpeed.migrate(prefs)
         activeSource = StreamLibrary.selected(prefs)
         session = MediaSessionCompat(this, "AutoClockMediaTestsV037").apply {
             setFlags(MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS)
@@ -637,7 +640,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val station = if (clientActive && running && !noticePlaying)
             activeSource else null
         val url = station?.url
-        streamPlayer.setSpeed(PlaybackSpeed.read(prefs))
+        streamPlayer.setSpeed(PlaybackSpeed.read(prefs, station), station?.url)
         streamPlayer.sync(url, !playMode && phoneMode != PhoneAudioMode.OFF,
             textLanguage = station?.takeIf { it.textFile }?.language, onChanged = {
             if (playMode || station?.textFile != true) lastPlayback = null

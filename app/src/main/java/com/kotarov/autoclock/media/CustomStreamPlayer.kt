@@ -77,11 +77,14 @@ class CustomStreamPlayer(context: Context) {
     fun seekTextTo(url: String?, positionMs: Long): Boolean =
         url != null && reader?.seekEstimatedTime(url, positionMs) == true
 
-    fun setSpeed(value: Float) {
+    fun setSpeed(value: Float, sourceUrl: String?) {
         speed = PlaybackSpeed.normalize(value)
-        reader?.setSpeed(speed)
+        // A pending source switch must not change the outgoing file or restart its TTS.
+        if (sourceUrl == null || requested?.first != sourceUrl) return
+        if (reading) reader?.setSpeed(speed)
         val media = player
-        if (media != null && prepared && seekable && !suspendedMedia && isPlaying()) applyMediaSpeed(media)
+        if (media != null && prepared && seekable && !suspendedMedia && isPlaying() &&
+            kotlin.math.abs(actualMediaSpeed() - speed) > 0.001f) applyMediaSpeed(media)
     }
 
     fun actualMediaSpeed(): Float = if (seekable) runCatching { player?.playbackParams?.speed ?: 1f }.getOrDefault(1f) else 1f

@@ -36,6 +36,7 @@ import com.kotarov.autoclock.media.NoticeAudio
 import com.kotarov.autoclock.media.PhoneAudioMode
 import com.kotarov.autoclock.media.CustomStreamPlayer
 import com.kotarov.autoclock.media.StreamLibrary
+import com.kotarov.autoclock.media.PlaybackSpeed
 import com.kotarov.autoclock.media.StreamMetadata
 import com.kotarov.autoclock.media.NoticeTest
 import com.kotarov.autoclock.media.NoticeSoundPlayer
@@ -107,7 +108,7 @@ class MainActivity : Activity() {
             syncQuickButtons()
             updatePreviewTiles()
         }
-        if (key == com.kotarov.autoclock.media.PlaybackSpeed.KEY) syncSpeedControls(phoneController?.playbackState)
+        if (PlaybackSpeed.isSourceKey(key)) syncSpeedControls(phoneController?.playbackState)
         if (key == ClockPreset.KEY_ADD_WEATHER) syncWeatherToggle()
         else if (key == "weather_fetched_at" || key == WeatherStore.KEY_LOCALITY) {
             updatePreviewTiles()
@@ -154,6 +155,7 @@ class MainActivity : Activity() {
         // This is now an auto-location-only product, including old installs.
         ClockSelectionStore.migrateSimplifiedIfNeeded(prefs)
         StreamLibrary.migrate(prefs)
+        PlaybackSpeed.migrate(prefs)
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -324,7 +326,10 @@ class MainActivity : Activity() {
         speedValue = text("1.0×", 17f, dp(4)).apply {
             gravity = android.view.Gravity.CENTER
             contentDescription = "Playback speed; tap to reset"
-            setOnClickListener { settings().edit().putFloat(com.kotarov.autoclock.media.PlaybackSpeed.KEY, 1f).apply() }
+            setOnClickListener {
+                val p = settings()
+                StreamLibrary.selected(p)?.let { PlaybackSpeed.write(p, it, 1f) }
+            }
         }
         speedRow.addView(slowerButton, LinearLayout.LayoutParams(dp(64), dp(48)))
         speedRow.addView(speedValue, LinearLayout.LayoutParams(dp(100), dp(48)))
@@ -474,9 +479,9 @@ class MainActivity : Activity() {
 
     private fun changeSpeed(direction: Int) {
         val p = settings()
-        val speed = com.kotarov.autoclock.media.PlaybackSpeed.read(p)
-        p.edit().putFloat(com.kotarov.autoclock.media.PlaybackSpeed.KEY,
-            com.kotarov.autoclock.media.PlaybackSpeed.step(speed, direction)).apply()
+        val source = StreamLibrary.selected(p) ?: return
+        val speed = PlaybackSpeed.read(p, source)
+        PlaybackSpeed.write(p, source, PlaybackSpeed.step(speed, direction))
     }
 
     private fun syncSpeedControls(state: PlaybackStateCompat?) {
@@ -485,10 +490,10 @@ class MainActivity : Activity() {
         val known = state?.customActions.orEmpty().any { it.action == AutoClockMediaService.ACTION_BACK_10 }
         val visible = selected != null && (selected.textFile || selected.local || known)
         speedRow.visibility = if (visible) View.VISIBLE else View.GONE
-        val speed = com.kotarov.autoclock.media.PlaybackSpeed.read(settings())
+        val speed = PlaybackSpeed.read(settings(), selected)
         speedValue.text = String.format(java.util.Locale.ROOT, "%.1f×", speed)
-        slowerButton.isEnabled = speed > com.kotarov.autoclock.media.PlaybackSpeed.MIN
-        fasterButton.isEnabled = speed < com.kotarov.autoclock.media.PlaybackSpeed.MAX
+        slowerButton.isEnabled = speed > PlaybackSpeed.MIN
+        fasterButton.isEnabled = speed < PlaybackSpeed.MAX
     }
 
     private fun detachPhoneController() {
