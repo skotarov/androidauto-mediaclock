@@ -910,7 +910,7 @@ class MainActivity : Activity() {
                 progress.dismiss()
                 val items = result.getOrNull().orEmpty()
                 if (items.isEmpty()) AlertDialog.Builder(this).setTitle(page.name)
-                    .setMessage(if (page.localFolder) "No audio or video files found, or folder unavailable." else "No direct playable media found, or page unavailable.")
+                    .setMessage(if (page.localFolder) "No supported audio, video or text files found, or folder unavailable." else "No direct playable media found, or page unavailable.")
                     .setPositiveButton("OK", null).show()
                 else AlertDialog.Builder(this).setTitle(page.name)
                     .setItems((if (page.localFolder) listOf("▶ Play folder") + items.map { it.name } else items.map { it.name + " · " + it.format }).toTypedArray()) { _, index ->

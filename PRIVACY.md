@@ -56,4 +56,4 @@ Public HTTPS page or playlist URLs and folder names are stored locally. Opening 
 
 ## Local folders (Lite beta)
 
-The system folder picker grants read access only to the directory you choose. Its reference and permission are stored on the device. Opening the folder lists supported immediate audio/video files and can play them sequentially. File contents are not uploaded or copied by the folder feature. Removing the folder releases the stored access permission when no other entry uses that URI.
+The system folder picker grants read access only to the directory you choose. Its reference and permission are stored on the device. Opening the folder lists supported immediate audio, video and text/book files and can play or read them sequentially. File contents are not uploaded or copied by the folder feature. Removing the folder releases the stored access permission when no other entry uses that URI.

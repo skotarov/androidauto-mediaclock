@@ -10,7 +10,7 @@ import java.util.Locale
 
 /** Direct public media only. No script execution, converter, login or player scraping. */
 internal object MediaPageParser {
-    data class Item(val id: String, val name: String, val url: String, val format: String)
+    data class Item(val id: String, val name: String, val url: String, val format: String, val textFile: Boolean = false)
     private const val MAX_BYTES = 2 * 1024 * 1024
     private const val MAX_ITEMS = 100
     private val extensions = setOf("mp3","aac","m4a","mp4","m4v","ogg","oga","opus","wav","flac","webm","m3u8","ts","3gp")

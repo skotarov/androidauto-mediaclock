@@ -65,7 +65,9 @@ object StreamLibrary {
             it.url == o.getString("pageUrl") } ?: return@runCatching null
         val url = o.getString("url")
         if (!(if (folder.localFolder) CustomStreamPlayer.validLocal(url) else CustomStreamPlayer.valid(url))) return@runCatching null
-        folder.id to Station(id, o.getString("name"), url, local = folder.localFolder)
+        val name = o.getString("name")
+        val textFile = folder.localFolder && (o.optBoolean("textFile", false) || BookFormat.detect(name, null) != null)
+        folder.id to Station(id, name, url, local = folder.localFolder, textFile = textFile, language = "auto")
     }.getOrNull()
     fun selectedFolder(prefs: SharedPreferences): Station? = selectedChild(prefs)?.first?.let { id ->
         list(prefs).firstOrNull { it.id == id && it.localFolder }
@@ -82,7 +84,7 @@ object StreamLibrary {
         if (hit != null && list(prefs).any { it.browsable && it.id == hit.parent.id && it.url == hit.parent.url }) {
             val item = hit.item
             val o = JSONObject().put("id", item.id).put("parent", hit.parent.id).put("pageUrl", hit.parent.url)
-                .put("url", item.url).put("name", item.name)
+                .put("url", item.url).put("name", item.name).put("textFile", item.textFile)
             prefs.edit().putString(KEY_CHILD, o.toString()).putString(KEY_SELECTED, item.id).apply()
             return true
         }
