@@ -792,6 +792,7 @@ class MainActivity : Activity() {
                 if (icon != null) setImageBitmap(icon)
                 else setImageResource(if (station.mediaPage) R.drawable.ic_source_folder else if (station.textFile) R.drawable.ic_source_text else if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast)
                 contentDescription = station.name
+                if (station.mediaPage) setOnClickListener { openMediaPage(station) }
             }, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginEnd = dp(8) })
             val title = text(station.name, 16f, 0).apply {
                 setTextColor(if (selected == station.id) accent else ink)

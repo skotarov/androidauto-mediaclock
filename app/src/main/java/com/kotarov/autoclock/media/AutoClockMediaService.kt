@@ -336,7 +336,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 val children = mutableListOf<MediaBrowserCompat.MediaItem>()
                 if (valid) outcome.getOrNull().orEmpty().forEach { item ->
                     val desc = MediaDescriptionCompat.Builder().setMediaId(item.id).setTitle(item.name)
-                        .setSubtitle(item.format).setIconBitmap(sourceIcon(R.drawable.ic_source_podcast)).build()
+                        .setSubtitle(item.format).build()
                     children.add(MediaBrowserCompat.MediaItem(desc, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
                 }
                 result.sendResult(children)

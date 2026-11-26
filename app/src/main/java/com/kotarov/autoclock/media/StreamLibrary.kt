@@ -50,11 +50,14 @@ object StreamLibrary {
     }
     fun selected(prefs: SharedPreferences): Station? {
         val id = prefs.getString(KEY_SELECTED, ALERT_ID)
+        if (id == ALERT_ID) return null
         list(prefs).firstOrNull { it.id == id && !it.mediaPage }?.let { return it }
-        return selectedChild(prefs)?.second
+        return if (id?.startsWith("webmedia:") == true) selectedChild(prefs)?.second else null
     }
     private fun selectedChild(prefs: SharedPreferences): Pair<String, Station>? = runCatching {
-        val o = JSONObject(prefs.getString(KEY_CHILD, "").orEmpty())
+        val raw = prefs.getString(KEY_CHILD, "").orEmpty()
+        if (raw.isBlank()) return@runCatching null
+        val o = JSONObject(raw)
         val id = o.getString("id")
         if (id != prefs.getString(KEY_SELECTED, ALERT_ID)) return@runCatching null
         val folder = list(prefs).firstOrNull { it.mediaPage && it.id == o.getString("parent") &&

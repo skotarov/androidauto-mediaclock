@@ -130,14 +130,19 @@ internal object MediaPageParser {
             }
             else -> {
                 val doc = Jsoup.parse(content, base)
-                for (el in doc.select("audio[src], video[src], audio source[src], video source[src], a[href], meta[content]")) {
+                for (el in doc.select("audio[src], video[src], audio source[src], video source[src], a[href], meta[content], [data-stream-url], [data-audio-url]")) {
+                    if (el.hasAttr("data-stream-url") || el.hasAttr("data-audio-url")) {
+                        val address = el.attr("data-stream-url").ifBlank { el.attr("data-audio-url") }
+                        add(address, el.attr("title").ifBlank { el.text() }, explicit = true)
+                    }
                     when (el.tagName()) {
                         "meta" -> {
-                            if (el.attr("property") in setOf("og:audio","og:audio:url","og:audio:secure_url","og:video","og:video:url","og:video:secure_url"))
-                                add(el.attr("content"), doc.title(), explicit = false)
+                            val property = el.attr("property")
+                            if (property in setOf("og:audio","og:audio:url","og:audio:secure_url","og:video","og:video:url","og:video:secure_url"))
+                                add(el.attr("content"), doc.title(), explicit = property.startsWith("og:audio"))
                         }
                         "a" -> add(el.attr("href"), el.text().ifBlank { el.attr("title") }, el.attr("type"))
-                        else -> {
+                        "audio", "video", "source" -> {
                             val owner = el.closest("audio, video") ?: el
                             val title = el.attr("title").ifBlank { owner.attr("title") }.ifBlank { owner.attr("aria-label") }.ifBlank { doc.title() }
                             add(el.attr("src"), title, el.attr("type"), true)
