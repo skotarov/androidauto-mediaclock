@@ -24,8 +24,8 @@ android {
         applicationId = "com.kotarov.autoclock2"
         minSdk = 23
         targetSdk = 36
-        versionCode = 118
-        versionName = "0.118.0"
+        versionCode = 119
+        versionName = "0.119.0"
         buildConfigField("boolean", "LITE_PDF", litePdf.toString())
     }
 
@@ -85,6 +85,7 @@ android {
 
 dependencies {
     implementation("androidx.media:media:1.7.0")
+    implementation("org.jsoup:jsoup:1.18.3")
     implementation("androidx.car.app:app:1.4.0")
     testImplementation("junit:junit:4.13.2")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.2")

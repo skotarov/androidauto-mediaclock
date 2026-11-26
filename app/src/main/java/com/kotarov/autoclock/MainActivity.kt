@@ -38,6 +38,8 @@ import com.kotarov.autoclock.media.CustomStreamPlayer
 import com.kotarov.autoclock.media.StreamLibrary
 import com.kotarov.autoclock.media.PlaybackSpeed
 import com.kotarov.autoclock.media.StreamMetadata
+import com.kotarov.autoclock.media.WebReader
+import com.kotarov.autoclock.media.WebTextProvider
 import com.kotarov.autoclock.media.NoticeTest
 import com.kotarov.autoclock.media.NoticeSoundPlayer
 import android.widget.Switch
@@ -338,6 +340,11 @@ class MainActivity : Activity() {
             setOnClickListener { pickFile() }
         }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(8) })
         addSpaced(streams, addRow)
+        if (!BuildConfig.PLAY_MEDIA_MODE) addSpaced(streams, Button(this).apply {
+            text = "Add Web Page"
+            isAllCaps = false
+            setOnClickListener { addWebPage() }
+        })
         streamRows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         streams.addView(streamRows)
         renderStreams()
@@ -802,7 +809,8 @@ class MainActivity : Activity() {
                             val remaining = StreamLibrary.list(prefs).filterNot { it.id == station.id }
                             StreamLibrary.save(prefs, remaining)
                             if (station.local && remaining.none { it.url == station.url }) {
-                                runCatching { contentResolver.releasePersistableUriPermission(Uri.parse(station.url), Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                                if (WebTextProvider.owns(station.url)) WebTextProvider.delete(this@MainActivity, station.url)
+                                else runCatching { contentResolver.releasePersistableUriPermission(Uri.parse(station.url), Intent.FLAG_GRANT_READ_URI_PERMISSION) }
                             }
                             renderStreams()
                         }.show()
@@ -836,6 +844,77 @@ class MainActivity : Activity() {
         }
         syncWeatherToggle()
         highlightSelectedSource()
+    }
+
+    private var webImport: Thread? = null
+
+    private fun addWebPage() {
+        if (webImport != null) return
+        val field = android.widget.EditText(this).apply {
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
+            hint = "https://..."
+            setSingleLine(true)
+        }
+        val dialog = AlertDialog.Builder(this).setTitle("Add Web Page")
+            .setView(field).setNegativeButton("Cancel", null)
+            .setPositiveButton("Save", null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val address = field.text.toString().trim()
+                if (!WebReader.valid(address)) {
+                    field.error = "Enter a public HTTPS page URL"
+                    return@setOnClickListener
+                }
+                dialog.dismiss()
+                val progress = AlertDialog.Builder(this).setTitle("Reader Mode")
+                    .setMessage("Extracting article text…").setCancelable(false)
+                    .setNegativeButton("Cancel", null).create()
+                val worker = Thread({
+                    val result = runCatching { WebReader.fetch(address) }
+                    val self = Thread.currentThread()
+                    messageHandler.post {
+                        if (webImport === self) {
+                            webImport = null
+                            if (!isDestroyed && !isFinishing) {
+                                progress.dismiss()
+                                result.fold(onSuccess = { page ->
+                                    runCatching {
+                                        val uri = WebTextProvider.save(this, page.text)
+                                        try {
+                                            val prefs = settings()
+                                            StreamLibrary.save(prefs, StreamLibrary.list(prefs) +
+                                                StreamLibrary.newFile(uri, page.title, textFile = true))
+                                        } catch (e: Exception) {
+                                            WebTextProvider.delete(this, uri)
+                                            throw e
+                                        }
+                                        renderStreams()
+                                    }.onFailure {
+                                        AlertDialog.Builder(this).setTitle("Reader Mode")
+                                            .setMessage("Could not save article. Check available storage.")
+                                            .setPositiveButton("OK", null).show()
+                                    }
+                                }, onFailure = {
+                                    AlertDialog.Builder(this).setTitle("Reader Mode")
+                                        .setMessage("No readable article found, or the page is unavailable. Try a public HTTPS article without a login.")
+                                        .setPositiveButton("OK", null).show()
+                                })
+                            }
+                        }
+                    }
+                }, "AutoClockWebReader")
+                webImport = worker
+                progress.setOnShowListener {
+                    progress.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener {
+                        if (webImport === worker) { webImport = null; worker.interrupt() }
+                        progress.dismiss()
+                    }
+                }
+                progress.show()
+                worker.start()
+            }
+        }
+        dialog.show()
     }
 
     private fun pickFile() {
@@ -1117,6 +1196,8 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        webImport?.interrupt()
+        webImport = null
         removeProjectionListener?.invoke()
         removeProjectionListener = null
         messageHandler.removeCallbacks(hideLocationMessage)

@@ -53,5 +53,11 @@
             android:exported="true"
             android:grantUriPermissions="true" />
 
+        <provider
+            android:name=".media.WebTextProvider"
+            android:authorities="com.kotarov.autoclock2.webtext"
+            android:exported="false"
+            android:grantUriPermissions="false" />
+
     </application>
 </manifest>

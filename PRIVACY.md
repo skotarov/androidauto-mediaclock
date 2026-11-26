@@ -45,3 +45,7 @@ EPUB, FB2 and DOCX documents are parsed locally and converted to a temporary pri
 PDF (embedded text only), local HTML and RTF are also processed on the device. PDF extraction can use temporary scratch storage in the private app cache, which is normally deleted when extraction closes. HTML scripts and remote resources are not executed or fetched. Scanned documents and password-protected PDFs are not supported. No OCR or online conversion service is used.
 
 Extracted book text may remain in private app cache for reuse (up to 3 files, 64 MiB total, 7 days; cleaned on subsequent reading). Documents without reliable size and modification metadata use temporary files only. Clearing app cache removes retained extracts. Bookmarks remain separate.
+
+## Web Reader (Lite beta)
+
+When you explicitly add a public HTTPS webpage, the phone requests that page directly from its provider, which receives normal connection information such as IP address. Redirects are HTTPS-only. No browser cookies or login credentials are supplied, scripts are not executed, and embedded images, ads and other resources are not requested. An on-device parser extracts readable article text, saved in private app storage as a local document for offline speech. The saved text is removed when its last library entry is deleted or app data is cleared. No developer server or automatic page refresh is used.
