@@ -198,6 +198,14 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 }
 
                 override fun onCustomAction(action: String?, extras: Bundle?) {
+                    if (action == ACTION_SPEED_DOWN || action == ACTION_SPEED_UP) {
+                        val source = activeSource ?: return
+                        if (!supportsSpeed(source)) return
+                        val current = PlaybackSpeed.read(prefs, source)
+                        val next = PlaybackSpeed.step(current, if (action == ACTION_SPEED_UP) 1 else -1)
+                        if (next != current) PlaybackSpeed.write(prefs, source, next)
+                        return
+                    }
                     val delta = when (action) {
                         ACTION_BACK_10 -> -10000
                         ACTION_FORWARD_10 -> 10000
@@ -608,8 +616,22 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private fun informationText(caption: String?, position: Int?): String? {
         if (!caption.isNullOrBlank()) return caption
         val book = bookTimeline()
-        if (book != null) return MediaPositionSubtitle.book(book.positionMs, book.durationMs)
-        return MediaPositionSubtitle.text(null, position ?: mediaSeek()?.position)
+        val elapsed = if (book != null) MediaPositionSubtitle.book(book.positionMs, book.durationMs)
+            else MediaPositionSubtitle.text(null, position ?: mediaSeek()?.position)
+        val source = activeSource
+        if (!supportsSpeed(source)) return elapsed
+        val rate = String.format(java.util.Locale.ROOT, "%.1f×", PlaybackSpeed.read(prefs, source))
+        return if (elapsed.isNullOrBlank()) rate else "$elapsed · $rate"
+    }
+
+    private fun supportsSpeed(source: StreamLibrary.Station?): Boolean =
+        source != null && (source.textFile || source.local || mediaSeek() != null)
+
+    private fun addSpeedActions(builder: PlaybackStateCompat.Builder, source: StreamLibrary.Station?) {
+        if (!supportsSpeed(source)) return
+        // Keep these after the existing skip controls so Auto can prioritize them.
+        builder.addCustomAction(ACTION_SPEED_DOWN, "Decrease speed by 0.1", R.drawable.ic_speed_down)
+        builder.addCustomAction(ACTION_SPEED_UP, "Increase speed by 0.1", R.drawable.ic_speed_up)
     }
 
     private fun publishMediaSubtitle(key: String, caption: String?, position: Int?) {
@@ -720,6 +742,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             builder.addCustomAction(ACTION_BACK_10, "Back 10 seconds", R.drawable.ic_replay_10)
             builder.addCustomAction(ACTION_FORWARD_10, "Forward 10 seconds", R.drawable.ic_forward_10)
         }
+        addSpeedActions(builder, station)
         session.setPlaybackState(builder.build())
         lastPlayback = key
     }
@@ -859,12 +882,15 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             builder.addCustomAction(ACTION_BACK_10, "Back 10 seconds", R.drawable.ic_replay_10)
             builder.addCustomAction(ACTION_FORWARD_10, "Forward 10 seconds", R.drawable.ic_forward_10)
         }
+        addSpeedActions(builder, source)
         session.setPlaybackState(builder.build())
     }
 
     companion object {
         const val ACTION_BACK_10 = "autoclock.back_10"
         const val ACTION_FORWARD_10 = "autoclock.forward_10"
+        const val ACTION_SPEED_DOWN = "autoclock.speed_down"
+        const val ACTION_SPEED_UP = "autoclock.speed_up"
         const val PREFERENCES = "clock_settings"
         const val KEY_LAYOUT = "clock_layout"
         const val KEY_SHOW_LOCATION = "show_location_message_v48"
