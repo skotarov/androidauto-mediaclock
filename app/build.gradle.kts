@@ -12,7 +12,8 @@ val commercialForecastEndpoint = providers.gradleProperty("autoClockForecastEndp
     .orElse("").get().trim()
 val escapedEndpoint = commercialForecastEndpoint.replace("\\", "\\\\").replace("\"", "\\\"")
 
-val litePdf = providers.gradleProperty("litePdf").map { it.toBoolean() }.orElse(false).get()
+// Lite is the only distributed and compiled edition.
+val litePdf = true
 
 android {
     buildFeatures { buildConfig = true }
@@ -23,8 +24,8 @@ android {
         applicationId = "com.kotarov.autoclock2"
         minSdk = 23
         targetSdk = 36
-        versionCode = 111
-        versionName = "0.111.0"
+        versionCode = 112
+        versionName = "0.112.0"
         buildConfigField("boolean", "LITE_PDF", litePdf.toString())
     }
 
@@ -62,7 +63,7 @@ android {
         }
     }
 
-    sourceSets.getByName("main").java.srcDir(if (litePdf) "src/litePdf/kotlin" else "src/universalPdf/kotlin")
+    sourceSets.getByName("main").java.srcDir("src/litePdf/kotlin")
 
     packaging {
         resources {
@@ -84,10 +85,6 @@ android {
 
 dependencies {
     implementation("androidx.media:media:1.7.0")
-    if (!litePdf) implementation("com.tom-roush:pdfbox-android:2.0.27.0") {
-        // Text-only reader rejects encrypted documents and never signs/verifies.
-        exclude(group = "org.bouncycastle")
-    }
     implementation("androidx.car.app:app:1.4.0")
     testImplementation("junit:junit:4.13.2")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.2")

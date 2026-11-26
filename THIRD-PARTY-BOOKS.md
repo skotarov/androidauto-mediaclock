@@ -7,4 +7,4 @@ The Android distribution must retain applicable upstream notices and license fil
 
 The compact build excludes optional Bouncy Castle public-key encryption and signature libraries. Password-protected/encrypted PDFs are not a supported reading format. Android 15+ can extract new PDF books with the platform renderer; older devices and existing legacy bookmarks use PDFBox. HTML extraction changed in v0.107; older bookmarks may land near, not at, their previous exact word.
 
-Lite omits PDFBox entirely; Universal retains it for legacy PDFs. Android 12–14 require S Extensions 13 for native PDF extraction. Font and CMap resources needed by PDFBox remain intact to protect multilingual extraction.
+From v0.112 only Lite is built and published; PDFBox is no longer a dependency. Older Universal versions retained it for legacy PDFs. Android 12–14 require S Extensions 13 for native PDF extraction. Older Universal builds retained font and CMap resources for multilingual extraction.

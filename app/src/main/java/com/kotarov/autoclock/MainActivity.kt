@@ -73,10 +73,8 @@ class MainActivity : Activity() {
     private lateinit var themeButton: ImageButton
     private lateinit var backButton: ImageButton
     private lateinit var forwardButton: ImageButton
-    private lateinit var speedRow: LinearLayout
-    private lateinit var speedValue: TextView
-    private lateinit var slowerButton: Button
-    private lateinit var fasterButton: Button
+    private lateinit var slowerButton: ImageButton
+    private lateinit var fasterButton: ImageButton
     private val playbackCallback = object : MediaControllerCompat.Callback() {
         override fun onPlaybackStateChanged(state: PlaybackStateCompat?) {
             syncTransportButtons(state)
@@ -296,9 +294,11 @@ class MainActivity : Activity() {
         forwardButton = quickButton(R.drawable.ic_forward_10, "Forward 10 seconds") {
             phoneController?.transportControls?.sendCustomAction(AutoClockMediaService.ACTION_FORWARD_10, null)
         }
-        transportRow.addView(weatherButton, LinearLayout.LayoutParams(dp(108), dp(52)))
-        listOf(backButton, forwardButton).forEach { button ->
-            transportRow.addView(button, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(12) })
+        slowerButton = quickButton(R.drawable.ic_speed_slower, "Decrease playback speed") { changeSpeed(-1) }
+        fasterButton = quickButton(R.drawable.ic_speed_faster, "Increase playback speed") { changeSpeed(1) }
+        transportRow.addView(weatherButton, LinearLayout.LayoutParams(dp(88), dp(52)))
+        listOf(backButton, forwardButton, slowerButton, fasterButton).forEach { button ->
+            transportRow.addView(button, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(4) })
         }
         addSpaced(root, transportRow)
         syncTransportButtons(null)
@@ -309,33 +309,6 @@ class MainActivity : Activity() {
             visibility = View.GONE
         }
         root.addView(locationMessage)
-
-        speedRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER
-        }
-        fun speedButton(label: String, description: String, action: () -> Unit) = Button(this).apply {
-            text = label
-            contentDescription = description
-            isAllCaps = false
-            textSize = 19f
-            setOnClickListener { action() }
-        }
-        slowerButton = speedButton("−", "Decrease playback speed") { changeSpeed(-1) }
-        fasterButton = speedButton("+", "Increase playback speed") { changeSpeed(1) }
-        speedValue = text("1.0×", 17f, dp(4)).apply {
-            gravity = android.view.Gravity.CENTER
-            contentDescription = "Playback speed; tap to reset"
-            setOnClickListener {
-                val p = settings()
-                StreamLibrary.selected(p)?.let { PlaybackSpeed.write(p, it, 1f) }
-            }
-        }
-        speedRow.addView(slowerButton, LinearLayout.LayoutParams(dp(64), dp(48)))
-        speedRow.addView(speedValue, LinearLayout.LayoutParams(dp(100), dp(48)))
-        speedRow.addView(fasterButton, LinearLayout.LayoutParams(dp(64), dp(48)))
-        root.addView(speedRow)
-        syncSpeedControls(null)
 
         val streams = settingsGroup(root, if (BuildConfig.PLAY_MEDIA_MODE) "Audio library" else "Streams")
         val addRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -485,15 +458,24 @@ class MainActivity : Activity() {
     }
 
     private fun syncSpeedControls(state: PlaybackStateCompat?) {
-        if (!::speedRow.isInitialized) return
+        if (!::slowerButton.isInitialized || !::fasterButton.isInitialized) return
         val selected = StreamLibrary.selected(settings())
-        val known = state?.customActions.orEmpty().any { it.action == AutoClockMediaService.ACTION_BACK_10 }
+        val known = state?.customActions.orEmpty().any {
+            it.action == AutoClockMediaService.ACTION_SPEED_DOWN || it.action == AutoClockMediaService.ACTION_SPEED_UP
+        }
         val visible = selected != null && (selected.textFile || selected.local || known)
-        speedRow.visibility = if (visible) View.VISIBLE else View.GONE
+        slowerButton.visibility = if (visible) View.VISIBLE else View.GONE
+        fasterButton.visibility = if (visible) View.VISIBLE else View.GONE
         val speed = PlaybackSpeed.read(settings(), selected)
-        speedValue.text = String.format(java.util.Locale.ROOT, "%.1f×", speed)
-        slowerButton.isEnabled = speed > PlaybackSpeed.MIN
-        fasterButton.isEnabled = speed < PlaybackSpeed.MAX
+        slowerButton.isEnabled = visible && speed > PlaybackSpeed.MIN
+        fasterButton.isEnabled = visible && speed < PlaybackSpeed.MAX
+        paintQuickButton(slowerButton, false)
+        paintQuickButton(fasterButton, false)
+        // Preserve the original larger play/pause button when speed actions are hidden.
+        val playWidth = dp(if (visible) 88 else 108)
+        if (weatherButton.layoutParams.width != playWidth) {
+            weatherButton.layoutParams = weatherButton.layoutParams.apply { width = playWidth }
+        }
     }
 
     private fun detachPhoneController() {
