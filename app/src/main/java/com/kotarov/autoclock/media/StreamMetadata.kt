@@ -5,13 +5,13 @@ import android.graphics.BitmapFactory
 import android.util.Base64
 import java.io.ByteArrayOutputStream
 import java.net.URI
-import javax.net.ssl.HttpsURLConnection
+import java.net.HttpURLConnection
 
 /** Best-effort discovery, invoked only on explicit add/edit, never during playback. */
 object StreamMetadata {
     data class Info(val name: String?, val icon: String)
-    private fun connection(url: String): HttpsURLConnection =
-        (URI(url).toURL().openConnection() as HttpsURLConnection).apply {
+    private fun connection(url: String): HttpURLConnection =
+        (URI(url).toURL().openConnection() as HttpURLConnection).apply {
             connectTimeout = 4000
             readTimeout = 4000
             instanceFollowRedirects = false
@@ -19,6 +19,7 @@ object StreamMetadata {
             setRequestProperty("User-Agent", "AutoClock/0.85")
         }
     fun lookup(url: String): Info {
+        if (!CustomStreamPlayer.valid(url)) return Info(null, "")
         var name: String? = null
         var iconUrl: String? = null
         runCatching {
@@ -34,7 +35,7 @@ object StreamMetadata {
         val candidate = runCatching {
             val u = origin.resolve(iconUrl ?: "/favicon.ico")
             // Do not contact unrelated sites automatically or disclose a stream token.
-            if (u.scheme == "https" && u.host.equals(origin.host, true) && u.userInfo == null)
+            if (u.scheme == "https" && u.host.equals(origin.host, true) && u.userInfo == null && u.rawQuery == null && u.fragment == null)
                 u.toString() else null
         }.getOrNull()
         val icon = candidate?.let { fetchIcon(it) }.orEmpty()

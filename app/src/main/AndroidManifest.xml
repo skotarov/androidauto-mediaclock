@@ -16,6 +16,8 @@
 
     <application
         android:allowBackup="false"
+        android:usesCleartextTraffic="true"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:label="SmartTrip Clock"
         android:icon="@drawable/ic_auto_clock"
         android:supportsRtl="true"

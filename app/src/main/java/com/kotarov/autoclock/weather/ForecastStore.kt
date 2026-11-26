@@ -207,7 +207,8 @@ object ForecastStore {
             "hourly=temperature_2m,weather_code,precipitation_probability,is_day&" +
             "current=temperature_2m,weather_code,is_day&timezone=auto&timeformat=unixtime&past_hours=1&forecast_hours=11"
         val connection = try {
-            (URL(url).openConnection() as HttpURLConnection).apply {
+            (URL(url).openConnection() as javax.net.ssl.HttpsURLConnection).apply {
+                instanceFollowRedirects = false
                 requestMethod = "GET"
                 connectTimeout = 5000
                 readTimeout = 5000

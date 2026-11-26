@@ -12,7 +12,7 @@ import android.os.SystemClock
 import android.util.Log
 import java.net.URI
 
-/** One user-selected direct HTTPS stream. No idle player or persistent audio route. */
+/** One user-selected direct HTTP(S) audio stream. No idle player or persistent audio route. */
 class CustomStreamPlayer(context: Context) {
     private val app = context.applicationContext
     private val localBookmarks = app.getSharedPreferences("audio_bookmarks", Context.MODE_PRIVATE)
@@ -288,7 +288,10 @@ class CustomStreamPlayer(context: Context) {
                 } else fail(token, "Stream ended", onError)
             }
             if (validLocal(url)) media.setDataSource(app, android.net.Uri.parse(url))
-            else media.setDataSource(url)
+            else if (URI(url).scheme.equals("https", true)) {
+                // Prevent HTTPS streams from forwarding private URL parameters to HTTP.
+                media.setDataSource(url, mapOf("android-allow-cross-domain-redirect" to "0"))
+            } else media.setDataSource(url)
             handler.postDelayed(timeout, 20000L)
             media.prepareAsync()
         } catch (e: Exception) {
@@ -380,7 +383,9 @@ class CustomStreamPlayer(context: Context) {
         }.getOrDefault(false)
         fun valid(url: String): Boolean = runCatching {
             val uri = URI(url)
-            uri.scheme.equals("https", true) && !uri.host.isNullOrBlank() &&
+            val secure = uri.scheme.equals("https", true)
+            val publicHttp = uri.scheme.equals("http", true) && uri.rawQuery == null
+            (secure || publicHttp) && !uri.host.isNullOrBlank() &&
                 uri.userInfo == null && uri.fragment == null
         }.getOrDefault(false)
     }

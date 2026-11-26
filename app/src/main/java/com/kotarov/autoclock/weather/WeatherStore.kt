@@ -499,7 +499,8 @@ object WeatherStore {
     }
 
     private fun fetchText(url: String, agent: String): String? {
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+        val connection = (URL(url).openConnection() as javax.net.ssl.HttpsURLConnection).apply {
+            instanceFollowRedirects = false
             requestMethod = "GET"
             connectTimeout = 5000
             readTimeout = 5000

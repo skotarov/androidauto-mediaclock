@@ -881,7 +881,7 @@ class MainActivity : Activity() {
         }
         val url = android.widget.EditText(this).apply {
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
-            hint = "https://..."
+            hint = "https:// or http:// (public audio)"
             setSingleLine(true)
             setText(existing?.url.orEmpty())
         }
@@ -898,7 +898,7 @@ class MainActivity : Activity() {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val address = url.text.toString().trim()
                 if (!CustomStreamPlayer.valid(address)) {
-                    url.error = "Enter a direct HTTPS audio URL"
+                    url.error = "Enter a direct HTTP(S) audio URL. HTTP must have no credentials or query parameters."
                     return@setOnClickListener
                 }
                 val entered = name.text.toString().trim().take(64)
