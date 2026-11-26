@@ -19,6 +19,8 @@ class CustomStreamPlayer(context: Context) {
     private val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val handler = Handler(Looper.getMainLooper())
     private var player: MediaPlayer? = null
+    private var fallback: NetworkAudioPlayer? = null
+    private var prepareTimeout: Runnable? = null
     private var generation = 0L
     private val keepAlive = PhoneAudioKeepAlive()
     private var ownsMode = false
@@ -40,8 +42,9 @@ class CustomStreamPlayer(context: Context) {
 
     /** Never report a stale saved seek position as currently playing media. */
     fun activePositionMs(url: String?): Int? {
-        val media = player ?: return null
         if (url == null || requested?.first != url || !prepared || !seekable || suspendedMedia) return null
+        fallback?.let { return it.position() }
+        val media = player ?: return null
         return runCatching { media.currentPosition }.getOrNull()?.takeIf { it >= 0 }
     }
 
@@ -54,7 +57,9 @@ class CustomStreamPlayer(context: Context) {
         if (requested?.first == url) {
             // An active request must establish its own timeline. Never reuse a
             // previous finite duration while the new connection is live/loading.
-            if (!prepared || !seekable || media == null) return null
+            if (!prepared || !seekable) return null
+            fallback?.let { return it.seekState() }
+            if (media == null) return null
             return runCatching { SeekState(media.currentPosition, media.duration) }.getOrNull()
                 ?.takeIf { PlaybackTimeline.known(it.position, it.duration) }
         }
@@ -63,7 +68,7 @@ class CustomStreamPlayer(context: Context) {
     }
 
     fun isPlaying(): Boolean = if (reading) reader?.progress() != null
-        else runCatching { player?.isPlaying == true }.getOrDefault(false)
+        else fallback?.isPlaying() ?: runCatching { player?.isPlaying == true }.getOrDefault(false)
 
     internal fun bookTimeline(url: String?): TextReading.Timeline? {
         if (url == null) return null
@@ -82,12 +87,13 @@ class CustomStreamPlayer(context: Context) {
         // A pending source switch must not change the outgoing file or restart its TTS.
         if (sourceUrl == null || requested?.first != sourceUrl) return
         if (reading) reader?.setSpeed(speed)
+        if (prepared && seekable && !suspendedMedia) fallback?.setSpeed(speed)
         val media = player
         if (media != null && prepared && seekable && !suspendedMedia && isPlaying() &&
             kotlin.math.abs(actualMediaSpeed() - speed) > 0.001f) applyMediaSpeed(media)
     }
 
-    fun actualMediaSpeed(): Float = if (seekable) runCatching { player?.playbackParams?.speed ?: 1f }.getOrDefault(1f) else 1f
+    fun actualMediaSpeed(): Float = if (seekable) fallback?.speed() ?: runCatching { player?.playbackParams?.speed ?: 1f }.getOrDefault(1f) else 1f
 
     private fun applyMediaSpeed(media: MediaPlayer) {
         runCatching {
@@ -112,6 +118,9 @@ class CustomStreamPlayer(context: Context) {
         if (prepared && seekable && requested?.first == url && media != null) {
             if (runCatching { media.seekTo(target) }.isFailure) return false
         }
+        if (prepared && seekable && requested?.first == url && fallback != null) {
+            if (fallback?.seek(target) != true) return false
+        }
         if (url != null) {
             savedSeek = url to current.copy(position = target)
             if (validLocal(url)) localBookmarks.edit().putInt(url, target).apply()
@@ -128,6 +137,7 @@ class CustomStreamPlayer(context: Context) {
                 suspendedMedia = false
                 try {
                     player?.let { it.start(); applyMediaSpeed(it) }
+                    fallback?.let { if (seekable) it.setSpeed(speed); it.play() }
                     changed()
                 } catch (_: Exception) { fail(generation, "Playback failed", onError) }
             }
@@ -242,16 +252,22 @@ class CustomStreamPlayer(context: Context) {
             }
             return
         }
+        if (!validLocal(url) && NetworkAudioPlayer.preferred(url)) {
+            openFallback(token, url, phone, onError)
+            return
+        }
         try {
             val media = MediaPlayer()
             player = media
             media.setAudioAttributes(AudioAttributes.Builder()
                 .setUsage(if (phone) AudioAttributes.USAGE_VOICE_COMMUNICATION else AudioAttributes.USAGE_MEDIA)
                 .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
-            val timeout = Runnable { fail(token, "Stream connection timed out", onError) }
+            val timeout = Runnable { nativeFailed(token, url, phone, "Stream connection timed out", onError) }
+            prepareTimeout = timeout
             media.setOnPreparedListener {
                 if (token == generation && player === it) {
                     handler.removeCallbacks(timeout)
+                    prepareTimeout = null
                     runCatching {
                         prepared = true
                         seekable = it.duration > 0
@@ -275,7 +291,7 @@ class CustomStreamPlayer(context: Context) {
             }
             media.setOnSeekCompleteListener { if (token == generation) changed() }
             media.setOnErrorListener { _, _, _ ->
-                fail(token, "Stream unavailable", onError)
+                if (player === media) nativeFailed(token, url, phone, "Stream unavailable", onError)
                 true
             }
             media.setOnCompletionListener {
@@ -297,7 +313,63 @@ class CustomStreamPlayer(context: Context) {
         } catch (e: Exception) {
             // Do not log the URL, which might contain a private access token.
             Log.w("AutoClock", "Stream could not be opened")
-            fail(token, "Stream unavailable", onError)
+            nativeFailed(token, url, phone, "Stream unavailable", onError)
+        }
+    }
+
+    private fun nativeFailed(token: Long, url: String, phone: Boolean, message: String, onError: (String) -> Unit) {
+        if (token != generation) return
+        if (!prepared && !validLocal(url) && fallback == null) {
+            prepareTimeout?.let { handler.removeCallbacks(it) }
+            prepareTimeout = null
+            val old = player
+            player = null
+            runCatching { old?.release() }
+            // Keep the existing route and silent keepalive intact during the one fallback.
+            openFallback(token, url, phone, onError)
+        } else fail(token, message, onError)
+    }
+
+    private fun openFallback(token: Long, url: String, phone: Boolean, onError: (String) -> Unit) {
+        if (token != generation) return
+        try {
+            val engine = NetworkAudioPlayer(app, phone)
+            fallback = engine
+            val timeout = Runnable {
+                if (fallback === engine) fail(token, "Stream connection timed out", onError)
+            }
+            prepareTimeout = timeout
+            handler.postDelayed(timeout, 20_000L)
+            engine.open(url, onReady = {
+                if (token == generation && fallback === engine) {
+                    handler.removeCallbacks(timeout)
+                    prepareTimeout = null
+                    val first = !prepared
+                    prepared = true
+                    seekable = engine.seekState() != null
+                    if (first && seekable) {
+                        val pos = savedSeek?.takeIf { it.first == url }?.second?.position ?: 0
+                        if (pos > 0) engine.seek(pos)
+                        engine.setSpeed(speed)
+                    }
+                    if (!seekable && savedSeek?.first == url) savedSeek = null
+                    changed()
+                }
+            }, onChanged = {
+                if (token == generation && fallback === engine && prepared) changed()
+            }, onEnded = {
+                if (token == generation && fallback === engine) {
+                    val finite = seekable
+                    savedSeek = null
+                    requested = null
+                    stop()
+                    onError(if (finite) "Media ended" else "Stream ended")
+                }
+            }, onError = {
+                if (token == generation && fallback === engine) fail(token, "Stream unavailable (AAC compatible player)", onError)
+            })
+        } catch (_: Exception) {
+            fail(token, "Stream unavailable (AAC compatible player)", onError)
         }
     }
 
@@ -319,6 +391,10 @@ class CustomStreamPlayer(context: Context) {
     fun suspendForNotice() {
         if (failed || suspendedMedia) return
         val media = player
+        if (fallback != null && prepared && requested?.second == false && fallback?.pause() == true) {
+            suspendedMedia = true
+            return
+        }
         // A normal media output can stay prepared while a short notice plays.
         // HFP must be released before the notice can claim the phone route.
         if (media != null && prepared && requested?.second == false &&
@@ -338,6 +414,7 @@ class CustomStreamPlayer(context: Context) {
     fun stop(keepReader: Boolean = false) {
         generation++
         handler.removeCallbacksAndMessages(null)
+        prepareTimeout = null
         requested?.first?.let { source ->
             reader?.timeline(source)?.let { savedBookTimeline = source to it }
         }
@@ -349,6 +426,12 @@ class CustomStreamPlayer(context: Context) {
         val previous = requested
         requested = null
         val old = player
+        val alternate = fallback
+        if (alternate != null && previous != null && prepared && seekable) {
+            alternate.seekState()?.let { savedSeek = previous.first to it }
+        }
+        fallback = null
+        alternate?.release()
         if (old != null && previous != null && prepared && seekable) {
             runCatching { SeekState(old.currentPosition, old.duration) }.getOrNull()
                 ?.takeIf { it.duration > 0 }?.let {

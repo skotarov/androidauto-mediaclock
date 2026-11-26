@@ -24,8 +24,8 @@ android {
         applicationId = "com.kotarov.autoclock2"
         minSdk = 23
         targetSdk = 36
-        versionCode = 121
-        versionName = "0.121.0"
+        versionCode = 122
+        versionName = "0.122.0"
         buildConfigField("boolean", "LITE_PDF", litePdf.toString())
     }
 
@@ -85,6 +85,8 @@ android {
 
 dependencies {
     implementation("androidx.media:media:1.7.0")
+    implementation("androidx.media3:media3-exoplayer:1.6.1")
+    implementation("androidx.media3:media3-exoplayer-hls:1.6.1")
     implementation("org.jsoup:jsoup:1.18.3")
     implementation("androidx.car.app:app:1.4.0")
     testImplementation("junit:junit:4.13.2")
