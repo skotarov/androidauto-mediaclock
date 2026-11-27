@@ -36,7 +36,7 @@ private class PhoneSettingsScreen(context: CarContext) : Screen(context) {
                         val intent = Intent(carContext, MainActivity::class.java)
                             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                         runCatching { carContext.startActivity(intent) }.onFailure {
-                            CarToast.makeText(carContext, "Open SmartTrip Clock on your phone when parked", CarToast.LENGTH_LONG).show()
+                            CarToast.makeText(carContext, "Open Travel to Awaken on your phone when parked", CarToast.LENGTH_LONG).show()
                         }
                     }).build()
             ).build()).build()

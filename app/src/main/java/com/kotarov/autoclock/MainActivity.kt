@@ -219,7 +219,7 @@ class MainActivity : Activity() {
             }, LinearLayout.LayoutParams(dp(36), dp(36)).apply {
                 marginEnd = dp(6)
             })
-            addView(text("SmartTrip Clock", 27f, 0).apply {
+            addView(text(getString(R.string.app_name), 27f, 0).apply {
                 setOnLongClickListener { showPerformanceDiagnostics(); true }
             }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         }
@@ -426,8 +426,17 @@ class MainActivity : Activity() {
         root.addView(View(this), LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
         ))
+        root.addView(Button(this).apply {
+            text = getString(R.string.about_title)
+            isAllCaps = false
+            setOnClickListener { showAbout() }
+        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            gravity = android.view.Gravity.CENTER_HORIZONTAL
+            topMargin = dp(20)
+        })
         val credit = if (BuildConfig.PLAY_MEDIA_MODE) "Privacy Policy"
-            else "Weather data: NOAA / Open-Meteo (CC BY 4.0)\nAdapted for SmartTrip Clock\nPrivacy Policy"
+            else "Weather data: NOAA / Open-Meteo (CC BY 4.0)\nAdapted for Travel to Awaken\nPrivacy Policy"
         val attribution = android.text.SpannableString(credit).apply {
             fun link(label: String, url: String) {
                 val start = credit.indexOf(label)
@@ -455,6 +464,42 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
         ))
+    }
+
+    private fun showAbout() {
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = android.view.Gravity.CENTER_HORIZONTAL
+            setPadding(dp(24), dp(20), dp(24), dp(12))
+            addView(ImageView(this@MainActivity).apply {
+                setImageResource(R.drawable.ic_auto_clock)
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }, LinearLayout.LayoutParams(dp(88), dp(88)))
+            addView(TextView(this@MainActivity).apply {
+                text = getString(R.string.app_name)
+                textSize = 24f
+                gravity = android.view.Gravity.CENTER
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+                setPadding(0, dp(12), 0, dp(6))
+            })
+            addView(TextView(this@MainActivity).apply {
+                text = getString(R.string.about_tagline)
+                textSize = 16f
+                gravity = android.view.Gravity.CENTER
+                setTypeface(typeface, android.graphics.Typeface.ITALIC)
+                setPadding(0, 0, 0, dp(20))
+            })
+            addView(TextView(this@MainActivity).apply {
+                text = getString(R.string.about_message)
+                textSize = 16f
+                setLineSpacing(dp(4).toFloat(), 1f)
+            })
+        }
+        AlertDialog.Builder(this)
+            .setView(ScrollView(this).apply { addView(content) })
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
     }
 
     private fun showPerformanceDiagnostics() {
