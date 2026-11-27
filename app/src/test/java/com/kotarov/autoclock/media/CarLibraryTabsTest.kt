@@ -15,10 +15,14 @@ class CarLibraryTabsTest {
         assertEquals(4, sources.size)
     }
 
-    @Test fun onlyBrowsableSourcesCanBePinned() {
+    @Test fun playableSourcesCanBePinned() {
         val audio = StreamLibrary.Station("audio", "song.mp3", "https://example.com/song.mp3")
         val sources = listOf(folder("a"), folder("b"), folder("c"), folder("d", false), audio)
-        assertFalse(CarLibraryTabs.eligible(audio))
+        assertTrue(CarLibraryTabs.eligible(audio))
+        assertFalse(CarLibraryTabs.browsable(audio))
+        assertEquals("audio", CarLibraryTabs.sourceId(CarLibraryTabs.sourceTab("audio")))
+        assertNull(CarLibraryTabs.toggle(sources, "audio"))
+        assertEquals(2, CarLibraryTabs.pinned(sources, 4, true).size)
         assertNull(CarLibraryTabs.toggle(sources, "d"))
         val unpinned = CarLibraryTabs.toggle(sources, "a")!!
         val pinned = CarLibraryTabs.toggle(unpinned, "d")!!

@@ -24,8 +24,8 @@ android {
         applicationId = "com.kotarov.autoclock2"
         minSdk = 23
         targetSdk = 36
-        versionCode = 146
-        versionName = "0.146.0"
+        versionCode = 147
+        versionName = "0.147.0"
         buildConfigField("boolean", "LITE_PDF", litePdf.toString())
     }
 

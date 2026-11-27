@@ -128,6 +128,10 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == CarLibraryTabs.KEY_ALERT_PIN) {
+            notifyLibraryChanged()
+            return@OnSharedPreferenceChangeListener
+        }
         if (key == CallInterruptionMonitor.PERMISSION_REFRESH) {
             if (!playMode && clientActive) callMonitor.refreshPermission()
             return@OnSharedPreferenceChangeListener
@@ -363,7 +367,11 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         // library entries. Other clients retain the original flat root.
         val carRoot = !playMode && clientPackageName == "com.google.android.projection.gearhead"
         val limit = rootHints?.getInt(androidx.media.utils.MediaConstants.BROWSER_ROOT_HINTS_KEY_ROOT_CHILDREN_LIMIT, 4) ?: 4
-        return BrowserRoot(if (carRoot) CarLibraryTabs.rootId(limit) else ROOT_ID, null)
+        val extras = if (carRoot) Bundle().apply {
+            putParcelable("androidx.media.BrowserRoot.Extras.APPLICATION_PREFERENCES_USING_CAR_APP_LIBRARY_INTENT",
+                Intent(this@AutoClockMediaService, com.kotarov.autoclock.car.PhoneSettingsService::class.java))
+        } else null
+        return BrowserRoot(if (carRoot) CarLibraryTabs.rootId(limit) else ROOT_ID, extras)
     }
 
     override fun onLoadChildren(
@@ -383,10 +391,30 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 items.add(MediaBrowserCompat.MediaItem(desc, MediaBrowserCompat.MediaItem.FLAG_BROWSABLE))
             }
             tab(CarLibraryTabs.LIBRARY_ID, "Library", R.drawable.ic_source_folder)
-            CarLibraryTabs.pinned(StreamLibrary.list(prefs), tabLimit).forEach { station ->
-                tab(if (station.browsable) station.id else BookNavigation.BOOK_PREFIX + station.id,
-                    station.name, if (station.localFolder) R.drawable.ic_source_folder
-                        else if (station.mediaPage) R.drawable.ic_source_web else R.drawable.ic_source_text)
+            val alertPinned = prefs.getBoolean(CarLibraryTabs.KEY_ALERT_PIN, false)
+            if (alertPinned && tabLimit > 1) tab(CarLibraryTabs.ALERT_TAB, "Alert only", R.drawable.ic_source_travel)
+            CarLibraryTabs.pinned(StreamLibrary.list(prefs), tabLimit, alertPinned).forEach { station ->
+                val id = when {
+                    station.browsable -> station.id
+                    CarLibraryTabs.browsable(station) -> BookNavigation.BOOK_PREFIX + station.id
+                    else -> CarLibraryTabs.sourceTab(station.id)
+                }
+                tab(id, station.name, libraryIcon(station))
+            }
+            result.sendResult(items)
+            return
+        }
+        val pinnedId = CarLibraryTabs.sourceId(parentId)
+        if (!playMode && (parentId == CarLibraryTabs.ALERT_TAB || pinnedId != null)) {
+            val station = StreamLibrary.list(prefs).firstOrNull { it.id == pinnedId && !CarLibraryTabs.browsable(it) }
+            val items = mutableListOf<MediaBrowserCompat.MediaItem>()
+            if (parentId == CarLibraryTabs.ALERT_TAB || station != null) {
+                val desc = MediaDescriptionCompat.Builder()
+                    .setMediaId(station?.id ?: CLOCK_ID)
+                    .setTitle(station?.name ?: "Alert only")
+                    .setIconBitmap(sourceIcon(station?.let { libraryIcon(it) } ?: R.drawable.ic_source_travel))
+                    .build()
+                items.add(MediaBrowserCompat.MediaItem(desc, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
             }
             result.sendResult(items)
             return
@@ -472,6 +500,12 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         if (snapshot != null) start(snapshot)
         else MediaPageDirectory.load(this, folder) { outcome -> start(outcome.getOrNull().orEmpty()) }
     }
+
+    private fun libraryIcon(station: StreamLibrary.Station): Int =
+        if (station.localFolder) R.drawable.ic_source_folder
+        else if (station.mediaPage) R.drawable.ic_source_web
+        else if (station.textFile) R.drawable.ic_source_text
+        else if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast
 
     private fun notifyLibraryChanged() {
         notifyChildrenChanged(ROOT_ID)

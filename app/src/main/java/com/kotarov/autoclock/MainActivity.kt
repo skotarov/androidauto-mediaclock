@@ -106,10 +106,11 @@ class MainActivity : Activity() {
     private lateinit var streamRows: LinearLayout
     private val sourceTitles = mutableMapOf<String, TextView>()
     private var renderedSources: List<StreamLibrary.Station>? = null
+    private var renderedAlertPin: Boolean? = null
     private var highlightedSource: String? = null
     private val weatherPreferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == StreamLibrary.KEY_LIST || key == StreamLibrary.KEY_SELECTED) {
-            if (key == StreamLibrary.KEY_LIST) renderStreams() else highlightSelectedSource()
+        if (key == StreamLibrary.KEY_LIST || key == StreamLibrary.KEY_SELECTED || key == CarLibraryTabs.KEY_ALERT_PIN) {
+            if (key != StreamLibrary.KEY_SELECTED) renderStreams() else highlightSelectedSource()
             syncTransportButtons(phoneController?.playbackState)
         }
         if (key == PhoneAudioMode.KEY || key == NoticeAudio.KEY_SPEAK ||
@@ -775,11 +776,13 @@ class MainActivity : Activity() {
         if (!::streamRows.isInitialized) return
         val prefs = settings()
         val sources = StreamLibrary.list(prefs)
-        if (renderedSources == sources) {
+        val alertPinned = prefs.getBoolean(CarLibraryTabs.KEY_ALERT_PIN, false)
+        if (renderedSources == sources && renderedAlertPin == alertPinned) {
             highlightSelectedSource()
             return
         }
         renderedSources = sources
+        renderedAlertPin = alertPinned
         streamRows.removeAllViews()
         sourceTitles.clear()
         val selected = StreamLibrary.selectedRootId(prefs)
@@ -800,6 +803,21 @@ class MainActivity : Activity() {
                 setImageResource(R.drawable.ic_source_travel)
             }, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginEnd = dp(8) })
             addView(alert, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(text(if (alertPinned) "★" else "☆", 23f, 0).apply {
+                gravity = android.view.Gravity.CENTER
+                setTextColor(if (alertPinned) Color.rgb(255, 190, 0) else ink)
+                contentDescription = if (alertPinned) "Remove Alert only from car tabs" else "Pin Alert only to car tabs"
+                setOnClickListener {
+                    val p = settings()
+                    val pinned = p.getBoolean(CarLibraryTabs.KEY_ALERT_PIN, false)
+                    if (!pinned && StreamLibrary.list(p).count { it.pinned } >= CarLibraryTabs.MAX_TABS - 1)
+                        android.widget.Toast.makeText(this@MainActivity, "Up to 3 pinned tabs. Unpin another first.", android.widget.Toast.LENGTH_SHORT).show()
+                    else {
+                        p.edit().putBoolean(CarLibraryTabs.KEY_ALERT_PIN, !pinned).apply()
+                        renderStreams()
+                    }
+                }
+            }, LinearLayout.LayoutParams(dp(36), dp(48)))
             setOnClickListener { selectPhoneSource(StreamLibrary.ALERT_ID) }
         }
         if (!BuildConfig.PLAY_MEDIA_MODE) addSpaced(streamRows, alertRow)
@@ -868,7 +886,7 @@ class MainActivity : Activity() {
                         val p = settings()
                         val latest = StreamLibrary.list(p)
                         val current = latest.firstOrNull { it.id == station.id } ?: return@setOnClickListener
-                        val updated = CarLibraryTabs.toggle(latest, current.id)
+                        val updated = CarLibraryTabs.toggle(latest, current.id, p.getBoolean(CarLibraryTabs.KEY_ALERT_PIN, false))
                         if (updated == null) {
                             android.widget.Toast.makeText(this@MainActivity, "Up to 3 pinned tabs. Unpin another first.", android.widget.Toast.LENGTH_SHORT).show()
                         } else {
