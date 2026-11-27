@@ -24,6 +24,12 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.View
+import android.view.MotionEvent
+import android.view.ViewConfiguration
+import android.view.animation.Animation
+import android.view.animation.TranslateAnimation
+import android.widget.ViewFlipper
+import kotlin.math.abs
 import com.kotarov.autoclock.media.CityAnnouncement
 import android.widget.Button
 import android.widget.FrameLayout
@@ -66,14 +72,16 @@ import com.kotarov.autoclock.weather.ForecastStore
 import java.time.LocalDateTime
 
 /**
- * Compact phone settings. Each selectable card is a LIVE preview of that
- * clock family's saved add-ons; both cards always render in the chosen theme.
+ * Compact phone settings. Swipe through live clock previews; only tapping
+ * a card selects that clock family for Android Auto.
  */
 class MainActivity : Activity() {
     private lateinit var analogCard: LinearLayout
     private lateinit var digitalCard: LinearLayout
     private lateinit var analogImage: ImageView
     private lateinit var digitalImage: ImageView
+    private lateinit var clockPager: ClockSwipePager
+    private lateinit var clockPageDots: List<View>
     private lateinit var weatherButton: android.widget.ImageButton
     private var removeProjectionListener: (() -> Unit)? = null
     private var phoneBrowser: MediaBrowserCompat? = null
@@ -225,12 +233,8 @@ class MainActivity : Activity() {
         }
         root.addView(header)
 
-        // The blue outline is the exclusive selection, as in phone display
-        // settings. No radio-circle UI is added next to the thumbnails.
-        val choices = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(0, 0, 0, dp(6))
-        }
+        // The page is only a preview; the blue outline still indicates the
+        // persisted selection. Keep the existing click listeners unchanged.
         val (analog, analogPreview) =
             createChoiceCard("Analog", ClockFamily.ANALOG)
         val (digital, digitalPreview) =
@@ -239,15 +243,31 @@ class MainActivity : Activity() {
         digitalCard = digital
         analogImage = analogPreview
         digitalImage = digitalPreview
-        choices.addView(analogCard,
-            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginEnd = dp(6)
-            })
-        choices.addView(digitalCard,
-            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginStart = dp(6)
-            })
-        root.addView(choices)
+        clockPager = ClockSwipePager(this).apply {
+            addView(analogCard, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+            addView(digitalCard, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        }
+        root.addView(clockPager, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        val pageIndicators = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER
+            setPadding(0, dp(6), 0, dp(8))
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+        }
+        clockPageDots = List(2) {
+            View(this).also { dot ->
+                pageIndicators.addView(dot, LinearLayout.LayoutParams(dp(7), dp(7)).apply {
+                    marginStart = dp(4)
+                    marginEnd = dp(4)
+                })
+            }
+        }
+        root.addView(pageIndicators)
+        clockPager.onPageChanged = { page -> updateClockPageDots(page) }
+        showSelectedClockPage()
         val quickRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER
@@ -520,6 +540,7 @@ class MainActivity : Activity() {
 
     override fun onStart() {
         super.onStart()
+        showSelectedClockPage()
         settings().registerOnSharedPreferenceChangeListener(weatherPreferenceListener)
         syncWeatherToggle()
         renderStreams()
@@ -870,7 +891,7 @@ class MainActivity : Activity() {
                 requestedPreview = next
                 previewWorker.submit({
                     fun make(preset: ClockPreset): Bitmap = ClockRenderer.render(
-                        preset.id, now, compact, outputSize = 256,
+                        preset.id, now, compact, outputSize = 512,
                         sourceLabel = if (preset.usesWeather) locality else null,
                         theme = theme, forecast = if (preset.usesWeather) forecast else emptyList())
                     val first = make(analog)
@@ -1637,6 +1658,99 @@ class MainActivity : Activity() {
             setTextColor(ink)
             setPadding(0, 0, 0, bottom)
         }
+
+    private fun showSelectedClockPage() {
+        if (!::clockPager.isInitialized) return
+        val page = if (ClockSelectionStore.current(settings()).family == ClockFamily.ANALOG) 0 else 1
+        clockPager.showPage(page, animate = false)
+        updateClockPageDots(page)
+    }
+
+    private fun updateClockPageDots(page: Int) {
+        if (!::clockPageDots.isInitialized) return
+        clockPageDots.forEachIndexed { index, dot ->
+            dot.background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(if (index == page) accent else faint)
+            }
+        }
+    }
+
+    /** Lightweight two-page square carousel. A horizontal drag cancels the
+     * child's click; a vertical drag remains available to the outer ScrollView. */
+    private class ClockSwipePager(context: Context) : ViewFlipper(context) {
+        private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+        private val swipeDistance = maxOf(touchSlop * 2, (32 * resources.displayMetrics.density).toInt())
+        private var downX = 0f
+        private var downY = 0f
+        private var dragging = false
+        var onPageChanged: ((Int) -> Unit)? = null
+
+        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+            super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(
+                MeasureSpec.getSize(widthMeasureSpec), MeasureSpec.EXACTLY))
+        }
+
+        override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downX = event.x
+                    downY = event.y
+                    dragging = false
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = abs(event.x - downX)
+                    val dy = abs(event.y - downY)
+                    if (dx > touchSlop && dx > dy) {
+                        dragging = true
+                        parent?.requestDisallowInterceptTouchEvent(true)
+                        return true
+                    }
+                }
+            }
+            return false
+        }
+
+        override fun onTouchEvent(event: MotionEvent): Boolean {
+            if (!dragging) return super.onTouchEvent(event)
+            when (event.actionMasked) {
+                MotionEvent.ACTION_UP -> {
+                    val dx = event.x - downX
+                    dragging = false
+                    parent?.requestDisallowInterceptTouchEvent(false)
+                    if (abs(dx) >= swipeDistance && abs(dx) > abs(event.y - downY)) {
+                        val target = displayedChild + if (dx < 0) 1 else -1
+                        if (target in 0 until childCount) showPage(target, animate = true)
+                    }
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    dragging = false
+                    parent?.requestDisallowInterceptTouchEvent(false)
+                }
+            }
+            return true
+        }
+
+        fun showPage(page: Int, animate: Boolean) {
+            if (page !in 0 until childCount) return
+            if (page == displayedChild) return
+            for (index in 0 until childCount) getChildAt(index).clearAnimation()
+            if (animate) {
+                val direction = if (page > displayedChild) 1f else -1f
+                fun slide(from: Float, to: Float) = TranslateAnimation(
+                    Animation.RELATIVE_TO_SELF, from, Animation.RELATIVE_TO_SELF, to,
+                    Animation.RELATIVE_TO_SELF, 0f, Animation.RELATIVE_TO_SELF, 0f
+                ).apply { duration = 180L }
+                inAnimation = slide(direction, 0f)
+                outAnimation = slide(0f, -direction)
+            } else {
+                inAnimation = null
+                outAnimation = null
+            }
+            displayedChild = page
+            onPageChanged?.invoke(page)
+        }
+    }
 
     /** Native square measure: thumbnail borders frame the entire drawing. */
     private class SquareFrame(context: Context) : FrameLayout(context) {
