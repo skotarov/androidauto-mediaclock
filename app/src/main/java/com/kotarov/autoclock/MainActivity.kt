@@ -800,7 +800,7 @@ class MainActivity : Activity() {
             // but keep Alert only fixed and non-draggable.
             addView(View(this@MainActivity), LinearLayout.LayoutParams(dp(34), dp(48)))
             addView(ImageView(this@MainActivity).apply {
-                setImageResource(R.drawable.ic_source_travel)
+                setImageResource(R.drawable.ic_source_alert)
             }, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginEnd = dp(8) })
             addView(alert, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             addView(text(if (alertPinned) "★" else "☆", 23f, 0).apply {

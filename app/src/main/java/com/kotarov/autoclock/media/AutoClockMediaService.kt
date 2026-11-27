@@ -387,12 +387,12 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             val items = mutableListOf<MediaBrowserCompat.MediaItem>()
             fun tab(id: String, title: String, icon: Int) {
                 val desc = MediaDescriptionCompat.Builder().setMediaId(id).setTitle(title)
-                    .setIconBitmap(sourceIcon(icon, 64, white = true)).build()
+                    .setIconBitmap(sourceIcon(icon, 64, white = icon != R.drawable.ic_source_alert)).build()
                 items.add(MediaBrowserCompat.MediaItem(desc, MediaBrowserCompat.MediaItem.FLAG_BROWSABLE))
             }
             tab(CarLibraryTabs.LIBRARY_ID, "Library", R.drawable.ic_source_folder)
             val alertPinned = prefs.getBoolean(CarLibraryTabs.KEY_ALERT_PIN, false)
-            if (alertPinned && tabLimit > 1) tab(CarLibraryTabs.ALERT_TAB, "Alert only", R.drawable.ic_source_travel)
+            if (alertPinned && tabLimit > 1) tab(CarLibraryTabs.ALERT_TAB, "Alert only", R.drawable.ic_source_alert)
             CarLibraryTabs.pinned(StreamLibrary.list(prefs), tabLimit, alertPinned).forEach { station ->
                 val id = when {
                     station.browsable -> station.id
@@ -412,7 +412,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 val desc = MediaDescriptionCompat.Builder()
                     .setMediaId(station?.id ?: CLOCK_ID)
                     .setTitle(station?.name ?: "Alert only")
-                    .setIconBitmap(sourceIcon(station?.let { libraryIcon(it) } ?: R.drawable.ic_source_travel))
+                    .setIconBitmap(sourceIcon(station?.let { libraryIcon(it) } ?: R.drawable.ic_source_alert))
                     .build()
                 items.add(MediaBrowserCompat.MediaItem(desc, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
             }
@@ -469,7 +469,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val inlineIcons = stations.size <= 40
         val alert = MediaDescriptionCompat.Builder().setMediaId(CLOCK_ID)
             .setTitle("Alert only")
-            .apply { if (inlineIcons) setIconBitmap(sourceIcon(R.drawable.ic_source_travel)) else setIconUri(browseIconUri(R.drawable.ic_source_travel)) }.build()
+            .apply { if (inlineIcons) setIconBitmap(sourceIcon(R.drawable.ic_source_alert)) else setIconUri(browseIconUri(R.drawable.ic_source_alert)) }.build()
         if (!playMode) items.add(MediaBrowserCompat.MediaItem(alert, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
         stations.forEach { station ->
             val bookFolder = !playMode && station.textFile && BookNavigation.mayHaveContents(station.name)
