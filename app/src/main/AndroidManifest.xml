@@ -29,6 +29,10 @@
             android:name="com.google.android.gms.car.application"
             android:resource="@xml/automotive_app_desc" />
 
+        <meta-data
+            android:name="androidx.car.app.TintableAttributionIcon"
+            android:resource="@drawable/ic_car_attribution" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true">
@@ -40,6 +44,7 @@
 
         <service
             android:name=".media.AutoClockMediaService"
+            android:icon="@drawable/ic_car_launcher"
             android:foregroundServiceType="mediaPlayback"
             android:exported="true">
             <intent-filter>

@@ -1135,7 +1135,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             val launch = android.app.PendingIntent.getActivity(this, 1,
                 Intent(this, com.kotarov.autoclock.MainActivity::class.java),
                 android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
-            val notification = builder.setSmallIcon(R.drawable.ic_auto_clock)
+            val notification = builder.setSmallIcon(R.drawable.ic_car_attribution)
                 .setContentTitle(activeSource?.name ?: "SmartTrip Clock")
                 .setContentText("Audio playback").setContentIntent(launch)
                 .addAction(android.app.Notification.Action.Builder(android.R.drawable.ic_media_pause, "Stop", stop).build())
