@@ -13,7 +13,6 @@ import androidx.car.app.model.ParkedOnlyOnClickListener
 import androidx.car.app.model.Row
 import androidx.car.app.model.Template
 import androidx.car.app.validation.HostValidator
-import com.kotarov.autoclock.MainActivity
 
 /** Host-managed settings entry, separate from media playback. */
 class PhoneSettingsService : CarAppService() {
@@ -33,11 +32,8 @@ private class PhoneSettingsScreen(context: CarContext) : Screen(context) {
             .setSingleList(ItemList.Builder().addItem(
                 Row.Builder().setTitle("Open on phone")
                     .setOnClickListener(ParkedOnlyOnClickListener.create {
-                        val intent = Intent(carContext, MainActivity::class.java)
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                        runCatching { carContext.startActivity(intent) }.onFailure {
-                            CarToast.makeText(carContext, "Open Travel to Awaken on your phone when parked", CarToast.LENGTH_LONG).show()
-                        }
+                        PhonePanelLauncher.open(carContext)
+                        CarToast.makeText(carContext, "Check your phone only when safely parked", CarToast.LENGTH_LONG).show()
                     }).build()
             ).build()).build()
 }

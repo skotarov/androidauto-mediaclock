@@ -253,7 +253,13 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 }
 
                 override fun onCustomAction(action: String?, extras: Bundle?) {
-                    if (action == ACTION_SPACER) return
+                    if (action == ACTION_SPACER) {
+                        val caller = session.currentControllerInfo.packageName
+                        if (!playMode && externalClient && caller == "com.google.android.projection.gearhead") {
+                            com.kotarov.autoclock.car.PhonePanelLauncher.open(this@AutoClockMediaService)
+                        } else android.util.Log.d("TravelToAwaken", "Phone panel action ignored from $caller")
+                        return
+                    }
                     if (action == ACTION_PHONE_AUDIO) {
                         if (!playMode && android.os.Build.VERSION.SDK_INT >= 31) PhoneAudioMode.toggle(prefs)
                         return
@@ -368,8 +374,15 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val carRoot = !playMode && clientPackageName == "com.google.android.projection.gearhead"
         val limit = rootHints?.getInt(androidx.media.utils.MediaConstants.BROWSER_ROOT_HINTS_KEY_ROOT_CHILDREN_LIMIT, 4) ?: 4
         val extras = if (carRoot) Bundle().apply {
-            putParcelable("androidx.media.BrowserRoot.Extras.APPLICATION_PREFERENCES_USING_CAR_APP_LIBRARY_INTENT",
-                Intent(this@AutoClockMediaService, com.kotarov.autoclock.car.PhoneSettingsService::class.java))
+            // The browser contract requires a CarPendingIntent, not a raw Intent.
+            val settingsIntent = Intent(Intent.ACTION_VIEW).setClass(
+                this@AutoClockMediaService, com.kotarov.autoclock.car.PhoneSettingsService::class.java)
+            runCatching {
+                androidx.car.app.notification.CarPendingIntent.getCarApp(
+                    this@AutoClockMediaService, 152, settingsIntent, android.app.PendingIntent.FLAG_UPDATE_CURRENT)
+            }.onSuccess {
+                putParcelable("androidx.media.BrowserRoot.Extras.APPLICATION_PREFERENCES_USING_CAR_APP_LIBRARY_INTENT", it)
+            }.onFailure { android.util.Log.w("TravelToAwaken", "Car settings unavailable", it) }
         } else null
         return BrowserRoot(if (carRoot) CarLibraryTabs.rootId(limit) else ROOT_ID, extras)
     }
@@ -1103,7 +1116,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         // Experimental visual spacer before phone routing. Auto owns the
         // actual slot allocation and may move actions into overflow.
         if (android.os.Build.VERSION.SDK_INT >= 31) {
-            builder.addCustomAction(ACTION_SPACER, "Spacer", R.drawable.ic_auto_action_spacer)
+            builder.addCustomAction(ACTION_SPACER, "Open on phone when parked", R.drawable.ic_auto_action_spacer)
             builder.addCustomAction(ACTION_PHONE_AUDIO,
                 if (phoneAudio) "Disable phone audio" else "Enable phone audio",
                 if (phoneAudio) R.drawable.ic_auto_phone_audio_on else R.drawable.ic_auto_phone_audio_off)
