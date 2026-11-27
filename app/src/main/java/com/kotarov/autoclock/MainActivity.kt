@@ -241,6 +241,8 @@ class MainActivity : Activity() {
         shell.addView(player, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         setContentView(shell)
+        @Suppress("DEPRECATION")
+        window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         if (android.os.Build.VERSION.SDK_INT >= 35) {
             shell.setOnApplyWindowInsetsListener { view, insets ->
                 val bars = insets.getInsets(android.view.WindowInsets.Type.systemBars() or
@@ -1142,7 +1144,7 @@ class MainActivity : Activity() {
         val frame = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = android.view.Gravity.CENTER
-            setBackgroundColor(background)
+            setBackgroundColor(this@MainActivity.background)
         }
         val controls = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1165,11 +1167,12 @@ class MainActivity : Activity() {
             setOnClickListener { dialog.dismiss() }
         })
         frame.addView(controls)
-        fullClockImage = ImageView(this).apply {
+        val image = ImageView(this).apply {
             scaleType = ImageView.ScaleType.FIT_CENTER
             contentDescription = "Selected live clock"
         }
-        frame.addView(fullClockImage, LinearLayout.LayoutParams(
+        fullClockImage = image
+        frame.addView(image, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
         dialog.setContentView(frame)
         fullClockDialog = dialog
