@@ -249,6 +249,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 }
 
                 override fun onCustomAction(action: String?, extras: Bundle?) {
+                    if (action == ACTION_SPACER) return
                     if (action == ACTION_PHONE_AUDIO) {
                         if (!playMode && android.os.Build.VERSION.SDK_INT >= 31) PhoneAudioMode.toggle(prefs)
                         return
@@ -1028,8 +1029,10 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             builder.addCustomAction(ACTION_FORWARD_10, "Forward 10 seconds", R.drawable.ic_forward_10)
         }
         addSpeedActions(builder, station)
-        // Phone routing is the last custom action; Auto decides available slots.
+        // Experimental visual spacer before phone routing. Auto owns the
+        // actual slot allocation and may move actions into overflow.
         if (android.os.Build.VERSION.SDK_INT >= 31) {
+            builder.addCustomAction(ACTION_SPACER, "Spacer", R.drawable.ic_auto_action_spacer)
             builder.addCustomAction(ACTION_PHONE_AUDIO,
                 if (phoneAudio) "Disable phone audio" else "Enable phone audio",
                 if (phoneAudio) R.drawable.ic_auto_phone_audio_on else R.drawable.ic_auto_phone_audio_off)
@@ -1179,6 +1182,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     companion object {
+        private const val ACTION_SPACER = "autoclock.action_spacer"
         const val ACTION_PHONE_AUDIO = "autoclock.phone_audio_toggle"
         const val ACTION_BACK_10 = "autoclock.back_10"
         const val ACTION_FORWARD_10 = "autoclock.forward_10"
