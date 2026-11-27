@@ -61,7 +61,11 @@ import android.widget.Switch
 import com.kotarov.autoclock.artwork.ClockRenderer
 import com.kotarov.autoclock.artwork.ArtworkWorkers
 import com.kotarov.autoclock.media.AutoClockMediaService
-import com.kotarov.autoclock.media.CarProjectionMonitor
+import android.text.TextUtils
+import android.text.TextWatcher
+import android.text.Editable
+import android.widget.PopupMenu
+import android.widget.ProgressBar
 import com.kotarov.autoclock.media.ClockFamily
 import com.kotarov.autoclock.media.ClockPreset
 import com.kotarov.autoclock.media.ClockSelectionStore
@@ -83,7 +87,15 @@ class MainActivity : Activity() {
     private lateinit var clockPager: ClockSwipePager
     private lateinit var clockPageDots: List<View>
     private lateinit var weatherButton: android.widget.ImageButton
-    private var removeProjectionListener: (() -> Unit)? = null
+    private lateinit var playerTitle: TextView
+    private lateinit var playerDetail: TextView
+    private lateinit var playerProgress: ProgressBar
+    private lateinit var playerExpand: TextView
+    private var playerExpanded = false
+    private var libraryQuery = ""
+    private var libraryFilter = 0
+    private var renderedLibraryKey: String? = null
+    private var lastRecentSource: String? = null
     private var phoneBrowser: MediaBrowserCompat? = null
     private var phoneController: MediaControllerCompat? = null
     private lateinit var carAudioButton: ImageButton
@@ -113,11 +125,13 @@ class MainActivity : Activity() {
         override fun onPlaybackStateChanged(state: PlaybackStateCompat?) {
             syncTransportButtons(state)
             seekState = state
+            syncMiniPlayer()
+            syncWeatherToggle()
             syncPhoneSeek()
-            if (BuildConfig.PLAY_MEDIA_MODE) syncWeatherToggle()
         }
         override fun onMetadataChanged(metadata: MediaMetadataCompat?) {
             seekMetadata = metadata
+            syncMiniPlayer()
             syncPhoneSeek()
         }
         override fun onSessionDestroyed() {
@@ -141,6 +155,7 @@ class MainActivity : Activity() {
         if (key == StreamLibrary.KEY_LIST || key == StreamLibrary.KEY_SELECTED || key == CarLibraryTabs.KEY_ALERT_PIN) {
             if (key != StreamLibrary.KEY_SELECTED) renderStreams() else highlightSelectedSource()
             syncTransportButtons(phoneController?.playbackState)
+            syncMiniPlayer()
             syncPhoneSeek()
         }
         if (key == PhoneAudioMode.KEY || key == NoticeAudio.KEY_SPEAK ||
@@ -148,7 +163,10 @@ class MainActivity : Activity() {
             syncQuickButtons()
             updatePreviewTiles()
         }
-        if (PlaybackSpeed.isSourceKey(key)) syncSpeedControls(phoneController?.playbackState)
+        if (PlaybackSpeed.isSourceKey(key)) {
+            syncSpeedControls(phoneController?.playbackState)
+            syncMiniPlayer()
+        }
         if (key == ClockPreset.KEY_ADD_WEATHER) syncWeatherToggle()
         else if (key == "weather_fetched_at" || key == WeatherStore.KEY_LOCALITY) {
             updatePreviewTiles()
@@ -187,10 +205,6 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Observe even while the phone panel is in the background, until destroyed.
-        removeProjectionListener = CarProjectionMonitor.subscribe(this) { connected ->
-            if (!connected && !isFinishing && !isDestroyed) finishAndRemoveTask()
-        }
         val prefs = settings()
         // This is now an auto-location-only product, including old installs.
         ClockSelectionStore.migrateSimplifiedIfNeeded(prefs)
@@ -202,19 +216,38 @@ class MainActivity : Activity() {
             setPadding(dp(16), dp(22), dp(16), dp(24))
             setBackgroundColor(this@MainActivity.background)
         }
-        setContentView(ScrollView(this).apply {
+        playerExpanded = savedInstanceState?.getBoolean("playerExpanded", false) ?: false
+        libraryFilter = savedInstanceState?.getInt("libraryFilter", 0)?.coerceIn(0, 2) ?: 0
+        libraryQuery = savedInstanceState?.getString("libraryQuery").orEmpty()
+        val shell = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(this@MainActivity.background)
+        }
+        val scroll = ScrollView(this).apply {
             isFillViewport = true
             addView(root)
-        })
+        }
+        shell.addView(scroll, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+        val player = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(6), dp(12), dp(8))
+            setBackgroundColor(Color.rgb(18, 20, 27))
+        }
+        shell.addView(View(this).apply { setBackgroundColor(faint) },
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)))
+        shell.addView(player, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        setContentView(shell)
         if (android.os.Build.VERSION.SDK_INT >= 35) {
-            root.setOnApplyWindowInsetsListener { view, insets ->
+            shell.setOnApplyWindowInsetsListener { view, insets ->
                 val bars = insets.getInsets(android.view.WindowInsets.Type.systemBars() or
                     android.view.WindowInsets.Type.displayCutout())
-                view.setPadding(dp(16) + bars.left, dp(22) + bars.top,
-                    dp(16) + bars.right, dp(24) + bars.bottom)
+                val ime = insets.getInsets(android.view.WindowInsets.Type.ime())
+                view.setPadding(bars.left, bars.top, bars.right, maxOf(bars.bottom, ime.bottom))
                 insets
             }
-            root.requestApplyInsets()
+            shell.requestApplyInsets()
         }
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -357,6 +390,48 @@ class MainActivity : Activity() {
         addSpaced(root, quickRow)
         syncQuickButtons()
 
+        val playerHeader = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            minimumHeight = dp(42)
+            isClickable = true
+            isFocusable = true
+            contentDescription = "Expand or collapse player"
+            setOnClickListener {
+                playerExpanded = !playerExpanded
+                syncMiniPlayer()
+                syncPhoneSeek()
+            }
+        }
+        val labels = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        playerTitle = text("Alert only", 15f, 0).apply {
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        }
+        playerDetail = text("", 12f, 0).apply {
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            setTextColor(Color.rgb(185, 190, 199))
+        }
+        labels.addView(playerTitle)
+        labels.addView(playerDetail)
+        playerHeader.addView(labels, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        playerExpand = text("⌃", 23f, 0).apply {
+            gravity = android.view.Gravity.CENTER
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+        playerHeader.addView(playerExpand, LinearLayout.LayoutParams(dp(40), dp(42)))
+        player.addView(playerHeader)
+        playerProgress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = PhoneSeekPosition.STEPS
+            progressTintList = ColorStateList.valueOf(accent)
+            visibility = View.GONE
+        }
+        player.addView(playerProgress, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, dp(4)))
+        addPhoneSeekPanel(player)
+
         val transportRow = LinearLayout(this).apply {
             gravity = android.view.Gravity.CENTER
             orientation = LinearLayout.HORIZONTAL
@@ -401,13 +476,15 @@ class MainActivity : Activity() {
         }
         slowerButton = quickButton(R.drawable.ic_speed_slower, "Decrease playback speed") { changeSpeed(-1) }
         fasterButton = quickButton(R.drawable.ic_speed_faster, "Increase playback speed") { changeSpeed(1) }
-        transportRow.addView(weatherButton, LinearLayout.LayoutParams(dp(108), dp(52)))
-        listOf(backButton, forwardButton, slowerButton, fasterButton).forEach { button ->
-            transportRow.addView(button, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(4) })
+        listOf(slowerButton, backButton, weatherButton, forwardButton, fasterButton).forEach { button ->
+            transportRow.addView(button, LinearLayout.LayoutParams(
+                dp(if (button === weatherButton) 64 else 48), dp(48)).apply {
+                marginStart = dp(3); marginEnd = dp(3)
+            })
         }
-        if (!BuildConfig.PLAY_MEDIA_MODE) transportRow.addView(carAudioButton, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(4) })
-        addSpaced(root, transportRow)
-        addPhoneSeekPanel(root)
+        if (!BuildConfig.PLAY_MEDIA_MODE) transportRow.addView(carAudioButton, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(3) })
+        player.addView(transportRow)
+        syncMiniPlayer()
         syncTransportButtons(null)
         syncWeatherToggle()
 
@@ -418,26 +495,55 @@ class MainActivity : Activity() {
         root.addView(locationMessage)
 
         val streams = settingsGroup(root, if (BuildConfig.PLAY_MEDIA_MODE) "Audio library" else "Library")
-        val addRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        addRow.addView(Button(this).apply {
-            text = "Add URL"
-            setAddIcon(this, R.drawable.ic_add_link)
-            isAllCaps = false
-            setOnClickListener { if (BuildConfig.PLAY_MEDIA_MODE) editStream(null) else addUrl() }
-        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        addRow.addView(Button(this).apply {
-            text = "Add Local"
-            setAddIcon(this, R.drawable.ic_source_file)
-            isAllCaps = false
-            setOnClickListener {
-                if (BuildConfig.PLAY_MEDIA_MODE) pickFile()
-                else AlertDialog.Builder(this@MainActivity).setTitle("Add Local")
-                    .setItems(arrayOf("Select file", "Select folder")) { _, index ->
-                        if (index == 0) pickFile() else pickFolder()
-                    }.setNegativeButton("Cancel", null).show()
+        val libraryTools = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+        val search = android.widget.EditText(this).apply {
+            hint = "Search library"
+            setSingleLine(true)
+            textSize = 15f
+            setText(libraryQuery)
+            setPadding(dp(8), dp(4), dp(8), dp(4))
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    libraryQuery = s?.toString().orEmpty()
+                    renderStreams()
+                }
+                override fun afterTextChanged(s: Editable?) {}
+            })
+        }
+        libraryTools.addView(search, LinearLayout.LayoutParams(0, dp(48), 1f))
+        libraryTools.addView(quickButton(R.drawable.ic_speed_faster, "Add to library") { showAddLibrary() },
+            LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(8) })
+        streams.addView(libraryTools)
+        val filters = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER
+        }
+        listOf("All", "Favorites", "Recent").forEachIndexed { index, label ->
+            text(label, 14f, 0).apply {
+                gravity = android.view.Gravity.CENTER
+                setTextColor(if (libraryFilter == index) accent else ink)
+                isSelected = libraryFilter == index
+                setOnClickListener {
+                    libraryFilter = index
+                    for (i in 0 until filters.childCount) {
+                        (filters.getChildAt(i) as TextView).apply {
+                            setTextColor(if (i == index) accent else ink)
+                            isSelected = i == index
+                        }
+                    }
+                    renderStreams()
+                }
+                filters.addView(this, LinearLayout.LayoutParams(0, dp(44), 1f))
             }
-        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(8) })
-        addSpaced(streams, addRow)
+        }
+        streams.addView(filters)
+        // Do not open the keyboard merely by launching the app.
+        root.isFocusableInTouchMode = true
+        root.requestFocus()
         streamRows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         streams.addView(streamRows)
         renderStreams()
@@ -557,8 +663,9 @@ class MainActivity : Activity() {
                         syncTransportButtons(it.playbackState)
                         seekState = it.playbackState
                         seekMetadata = it.metadata
-                        if (BuildConfig.PLAY_MEDIA_MODE) syncWeatherToggle()
                     }
+                    syncWeatherToggle()
+                    syncMiniPlayer()
                     syncPhoneSeek()
                     val source = pendingPhoneSource
                     val play = pendingPhonePlay
@@ -640,13 +747,14 @@ class MainActivity : Activity() {
         val selectedSource = StreamLibrary.selected(settings())
         val alertOnly = selectedSource == null
         val actions = state?.customActions.orEmpty()
+        syncMiniPlayer()
         val key = "${selectedSource?.id}|${actions.joinToString { it.action }}|${PlaybackSpeed.read(settings(), selectedSource)}"
         if (transportUiKey == key) return
         transportUiKey = key
-        backButton.visibility = if (alertOnly) View.GONE else View.VISIBLE
-        forwardButton.visibility = if (alertOnly) View.GONE else View.VISIBLE
         backButton.isEnabled = !alertOnly && actions.any { it.action == AutoClockMediaService.ACTION_BACK_10 }
         forwardButton.isEnabled = !alertOnly && actions.any { it.action == AutoClockMediaService.ACTION_FORWARD_10 }
+        backButton.visibility = if (backButton.isEnabled) View.VISIBLE else View.GONE
+        forwardButton.visibility = if (forwardButton.isEnabled) View.VISIBLE else View.GONE
         paintQuickButton(backButton, false)
         paintQuickButton(forwardButton, false)
         syncSpeedControls(state)
@@ -673,12 +781,9 @@ class MainActivity : Activity() {
         fasterButton.isEnabled = visible && speed < PlaybackSpeed.MAX
         paintQuickButton(slowerButton, false)
         paintQuickButton(fasterButton, false)
-        // Play/Pause always keeps its original large 108 x 52 dp footprint.
-        // On narrow phones only the secondary controls may shrink.
-        val available = resources.configuration.screenWidthDp - 32
-        val smallDp = if (visible && !BuildConfig.PLAY_MEDIA_MODE)
-            ((available - 108 - 5 * 4) / 5).coerceIn(32, 40)
-            else 48
+        // Fit all controls, including Bluetooth, on small phones without clipping.
+        val available = resources.configuration.screenWidthDp - 24
+        val smallDp = ((available - 64 - 36) / 5).coerceIn(32, 48)
         val small = dp(smallDp)
         listOf(backButton, forwardButton, slowerButton, fasterButton, carAudioButton).forEach { button ->
             val lp = button.layoutParams ?: return@forEach
@@ -760,6 +865,7 @@ class MainActivity : Activity() {
             (state.actions and PlaybackStateCompat.ACTION_SEEK_TO) != 0L
         if (!valid || state == null) {
             seekPanel.visibility = View.GONE
+            if (::playerProgress.isInitialized) playerProgress.visibility = View.GONE
             seekSource = null
             seekDuration = 0L
             dragSource = null
@@ -772,7 +878,8 @@ class MainActivity : Activity() {
         }
         seekSource = id
         seekDuration = duration
-        seekPanel.visibility = View.VISIBLE
+        seekPanel.visibility = if (playerExpanded) View.VISIBLE else View.GONE
+        playerProgress.visibility = if (playerExpanded) View.GONE else View.VISIBLE
         durationLabel.text = (if (source?.textFile == true) "≈ " else "") + PhoneSeekPosition.format(duration)
         val now = SystemClock.elapsedRealtime()
         val advancing = state.state == PlaybackStateCompat.STATE_PLAYING && state.playbackSpeed > 0f
@@ -780,6 +887,7 @@ class MainActivity : Activity() {
             val position = PhoneSeekPosition.current(state.position, duration, state.lastPositionUpdateTime,
                 now, if (advancing) state.playbackSpeed else 0f)
             positionSlider.progress = PhoneSeekPosition.progress(position, duration)
+            playerProgress.progress = positionSlider.progress
             elapsedLabel.text = PhoneSeekPosition.format(position)
         }
         // Only while the phone panel is connected, and only for a moving or pending slider.
@@ -793,6 +901,7 @@ class MainActivity : Activity() {
         seekMetadata = null
         syncPhoneSeek()
         syncTransportButtons(null)
+        syncMiniPlayer()
     }
 
     private fun syncWeatherToggle() {
@@ -963,17 +1072,121 @@ class MainActivity : Activity() {
         return group
     }
 
+    private fun syncMiniPlayer() {
+        if (!::playerTitle.isInitialized || !::playerExpand.isInitialized) return
+        val prefs = settings()
+        val source = StreamLibrary.selected(prefs)
+        val state = phoneController?.playbackState ?: seekState
+        val playing = state?.state == PlaybackStateCompat.STATE_PLAYING ||
+            state?.state == PlaybackStateCompat.STATE_BUFFERING
+        val name = source?.name ?: if (BuildConfig.PLAY_MEDIA_MODE) "Select audio" else "Alert only"
+        val kind = when {
+            source == null -> if (BuildConfig.PLAY_MEDIA_MODE) "Audio" else "Voice and weather alerts"
+            source.textFile -> "Text reading"
+            source.local -> "Local audio"
+            else -> "Stream"
+        }
+        val rate = if (source != null && (source.textFile || source.local ||
+                state?.customActions.orEmpty().any { it.action == AutoClockMediaService.ACTION_SPEED_UP }))
+            " · " + String.format(java.util.Locale.ROOT, "%.1f×", PlaybackSpeed.read(prefs, source)) else ""
+        playerTitle.text = name
+        playerDetail.text = kind + rate + if (playing) " · Playing" else " · Paused"
+        playerExpand.text = if (playerExpanded) "⌄" else "⌃"
+        if (playing && source != null) {
+            val rootId = StreamLibrary.selectedRootId(prefs)
+            if (rootId != lastRecentSource) {
+                lastRecentSource = rootId
+                val recent = (listOf(rootId) + recentSources().filterNot { it == rootId }).take(40)
+                prefs.edit().putString("phone_library_recent", recent.joinToString("\n")).apply()
+                if (libraryFilter == 2) renderStreams()
+            }
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean("playerExpanded", playerExpanded)
+        outState.putInt("libraryFilter", libraryFilter)
+        outState.putString("libraryQuery", libraryQuery)
+        super.onSaveInstanceState(outState)
+    }
+
+    private fun showAddLibrary() {
+        val options = if (BuildConfig.PLAY_MEDIA_MODE) arrayOf("Add URL", "Select file")
+            else arrayOf("Add URL", "Select file", "Select folder")
+        AlertDialog.Builder(this).setTitle("Add to library").setItems(options) { _, index ->
+            when (index) {
+                0 -> if (BuildConfig.PLAY_MEDIA_MODE) editStream(null) else addUrl()
+                1 -> pickFile()
+                2 -> pickFolder()
+            }
+        }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun favoriteSources(): Set<String> {
+        val p = settings()
+        if (!p.contains("phone_library_favorites")) {
+            val initial = StreamLibrary.list(p).filter { it.pinned }.map { it.id }.toMutableSet()
+            if (p.getBoolean(CarLibraryTabs.KEY_ALERT_PIN, false)) initial.add(StreamLibrary.ALERT_ID)
+            p.edit().putStringSet("phone_library_favorites", initial).apply()
+        }
+        return p.getStringSet("phone_library_favorites", emptySet()).orEmpty().toSet()
+    }
+
+    private fun recentSources(): List<String> =
+        settings().getString("phone_library_recent", "").orEmpty().lines().filter { it.isNotBlank() }
+
+    private fun favoriteButton(id: String): TextView {
+        val favorite = id in favoriteSources()
+        return text(if (favorite) "★" else "☆", 23f, 0).apply {
+            gravity = android.view.Gravity.CENTER
+            setTextColor(if (favorite) Color.rgb(255, 190, 0) else ink)
+            contentDescription = if (favorite) "Remove from favorites" else "Add to favorites"
+            setOnClickListener {
+                val next = favoriteSources().toMutableSet()
+                if (!next.add(id)) next.remove(id)
+                settings().edit().putStringSet("phone_library_favorites", next).apply()
+                renderStreams()
+            }
+        }
+    }
+
+    private fun toggleCarPin(id: String) {
+        val p = settings()
+        val latest = StreamLibrary.list(p)
+        val alertPinned = p.getBoolean(CarLibraryTabs.KEY_ALERT_PIN, false)
+        if (id == StreamLibrary.ALERT_ID) {
+            if (!alertPinned && latest.count { it.pinned } >= CarLibraryTabs.MAX_TABS - 1) {
+                android.widget.Toast.makeText(this, "Up to 3 pinned tabs. Unpin another first.", android.widget.Toast.LENGTH_SHORT).show()
+                return
+            }
+            p.edit().putBoolean(CarLibraryTabs.KEY_ALERT_PIN, !alertPinned).apply()
+        } else {
+            val updated = CarLibraryTabs.toggle(latest, id, alertPinned)
+            if (updated == null) {
+                android.widget.Toast.makeText(this, "Up to 3 pinned tabs. Unpin another first.", android.widget.Toast.LENGTH_SHORT).show()
+                return
+            }
+            StreamLibrary.save(p, updated)
+        }
+        renderStreams()
+    }
+
     private fun renderStreams() {
         if (!::streamRows.isInitialized) return
         val prefs = settings()
         val sources = StreamLibrary.list(prefs)
         val alertPinned = prefs.getBoolean(CarLibraryTabs.KEY_ALERT_PIN, false)
-        if (renderedSources == sources && renderedAlertPin == alertPinned) {
+        val favorites = favoriteSources()
+        val recent = recentSources()
+        val query = libraryQuery.trim()
+        val key = "${libraryFilter}|${query}|${favorites.sorted()}|${if (libraryFilter == 2) recent else emptyList<String>()}"
+        if (renderedSources == sources && renderedAlertPin == alertPinned && renderedLibraryKey == key) {
             highlightSelectedSource()
             return
         }
         renderedSources = sources
         renderedAlertPin = alertPinned
+        renderedLibraryKey = key
         streamRows.removeAllViews()
         sourceTitles.clear()
         val selected = StreamLibrary.selectedRootId(prefs)
@@ -989,35 +1202,41 @@ class MainActivity : Activity() {
             setPadding(0, dp(6), 0, dp(6))
             // Match the drag-handle slot and icon size of the stream rows,
             // but keep Alert only fixed and non-draggable.
-            addView(View(this@MainActivity), LinearLayout.LayoutParams(dp(34), dp(48)))
+            addView(View(this@MainActivity), LinearLayout.LayoutParams(dp(24), dp(44)))
             addView(ImageView(this@MainActivity).apply {
                 setImageResource(R.drawable.ic_source_alert)
             }, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginEnd = dp(8) })
             addView(alert, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-            addView(text(if (alertPinned) "★" else "☆", 23f, 0).apply {
+            addView(favoriteButton(StreamLibrary.ALERT_ID), LinearLayout.LayoutParams(dp(36), dp(44)))
+            addView(text("⋮", 24f, 0).apply {
                 gravity = android.view.Gravity.CENTER
-                setTextColor(if (alertPinned) Color.rgb(255, 190, 0) else ink)
-                contentDescription = if (alertPinned) "Remove Alert only from car tabs" else "Pin Alert only to car tabs"
-                setOnClickListener {
-                    val p = settings()
-                    val pinned = p.getBoolean(CarLibraryTabs.KEY_ALERT_PIN, false)
-                    if (!pinned && StreamLibrary.list(p).count { it.pinned } >= CarLibraryTabs.MAX_TABS - 1)
-                        android.widget.Toast.makeText(this@MainActivity, "Up to 3 pinned tabs. Unpin another first.", android.widget.Toast.LENGTH_SHORT).show()
-                    else {
-                        p.edit().putBoolean(CarLibraryTabs.KEY_ALERT_PIN, !pinned).apply()
-                        renderStreams()
+                contentDescription = "Alert only options"
+                setOnClickListener { anchor ->
+                    PopupMenu(this@MainActivity, anchor).apply {
+                        menu.add(if (alertPinned) "Unpin from car tabs" else "Pin to car tabs")
+                            .setOnMenuItemClickListener { toggleCarPin(StreamLibrary.ALERT_ID); true }
+                        show()
                     }
                 }
-            }, LinearLayout.LayoutParams(dp(36), dp(48)))
+            }, LinearLayout.LayoutParams(dp(40), dp(44)))
             setOnClickListener { selectPhoneSource(StreamLibrary.ALERT_ID) }
         }
-        if (!BuildConfig.PLAY_MEDIA_MODE) addSpaced(streamRows, alertRow)
-        sources.forEach { station ->
+        if (!BuildConfig.PLAY_MEDIA_MODE && libraryFilter != 2 &&
+            (libraryFilter != 1 || StreamLibrary.ALERT_ID in favorites) &&
+            "Alert only".contains(query, ignoreCase = true)) streamRows.addView(alertRow)
+        val visibleSources = sources.filter { station ->
+            station.name.contains(query, ignoreCase = true) && when (libraryFilter) {
+                1 -> station.id in favorites
+                2 -> station.id in recent
+                else -> true
+            }
+        }.let { if (libraryFilter == 2) it.sortedBy { station -> recent.indexOf(station.id) } else it }
+        visibleSources.forEach { station ->
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = android.view.Gravity.CENTER_VERTICAL
                 setPadding(0, dp(6), 0, dp(6))
-                setOnDragListener { view, event ->
+                if (libraryFilter == 0 && query.isEmpty()) setOnDragListener { view, event ->
                     when (event.action) {
                         DragEvent.ACTION_DRAG_STARTED -> event.localState is String
                         DragEvent.ACTION_DRAG_ENTERED -> { view.alpha = 0.55f; true }
@@ -1041,7 +1260,7 @@ class MainActivity : Activity() {
                     }
                 }
             }
-            row.addView(text("☰", 23f, 0).apply {
+            if (libraryFilter == 0 && query.isEmpty()) row.addView(text("☰", 18f, 0).apply {
                 gravity = android.view.Gravity.CENTER
                 contentDescription = "Drag to reorder " + station.name
                 setOnLongClickListener {
@@ -1054,68 +1273,78 @@ class MainActivity : Activity() {
                     }
                     true
                 }
-            }, LinearLayout.LayoutParams(dp(34), dp(48)))
+            }, LinearLayout.LayoutParams(dp(24), dp(44)))
             row.addView(ImageView(this).apply {
                 setImageResource(if (station.localFolder) R.drawable.ic_source_folder else if (station.mediaPage) R.drawable.ic_source_web else if (station.textFile) R.drawable.ic_source_text else if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast)
                 contentDescription = station.name
                 if (station.browsable || station.textFile) setOnClickListener { if (station.browsable) openMediaPage(station) else openBook(station) }
-            }, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginEnd = dp(8) })
-            val title = text(station.name, 16f, 0).apply {
+            }, LinearLayout.LayoutParams(dp(32), dp(32)).apply { marginEnd = dp(8) })
+            val title = text(station.name, 15f, 0).apply {
+                maxLines = 2
+                ellipsize = TextUtils.TruncateAt.END
                 setTextColor(if (selected == station.id) accent else ink)
                 setOnClickListener { if (station.browsable) openMediaPage(station) else if (station.textFile) openBook(station) else selectPhoneSource(station.id) }
             }
             sourceTitles[station.id] = title
-            row.addView(title, LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-            if (!BuildConfig.PLAY_MEDIA_MODE && CarLibraryTabs.eligible(station)) {
-                row.addView(text(if (station.pinned) "★" else "☆", 23f, 0).apply {
-                    gravity = android.view.Gravity.CENTER
-                    setTextColor(if (station.pinned) Color.rgb(255, 190, 0) else ink)
-                    contentDescription = if (station.pinned) "Remove from car tabs: " + station.name
-                        else "Pin to car tabs: " + station.name
-                    setOnClickListener {
-                        val p = settings()
-                        val latest = StreamLibrary.list(p)
-                        val current = latest.firstOrNull { it.id == station.id } ?: return@setOnClickListener
-                        val updated = CarLibraryTabs.toggle(latest, current.id, p.getBoolean(CarLibraryTabs.KEY_ALERT_PIN, false))
-                        if (updated == null) {
-                            android.widget.Toast.makeText(this@MainActivity, "Up to 3 pinned tabs. Unpin another first.", android.widget.Toast.LENGTH_SHORT).show()
-                        } else {
-                            StreamLibrary.save(p, updated)
-                            renderStreams()
-                        }
-                    }
-                }, LinearLayout.LayoutParams(dp(36), dp(48)))
+            val details = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(title)
+                addView(text(when {
+                    station.localFolder -> "Folder"
+                    station.mediaPage -> "Web media"
+                    station.textFile -> "Text reading"
+                    station.local -> "Local audio"
+                    else -> "Stream"
+                } + if (station.pinned) " · Car tab" else "", 11f, 0).apply {
+                    setTextColor(Color.rgb(185, 190, 199))
+                    maxLines = 1
+                })
             }
-            row.addView(Button(this).apply {
-                text = "Edit"
-                isAllCaps = false
-                minWidth = 0; minimumWidth = 0
-                setOnClickListener { if (station.localFolder) editFileName(station) else if (station.mediaPage) editMediaPage(station) else if (station.local) editFileName(station) else editStream(station) }
-            })
-            row.addView(Button(this).apply {
-                text = "Delete"
-                isAllCaps = false
-                minWidth = 0; minimumWidth = 0
-                setOnClickListener {
-                    AlertDialog.Builder(this@MainActivity).setTitle(station.name)
-                        .setMessage(if (station.browsable) "Remove folder from list?" else if (station.local) "Remove file from list?" else "Delete stream?")
-                        .setNegativeButton("Cancel", null)
-                        .setPositiveButton("Delete") { _, _ ->
-                            val prefs = settings()
-                            val remaining = StreamLibrary.list(prefs).filterNot { it.id == station.id }
-                            StreamLibrary.save(prefs, remaining)
-                            RemotePlaybackBookmarks(this@MainActivity).removeRoot(station.id)
-                            if (station.local && remaining.none { it.url == station.url }) {
-                                if (WebTextProvider.owns(station.url)) WebTextProvider.delete(this@MainActivity, station.url)
-                                else runCatching { contentResolver.releasePersistableUriPermission(Uri.parse(station.url), Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-                            }
-                            renderStreams()
-                        }.show()
+            row.addView(details, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            row.addView(favoriteButton(station.id), LinearLayout.LayoutParams(dp(36), dp(44)))
+            row.addView(text("⋮", 24f, 0).apply {
+                gravity = android.view.Gravity.CENTER
+                contentDescription = "Options: " + station.name
+                setOnClickListener { anchor ->
+                    PopupMenu(this@MainActivity, anchor).apply {
+                        menu.add("Edit").setOnMenuItemClickListener {
+                            if (station.localFolder) editFileName(station) else if (station.mediaPage) editMediaPage(station)
+                            else if (station.local) editFileName(station) else editStream(station)
+                            true
+                        }
+                        if (!BuildConfig.PLAY_MEDIA_MODE && CarLibraryTabs.eligible(station))
+                            menu.add(if (station.pinned) "Unpin from car tabs" else "Pin to car tabs")
+                                .setOnMenuItemClickListener { toggleCarPin(station.id); true }
+                        menu.add("Delete").setOnMenuItemClickListener { deleteLibrarySource(station); true }
+                        show()
+                    }
                 }
-            })
-            addSpaced(streamRows, row)
+            }, LinearLayout.LayoutParams(dp(40), dp(44)))
+            row.setOnClickListener { title.performClick() }
+            streamRows.addView(row)
+            streamRows.addView(View(this).apply { setBackgroundColor(Color.rgb(42, 45, 54)) },
+                LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)))
         }
+        if (streamRows.childCount == 0) streamRows.addView(text("No matching items", 14f, dp(12)))
+    }
+
+    private fun deleteLibrarySource(station: StreamLibrary.Station) {
+        AlertDialog.Builder(this).setTitle(station.name)
+            .setMessage(if (station.browsable) "Remove folder from list?" else if (station.local) "Remove file from list?" else "Delete stream?")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Delete") { _, _ ->
+                val prefs = settings()
+                val remaining = StreamLibrary.list(prefs).filterNot { it.id == station.id }
+                StreamLibrary.save(prefs, remaining)
+                prefs.edit().putStringSet("phone_library_favorites", favoriteSources() - station.id)
+                    .putString("phone_library_recent", recentSources().filterNot { it == station.id }.joinToString("\n")).apply()
+                RemotePlaybackBookmarks(this).removeRoot(station.id)
+                if (station.local && remaining.none { it.url == station.url }) {
+                    if (WebTextProvider.owns(station.url)) WebTextProvider.delete(this, station.url)
+                    else runCatching { contentResolver.releasePersistableUriPermission(Uri.parse(station.url), Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                }
+                renderStreams()
+            }.show()
     }
 
     private fun highlightSelectedSource() {
@@ -1763,8 +1992,6 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         webImport?.interrupt()
         webImport = null
-        removeProjectionListener?.invoke()
-        removeProjectionListener = null
         messageHandler.removeCallbacks(hideLocationMessage)
         releasePreviews()
         super.onDestroy()
