@@ -1107,8 +1107,9 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 book?.positionMs ?: seek?.position?.toLong() ?: PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN,
                 speed)
             .setActions(actions)
-        // Leave next/previous slots free: Auto may place these custom actions there.
-        if (seek != null || textSkip) {
+        // While paused, free the first custom-action slots for speed controls.
+        // Keep ACTION_SEEK_TO above so the timeline still works when paused.
+        if (isRunning && (seek != null || textSkip)) {
             builder.addCustomAction(ACTION_BACK_10, "Back 10 seconds", R.drawable.ic_replay_10)
             builder.addCustomAction(ACTION_FORWARD_10, "Forward 10 seconds", R.drawable.ic_forward_10)
         }
@@ -1257,7 +1258,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             .setState(state, book?.positionMs ?: seek?.position?.toLong() ?: PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN,
                 if (state == PlaybackStateCompat.STATE_PLAYING && seek != null) streamPlayer.actualMediaSpeed() else 0f)
         mediaError?.let { builder.setErrorMessage(PlaybackStateCompat.ERROR_CODE_APP_ERROR, it) }
-        if (seek != null || (source?.textFile == true && streamPlayer.canSkipText(source.url))) {
+        if (running && (seek != null || textSkip)) {
             builder.addCustomAction(ACTION_BACK_10, "Back 10 seconds", R.drawable.ic_replay_10)
             builder.addCustomAction(ACTION_FORWARD_10, "Forward 10 seconds", R.drawable.ic_forward_10)
         }
