@@ -39,6 +39,7 @@ import com.kotarov.autoclock.media.StreamLibrary
 import com.kotarov.autoclock.media.PlaybackSpeed
 import com.kotarov.autoclock.media.StreamMetadata
 import com.kotarov.autoclock.media.MediaPageDirectory
+import com.kotarov.autoclock.media.MediaPageParser
 import com.kotarov.autoclock.media.BookNavigation
 import com.kotarov.autoclock.media.FolderNavigation
 import com.kotarov.autoclock.media.WebReader
@@ -342,43 +343,27 @@ class MainActivity : Activity() {
         }
         root.addView(locationMessage)
 
-        val streams = settingsGroup(root, if (BuildConfig.PLAY_MEDIA_MODE) "Audio library" else "Streams")
+        val streams = settingsGroup(root, if (BuildConfig.PLAY_MEDIA_MODE) "Audio library" else "Library")
         val addRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         addRow.addView(Button(this).apply {
-            text = "Stream"
+            text = "Add URL"
             setAddIcon(this, R.drawable.ic_add_link)
             isAllCaps = false
-            setOnClickListener { editStream(null) }
+            setOnClickListener { if (BuildConfig.PLAY_MEDIA_MODE) editStream(null) else addUrl() }
         }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         addRow.addView(Button(this).apply {
-            text = "File"
+            text = "Add Local"
             setAddIcon(this, R.drawable.ic_source_file)
             isAllCaps = false
-            setOnClickListener { pickFile() }
-        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(8) })
-        if (!BuildConfig.PLAY_MEDIA_MODE) addRow.addView(Button(this).apply {
-            text = "Folder"
-            setAddIcon(this, R.drawable.ic_source_folder)
-            isAllCaps = false
-            setOnClickListener { pickFolder() }
+            setOnClickListener {
+                if (BuildConfig.PLAY_MEDIA_MODE) pickFile()
+                else AlertDialog.Builder(this@MainActivity).setTitle("Add Local")
+                    .setItems(arrayOf("Select file", "Select folder")) { _, index ->
+                        if (index == 0) pickFile() else pickFolder()
+                    }.setNegativeButton("Cancel", null).show()
+            }
         }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(8) })
         addSpaced(streams, addRow)
-        if (!BuildConfig.PLAY_MEDIA_MODE) {
-            val webRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            webRow.addView(Button(this).apply {
-                text = "Web Article"
-                setAddIcon(this, R.drawable.ic_source_text)
-                isAllCaps = false
-                setOnClickListener { addWebPage() }
-            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-            webRow.addView(Button(this).apply {
-                text = "Web Media"
-                setAddIcon(this, R.drawable.ic_source_web)
-                isAllCaps = false
-                setOnClickListener { editMediaPage(null) }
-            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(8) })
-            addSpaced(streams, webRow)
-        }
         streamRows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         streams.addView(streamRows)
         renderStreams()
@@ -993,73 +978,130 @@ class MainActivity : Activity() {
 
     private var webImport: Thread? = null
 
-    private fun addWebPage() {
+    private fun addUrl() {
         if (webImport != null) return
-        val field = android.widget.EditText(this).apply {
+        val fields = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(8))
+        }
+        val url = android.widget.EditText(this).apply {
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
             hint = "https://..."
             setSingleLine(true)
         }
-        val dialog = AlertDialog.Builder(this).setTitle("Web Article")
-            .setView(field).setNegativeButton("Cancel", null)
-            .setPositiveButton("Save", null).create()
+        val name = android.widget.EditText(this).apply {
+            hint = "Name (automatic)"
+            setSingleLine(true)
+        }
+        fields.addView(url)
+        fields.addView(name)
+        val dialog = AlertDialog.Builder(this).setTitle("Add URL").setView(fields)
+            .setNegativeButton("Cancel", null).setPositiveButton("Add", null)
+            .setNeutralButton("Choose type", null).create()
         dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val address = field.text.toString().trim()
-                if (!WebReader.valid(address)) {
-                    field.error = "Enter a public HTTPS page URL"
-                    return@setOnClickListener
+            fun submit(manual: Boolean) {
+                val address = url.text.toString().trim()
+                if (!CustomStreamPlayer.valid(address)) {
+                    url.error = "Enter a valid HTTP(S) URL"
+                    return
                 }
+                val title = name.text.toString().trim().take(128)
                 dialog.dismiss()
-                val progress = AlertDialog.Builder(this).setTitle("Reader Mode")
-                    .setMessage("Extracting article text…").setCancelable(false)
-                    .setNegativeButton("Cancel", null).create()
-                val worker = Thread({
-                    val result = runCatching { WebReader.fetch(address) }
-                    val self = Thread.currentThread()
-                    messageHandler.post {
-                        if (webImport === self) {
-                            webImport = null
-                            if (!isDestroyed && !isFinishing) {
-                                progress.dismiss()
-                                result.fold(onSuccess = { page ->
-                                    runCatching {
-                                        val uri = WebTextProvider.save(this, page.text)
-                                        try {
-                                            val prefs = settings()
-                                            StreamLibrary.save(prefs, StreamLibrary.list(prefs) +
-                                                StreamLibrary.newFile(uri, page.title, textFile = true))
-                                        } catch (e: Exception) {
-                                            WebTextProvider.delete(this, uri)
-                                            throw e
-                                        }
-                                        renderStreams()
-                                    }.onFailure {
-                                        AlertDialog.Builder(this).setTitle("Reader Mode")
-                                            .setMessage("Could not save article. Check available storage.")
-                                            .setPositiveButton("OK", null).show()
-                                    }
-                                }, onFailure = {
-                                    AlertDialog.Builder(this).setTitle("Reader Mode")
-                                        .setMessage("No readable article found, or the page is unavailable. Try a public HTTPS article without a login.")
-                                        .setPositiveButton("OK", null).show()
-                                })
-                            }
-                        }
-                    }
-                }, "AutoClockWebReader")
-                webImport = worker
-                progress.setOnShowListener {
-                    progress.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener {
-                        if (webImport === worker) { webImport = null; worker.interrupt() }
-                        progress.dismiss()
-                    }
+                if (manual) chooseUrlType(address, title, null, false)
+                else runUrlWork("Checking URL…", { MediaPageParser.inspect(address) }) { result ->
+                    val info = result.getOrNull()
+                    val suggested = info?.suggested().orEmpty()
+                    if (suggested.size == 1) saveUrlType(address, title, suggested.single(), info)
+                    else chooseUrlType(address, title, info, true)
                 }
-                progress.show()
-                worker.start()
             }
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener { submit(false) }
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener { submit(true) }
         }
         dialog.show()
+    }
+
+    private fun chooseUrlType(address: String, name: String, info: MediaPageParser.Inspection?, checked: Boolean) {
+        val options = if (WebReader.valid(address)) listOf("Read article", "Browse media", "Stream") else listOf("Stream")
+        val suggested = info?.suggested().orEmpty()
+        val ordered = (suggested.filter { it in options } + options).distinct()
+        val heading = if (checked && suggested.isEmpty()) "URL not recognized — choose type" else "Choose URL type"
+        AlertDialog.Builder(this).setTitle(heading)
+            .setItems(ordered.toTypedArray()) { _, index -> saveUrlType(address, name, ordered[index], info) }
+            .setNegativeButton("Cancel", null).show()
+    }
+
+    private fun saveUrlType(address: String, name: String, type: String, info: MediaPageParser.Inspection?) {
+        when (type) {
+            "Read article" -> {
+                if (!WebReader.valid(address)) return
+                val cached = info?.article
+                if (cached != null) saveArticle(cached, name)
+                else runUrlWork("Extracting article text…", { WebReader.fetch(address) }) { result ->
+                    result.fold(onSuccess = { saveArticle(it, name) }, onFailure = {
+                        AlertDialog.Builder(this).setTitle("Reader Mode")
+                            .setMessage("No readable article found, or the page is unavailable.")
+                            .setPositiveButton("OK", null).show()
+                    })
+                }
+            }
+            "Browse media" -> {
+                if (!WebReader.valid(address)) return
+                saveLibrarySource(StreamLibrary.newMediaPage(address, name.ifBlank { StreamLibrary.defaultName(address) }))
+            }
+            "Stream" -> saveLibrarySource(StreamLibrary.newStation(address).copy(
+                name = name.ifBlank { info?.streamName ?: StreamLibrary.defaultName(address) }))
+        }
+    }
+
+    private fun saveLibrarySource(station: StreamLibrary.Station) {
+        val prefs = settings()
+        StreamLibrary.save(prefs, StreamLibrary.list(prefs) + station)
+        renderStreams()
+    }
+
+    private fun saveArticle(page: WebReader.Page, name: String) {
+        runCatching {
+            val uri = WebTextProvider.save(this, page.text)
+            try {
+                saveLibrarySource(StreamLibrary.newFile(uri, name.ifBlank { page.title }, textFile = true))
+            } catch (e: Exception) {
+                WebTextProvider.delete(this, uri)
+                throw e
+            }
+        }.onFailure {
+            AlertDialog.Builder(this).setTitle("Reader Mode")
+                .setMessage("Could not save article. Check available storage.")
+                .setPositiveButton("OK", null).show()
+        }
+    }
+
+    private fun <T> runUrlWork(message: String, work: () -> T, done: (Result<T>) -> Unit) {
+        if (webImport != null) return
+        val progress = AlertDialog.Builder(this).setTitle("Add URL")
+            .setMessage(message).setCancelable(false).setNegativeButton("Cancel", null).create()
+        val worker = Thread({
+            val result = runCatching { work() }
+            val self = Thread.currentThread()
+            messageHandler.post {
+                if (webImport === self) {
+                    webImport = null
+                    if (!isDestroyed && !isFinishing) {
+                        progress.dismiss()
+                        done(result)
+                    }
+                }
+            }
+        }, "AutoClockUrlImport")
+        webImport = worker
+        progress.setOnShowListener {
+            progress.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener {
+                if (webImport === worker) { webImport = null; worker.interrupt() }
+                progress.dismiss()
+            }
+        }
+        progress.show()
+        worker.start()
     }
 
     private fun pickFolder() {

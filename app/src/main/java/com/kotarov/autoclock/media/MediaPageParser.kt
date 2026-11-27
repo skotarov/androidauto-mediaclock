@@ -22,12 +22,23 @@ internal object MediaPageParser {
     private fun absolute(base: String, value: String): String? = runCatching {
         URI(base).resolve(value.trim()).toString().takeIf { allowed(it) }
     }.getOrNull()
-    fun fetch(parent: String, address: String): List<Item> {
-        require(WebReader.valid(address))
+    data class Inspection(val items: List<Item> = emptyList(), val article: WebReader.Page? = null,
+        val direct: Boolean = false, val streamName: String? = null) {
+        fun suggested(): List<String> = if (direct) listOf("Stream") else
+            listOfNotNull("Read article".takeIf { article != null }, "Browse media".takeIf { items.isNotEmpty() })
+    }
+
+    fun fetch(parent: String, address: String): List<Item> = download(parent, address, false).items
+
+    fun inspect(address: String): Inspection = download("inspect", address, true)
+
+    private fun download(parent: String, address: String, inspect: Boolean): Inspection {
+        require(if (inspect) CustomStreamPlayer.valid(address) else WebReader.valid(address))
         var uri = URI(address)
         val deadline = System.nanoTime() + 30_000_000_000L
         repeat(5) {
-            require(WebReader.valid(uri.toString()) && System.nanoTime() < deadline)
+            require(!Thread.currentThread().isInterrupted && System.nanoTime() < deadline)
+            require(if (inspect) CustomStreamPlayer.valid(uri.toString()) else WebReader.valid(uri.toString()))
             val conn = uri.toURL().openConnection() as HttpURLConnection
             try {
                 conn.instanceFollowRedirects = false
@@ -44,9 +55,16 @@ internal object MediaPageParser {
                 val type = conn.contentType.orEmpty()
                 val mime = type.substringBefore(';').trim().lowercase(Locale.ROOT)
                 // Never download a complete direct media file merely to browse a folder.
-                if (mime.startsWith("audio/") && !mime.contains("mpegurl") && !mime.contains("scpls") || mime.startsWith("video/")) {
-                    return parse(parent, uri.toString(), "", "direct:" + mime)
+                val icyName = conn.getHeaderField("icy-name")?.trim()?.take(64)
+                    ?.takeIf { it.isNotBlank() && '\uFFFD' !in it }
+                val direct = (mime.startsWith("audio/") && !mime.contains("mpegurl") && !mime.contains("scpls")) ||
+                    mime.startsWith("video/") || (inspect && (icyName != null || conn.getHeaderField("icy-br") != null ||
+                    (mime in setOf("", "application/octet-stream") && ext(uri.toString()) in extensions && ext(uri.toString()) != "m3u8")))
+                if (direct) {
+                    return Inspection(parse(parent, uri.toString(), "", "direct:" + mime), direct = true, streamName = icyName)
                 }
+                // Web import and browsing retain the existing HTTPS-only policy.
+                if (inspect && (!WebReader.valid(address) || !WebReader.valid(uri.toString()))) return Inspection()
                 val bytes = conn.inputStream.use { input ->
                     val out = ByteArrayOutputStream()
                     val buffer = ByteArray(8192)
@@ -62,10 +80,14 @@ internal object MediaPageParser {
                 val charset = Regex("(?i)charset\\s*=\\s*[\"']?([a-z0-9._-]+)").find(type)?.groupValues?.get(1)
                 if (mime.contains("html")) {
                     val doc = Jsoup.parse(bytes.inputStream(), charset, uri.toString())
-                    return parse(parent, uri.toString(), "", mime, doc)
+                    val items = parse(parent, uri.toString(), "", mime, doc)
+                    val article = if (inspect) runCatching { WebReader.extract(doc, uri.host) }.getOrNull() else null
+                    return Inspection(items, article)
                 }
                 val text = RadioText.decode(bytes, charset, mime.contains("json"))
-                return parse(parent, uri.toString(), text, mime)
+                val items = parse(parent, uri.toString(), text, mime)
+                val hls = text.contains("#EXT-X-TARGETDURATION") || text.contains("#EXT-X-STREAM-INF")
+                return Inspection(items, direct = inspect && hls)
             } finally { conn.disconnect() }
         }
         error("Too many redirects")

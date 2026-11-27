@@ -72,7 +72,7 @@ internal object WebReader {
         extract(Jsoup.parse(html), fallback)
 
     private val clutter = Regex("(?i)(^|[-_\\s])(ads?|advertisement|advertising|sidebar|related|recommendations?|comments?|commentlist|cookie|cookies|newsletter|subscribe|social|share|sharing|breadcrumb|breadcrumbs|menu|navigation|pagination|popup|modal|paywall|toolbar|footer|masthead)([-_\\s]|$)")
-    private fun extract(doc: org.jsoup.nodes.Document, fallback: String): Page {
+    internal fun extract(doc: org.jsoup.nodes.Document, fallback: String): Page {
         val title = doc.selectFirst("meta[property=og:title]")?.attr("content")?.trim().orEmpty()
             .ifBlank { doc.selectFirst("article h1, main h1, h1")?.text().orEmpty() }
             .ifBlank { doc.title() }.ifBlank { fallback }.take(128)
