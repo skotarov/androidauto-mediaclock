@@ -181,9 +181,22 @@ class MainActivity : Activity() {
             }
             root.requestApplyInsets()
         }
-        root.addView(text("SmartTrip Clock", 27f, dp(16)).apply {
-            setOnLongClickListener { showPerformanceDiagnostics(); true }
-        })
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(0, 0, 0, dp(16))
+            addView(ImageView(this@MainActivity).apply {
+                setImageResource(R.drawable.ic_auto_clock)
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }, LinearLayout.LayoutParams(dp(36), dp(36)).apply {
+                marginEnd = dp(6)
+            })
+            addView(text("SmartTrip Clock", 27f, 0).apply {
+                setOnLongClickListener { showPerformanceDiagnostics(); true }
+            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        }
+        root.addView(header)
 
         // The blue outline is the exclusive selection, as in phone display
         // settings. No radio-circle UI is added next to the thumbnails.
