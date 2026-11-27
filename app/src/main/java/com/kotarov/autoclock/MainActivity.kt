@@ -326,6 +326,7 @@ class MainActivity : Activity() {
             }
             setColorFilter(Color.rgb(47, 52, 60))
             scaleType = ImageView.ScaleType.CENTER_INSIDE
+            setPadding(0, 0, 0, 0)
             setOnClickListener {
                 val p = settings()
                 if (BuildConfig.PLAY_MEDIA_MODE) {
@@ -357,7 +358,7 @@ class MainActivity : Activity() {
         }
         slowerButton = quickButton(R.drawable.ic_speed_slower, "Decrease playback speed") { changeSpeed(-1) }
         fasterButton = quickButton(R.drawable.ic_speed_faster, "Increase playback speed") { changeSpeed(1) }
-        transportRow.addView(weatherButton, LinearLayout.LayoutParams(dp(88), dp(52)))
+        transportRow.addView(weatherButton, LinearLayout.LayoutParams(dp(108), dp(52)))
         listOf(backButton, forwardButton, slowerButton, fasterButton).forEach { button ->
             transportRow.addView(button, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(4) })
         }
@@ -579,18 +580,18 @@ class MainActivity : Activity() {
         fasterButton.isEnabled = visible && speed < PlaybackSpeed.MAX
         paintQuickButton(slowerButton, false)
         paintQuickButton(fasterButton, false)
-        // Preserve the original larger play/pause button when speed actions are hidden.
-        val playWidth = dp(if (visible && !BuildConfig.PLAY_MEDIA_MODE) 64 else if (visible) 88 else 108)
-        if (weatherButton.layoutParams.width != playWidth) {
-            weatherButton.layoutParams = weatherButton.layoutParams.apply { width = playWidth }
-        }
-        // Six controls must fit on a narrow phone, keeping each round.
-        val small = dp(if (visible && !BuildConfig.PLAY_MEDIA_MODE) 40 else 48)
+        // Play/Pause always keeps its original large 108 x 52 dp footprint.
+        // On narrow phones only the secondary controls may shrink.
+        val available = resources.configuration.screenWidthDp - 32
+        val smallDp = if (visible && !BuildConfig.PLAY_MEDIA_MODE)
+            ((available - 108 - 5 * 4) / 5).coerceIn(32, 40)
+            else 48
+        val small = dp(smallDp)
         listOf(backButton, forwardButton, slowerButton, fasterButton, carAudioButton).forEach { button ->
             val lp = button.layoutParams ?: return@forEach
             if (lp.width != small || lp.height != small) {
                 lp.width = small; lp.height = small; button.layoutParams = lp
-                val padding = dp(if (small == dp(40)) 8 else 12)
+                val padding = dp(((smallDp - 24) / 2).coerceAtLeast(4))
                 button.setPadding(padding, padding, padding, padding)
             }
         }
@@ -607,8 +608,8 @@ class MainActivity : Activity() {
         val playing = if (BuildConfig.PLAY_MEDIA_MODE) phoneController?.playbackState?.state.let {
             it == PlaybackStateCompat.STATE_PLAYING || it == PlaybackStateCompat.STATE_BUFFERING
         } else ClockSelectionStore.weatherEnabled(settings())
-        weatherButton.setImageResource(if (playing) android.R.drawable.ic_media_pause
-            else android.R.drawable.ic_media_play)
+        weatherButton.setImageResource(if (playing) R.drawable.ic_transport_pause
+            else R.drawable.ic_transport_play)
         weatherButton.contentDescription = if (playing) "Pause" else "Play"
         weatherButton.isSelected = playing
         weatherButton.background = GradientDrawable().apply {
