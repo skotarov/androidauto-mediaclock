@@ -4,11 +4,7 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Preserve the verified launcher alpha silhouette and circular face. -->
-    <path android:fillColor="#0A0A0C"
-        android:pathData="M54,4 A50,50 0,1 1,54,104 A50,50 0,1 1,54,4 Z" />
-    <path android:fillColor="#FFFFFF"
-        android:pathData="M54,13 A41,41 0,1 1,54,95 A41,41 0,1 1,54,13 Z" />
+    <!-- Transparent background; keep the approved cap geometry and viewport unchanged. -->
     <!-- Graduation cap with ascending road. Solid vector fills for API 23+. -->
     <path android:fillColor="#0754A4"
         android:pathData="M18,44 Q15,42 18,40 L51,23 Q54,21 57,23 L91,40 Q94,42 91,45 L75,54 L54,65 L18,45 Z" />
