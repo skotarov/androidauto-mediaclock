@@ -412,6 +412,15 @@ class CustomStreamPlayer(context: Context) {
         reader = null
     }
 
+    /** Reset a file after its outgoing player has checkpointed. */
+    fun resetBookmark(url: String) {
+        if (requested?.first == url) stop()
+        if (savedSeek?.first == url) savedSeek = null
+        if (savedBookTimeline?.first == url) savedBookTimeline = null
+        localBookmarks.edit().remove(url).apply()
+        app.getSharedPreferences("text_bookmarks", Context.MODE_PRIVATE).edit().remove(url).apply()
+    }
+
     fun stop(keepReader: Boolean = false) {
         generation++
         handler.removeCallbacksAndMessages(null)

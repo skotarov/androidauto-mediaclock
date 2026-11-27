@@ -40,6 +40,7 @@ import com.kotarov.autoclock.media.PlaybackSpeed
 import com.kotarov.autoclock.media.StreamMetadata
 import com.kotarov.autoclock.media.MediaPageDirectory
 import com.kotarov.autoclock.media.BookNavigation
+import com.kotarov.autoclock.media.FolderNavigation
 import com.kotarov.autoclock.media.WebReader
 import com.kotarov.autoclock.media.WebTextProvider
 import com.kotarov.autoclock.media.NoticeTest
@@ -891,7 +892,7 @@ class MainActivity : Activity() {
         else {
             pendingPhoneSource = id
             pendingPhonePlay = true
-            if (BookNavigation.parseChoice(id) == null) {
+            if (BookNavigation.parseChoice(id) == null && FolderNavigation.parse(id) == null) {
                 if (!StreamLibrary.select(prefs, id)) { pendingPhoneSource = null; pendingPhonePlay = null; return }
                 ClockSelectionStore.setWeatherEnabled(prefs, true)
             }
@@ -953,10 +954,14 @@ class MainActivity : Activity() {
                     .setMessage(if (page.localFolder) "No files found, or folder unavailable." else "No direct playable media found, or page unavailable.")
                     .setPositiveButton("OK", null).show()
                 else AlertDialog.Builder(this).setTitle(page.name)
-                    .setItems((if (page.localFolder) listOf("▶ Play folder") + items.map { it.name } else items.map { it.name + " · " + it.format }).toTypedArray()) { _, index ->
-                        val item = items[if (page.localFolder) (index - 1).coerceAtLeast(0) else index]
-                        val book = if (item.textFile && !(page.localFolder && index == 0)) StreamLibrary.book(settings(), item.id) else null
-                        if (book != null) openBook(book) else selectPhoneSource(item.id)
+                    .setItems((if (page.localFolder && !BuildConfig.PLAY_MEDIA_MODE) FolderNavigation.choices(page.id).map { it.title } + items.map { it.name } else items.map { it.name + " · " + it.format }).toTypedArray()) { _, index ->
+                        val choices = if (page.localFolder && !BuildConfig.PLAY_MEDIA_MODE) FolderNavigation.choices(page.id) else emptyList()
+                        if (index < choices.size) selectPhoneSource(choices[index].id)
+                        else {
+                            val item = items[index - choices.size]
+                            val book = if (item.textFile) StreamLibrary.book(settings(), item.id) else null
+                            if (book != null) openBook(book) else selectPhoneSource(item.id)
+                        }
                     }.setNegativeButton("Cancel", null).show()
             }
         }

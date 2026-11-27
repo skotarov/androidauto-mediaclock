@@ -31,6 +31,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private lateinit var session: MediaSessionCompat
     private lateinit var prefs: SharedPreferences
     private var activeSource: StreamLibrary.Station? = null
+    private var folderRequest = 0L
     private val playMode = BuildConfig.PLAY_MEDIA_MODE
     private var requestedPlayback = false
     private var focusInterrupted = false
@@ -229,16 +230,17 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             setFlags(MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS)
             setCallback(object : MediaSessionCompat.Callback() {
                 override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
-                    if (mediaId == OPEN_PHONE_ID) {
-                        if (!playMode) openPhonePanel()
+                    val request = ++folderRequest
+                    val folderChoice = FolderNavigation.parse(mediaId)
+                    if (folderChoice != null) {
+                        if (!playMode) playFolder(folderChoice, request)
                         return
                     }
                     if (prepareBookChoice(mediaId) || selectSource(mediaId)) setWeatherEnabled(true)
                 }
 
                 override fun onPrepareFromMediaId(mediaId: String?, extras: Bundle?) {
-                    // Preparing a command must not launch UI or alter playback.
-                    if (mediaId == OPEN_PHONE_ID) return
+                    if (FolderNavigation.parse(mediaId) != null) return
                     if (playMode) setWeatherEnabled(false)
                     if (prepareBookChoice(mediaId) || selectSource(mediaId)) {
                         publishClock()
@@ -290,8 +292,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                     }
                 }
                 override fun onPlay() = setWeatherEnabled(true)
-                override fun onPause() = setWeatherEnabled(false)
-                override fun onStop() = setWeatherEnabled(false)
+                override fun onPause() { folderRequest++; setWeatherEnabled(false) }
+                override fun onStop() { folderRequest++; setWeatherEnabled(false) }
             })
             isActive = true
         }
@@ -391,6 +393,13 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 val valid = StreamLibrary.list(prefs).any { it.id == page.id && it.url == page.url && it.browsable }
                 val children = mutableListOf<MediaBrowserCompat.MediaItem>()
                 val entries = if (valid) outcome.getOrNull().orEmpty() else emptyList()
+                if (!playMode && page.localFolder && entries.isNotEmpty()) {
+                    FolderNavigation.choices(page.id).forEach { choice ->
+                        val desc = MediaDescriptionCompat.Builder().setMediaId(choice.id)
+                            .setTitle(choice.title).build()
+                        children.add(MediaBrowserCompat.MediaItem(desc, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
+                    }
+                }
                 val streamIcon = if (page.mediaPage && entries.size <= 40) sourceIcon(R.drawable.ic_source_podcast, 32) else null
                 entries.forEach { item ->
                     val bookFolder = !playMode && item.textFile && BookNavigation.mayHaveContents(item.name)
@@ -411,14 +420,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val alert = MediaDescriptionCompat.Builder().setMediaId(CLOCK_ID)
             .setTitle("Alert only")
             .apply { if (inlineIcons) setIconBitmap(sourceIcon(R.drawable.ic_source_travel)) else setIconUri(browseIconUri(R.drawable.ic_source_travel)) }.build()
-        if (!playMode) {
-            items.add(MediaBrowserCompat.MediaItem(alert, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
-            val phone = MediaDescriptionCompat.Builder().setMediaId(OPEN_PHONE_ID)
-                .setTitle("Open on phone")
-                .apply { if (inlineIcons) setIconBitmap(sourceIcon(R.drawable.ic_source_phone)) else setIconUri(browseIconUri(R.drawable.ic_source_phone)) }
-                .build()
-            items.add(MediaBrowserCompat.MediaItem(phone, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
-        }
+        if (!playMode) items.add(MediaBrowserCompat.MediaItem(alert, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
         stations.forEach { station ->
             val bookFolder = !playMode && station.textFile && BookNavigation.mayHaveContents(station.name)
             val desc = MediaDescriptionCompat.Builder().setMediaId(if (bookFolder) BookNavigation.BOOK_PREFIX + station.id else station.id)
@@ -431,14 +433,22 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         result.sendResult(items)
     }
 
-    private fun openPhonePanel() {
-        // Explicit beta-only user action. The OS may deny background activity
-        // launches; do not request overlay privileges or circumvent that policy.
-        val launch = Intent(this, com.kotarov.autoclock.MainActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        runCatching { startActivity(launch) }.onFailure {
-            android.widget.Toast.makeText(this, "Open SmartTrip Clock on your phone", android.widget.Toast.LENGTH_SHORT).show()
+    private fun playFolder(choice: FolderNavigation.Request, request: Long) {
+        val folder = StreamLibrary.list(prefs).firstOrNull { it.localFolder && it.id == choice.folderId } ?: return
+        fun start(items: List<MediaPageParser.Item>) {
+            if (request != folderRequest || !StreamLibrary.list(prefs).any { it.localFolder && it.id == folder.id && it.url == folder.url }) return
+            val remembered = if (choice.resume) StreamLibrary.folderPosition(prefs, folder) else null
+            val id = FolderNavigation.target(items.map { it.id }, remembered) ?: return
+            val item = items.first { it.id == id }
+            if (!choice.resume || remembered != id) {
+                setWeatherEnabled(false)
+                streamPlayer.resetBookmark(item.url)
+            }
+            if (selectSource(id)) setWeatherEnabled(true)
         }
+        val snapshot = MediaPageDirectory.folderSnapshot(folder)
+        if (snapshot != null) start(snapshot)
+        else MediaPageDirectory.load(this, folder) { outcome -> start(outcome.getOrNull().orEmpty()) }
     }
 
     private fun browseIconUri(resource: Int): android.net.Uri =
@@ -922,8 +932,13 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 StreamLibrary.selectedFolder(prefs)?.id != folder.id) return
             val index = items.indexOfFirst { it.id == ended.id }
             val next = if (index >= 0) items.getOrNull(index + 1) else null
-            if (next != null && selectSource(next.id)) setWeatherEnabled(true)
-            else setWeatherEnabled(false)
+            if (next != null) {
+                streamPlayer.resetBookmark(next.url)
+                if (selectSource(next.id)) setWeatherEnabled(true) else setWeatherEnabled(false)
+            } else {
+                if (index >= 0) StreamLibrary.clearFolderPosition(prefs, folder)
+                setWeatherEnabled(false)
+            }
         }
         // Post the transition outside the completed player's callback.
         val snapshot = MediaPageDirectory.folderSnapshot(folder)
@@ -1176,7 +1191,6 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         private const val KEY_TEST_STATE_NONE = "try_playback_state_none_v37"
         private const val KEY_TEST_STATE_STOPPED = "try_playback_state_stopped_v39"
         private const val INVISIBLE_TEXT = "\u00A0"
-        private const val OPEN_PHONE_ID = "autoclock_open_phone"
         const val CLOCK_ID = "autoclock_clock"
         const val ROOT_ID = "auto_clock_root"
     }

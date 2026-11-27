@@ -74,6 +74,16 @@ object StreamLibrary {
     fun selectedFolder(prefs: SharedPreferences): Station? = selectedChild(prefs)?.first?.let { id ->
         list(prefs).firstOrNull { it.id == id && it.localFolder }
     }
+    private fun folderKey(folder: Station): String = "folder_position_v139:" + folder.id
+    fun folderPosition(prefs: SharedPreferences, folder: Station): String? {
+        val key = folderKey(folder)
+        if (prefs.contains(key)) return prefs.getString(key, null)?.takeIf { it.isNotBlank() }
+        // Migrate the current selected child from earlier builds, if available.
+        return selectedChild(prefs)?.takeIf { it.first == folder.id }?.second?.id
+    }
+    fun clearFolderPosition(prefs: SharedPreferences, folder: Station) {
+        prefs.edit().putString(folderKey(folder), "").apply()
+    }
     fun selectedRootId(prefs: SharedPreferences): String =
         selectedChild(prefs)?.first ?: prefs.getString(KEY_SELECTED, ALERT_ID).orEmpty()
     internal fun book(prefs: SharedPreferences, id: String): Station? {
@@ -94,7 +104,9 @@ object StreamLibrary {
             val item = hit.item
             val o = JSONObject().put("id", item.id).put("parent", hit.parent.id).put("pageUrl", hit.parent.url)
                 .put("url", item.url).put("name", item.name).put("textFile", item.textFile)
-            prefs.edit().putString(KEY_CHILD, o.toString()).putString(KEY_SELECTED, item.id).apply()
+            prefs.edit().putString(KEY_CHILD, o.toString()).putString(KEY_SELECTED, item.id).apply {
+                if (hit.parent.localFolder) putString(folderKey(hit.parent), item.id)
+            }.apply()
             return true
         }
         return selectedChild(prefs)?.second?.id == id
@@ -105,6 +117,8 @@ object StreamLibrary {
             a.put(JSONObject().put("id", s.id).put("name", s.name).put("url", s.url).put("icon", "").put("local", s.local).put("textFile", s.textFile).put("language", s.language).put("mediaPage", s.mediaPage).put("localFolder", s.localFolder))
         }
         val edit = prefs.edit().putString(KEY_LIST, a.toString())
+        list(prefs).filter { old -> old.localFolder && stations.none { it.id == old.id && it.url == old.url && it.localFolder } }
+            .forEach { edit.remove(folderKey(it)) }
         val child = selectedChild(prefs)
         val keepChild = child != null && stations.any { next ->
             next.browsable && next.id == child.first && list(prefs).any { old -> old.id == next.id && old.url == next.url }
