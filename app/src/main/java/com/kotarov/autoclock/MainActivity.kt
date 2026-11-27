@@ -261,29 +261,56 @@ class MainActivity : Activity() {
         val chimeButton = quickButton(R.drawable.ic_setting_chime, "Alert chime") {
             showChimePicker()
         }
-        fun addQuickControl(parent: LinearLayout, button: ImageButton) {
-            parent.addView(FrameLayout(this).apply {
-                addView(button, FrameLayout.LayoutParams(dp(48), dp(48), android.view.Gravity.CENTER))
-            }, LinearLayout.LayoutParams(0, dp(56), 1f))
+        fun addQuickControl(parent: LinearLayout, button: ImageButton, label: String) {
+            val control = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = android.view.Gravity.CENTER_HORIZONTAL
+                addView(FrameLayout(this@MainActivity).apply {
+                    addView(button, FrameLayout.LayoutParams(dp(48), dp(48), android.view.Gravity.CENTER))
+                }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(56)))
+                addView(text(label, 10f, 0).apply {
+                    gravity = android.view.Gravity.CENTER
+                    setTextColor(Color.rgb(185, 190, 199))
+                    maxLines = 1
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                    setOnClickListener { button.performClick() }
+                }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            }
+            parent.addView(control, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         }
-        listOf(sizeButton, themeButton).forEach { button ->
-            addQuickControl(quickRow, button)
+        addQuickControl(quickRow, sizeButton, "Size")
+        addQuickControl(quickRow, themeButton, "Theme")
+
+        // Link the three message controls through their button centres.
+        // Draw behind the opaque circular buttons so only the gaps show a line.
+        val messageControls = FrameLayout(this)
+        val connector = View(this).apply {
+            setBackgroundColor(faint)
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }
-        // A single subtle outline links the three message-related controls.
-        // Equal weights keep the three message controls together.
-        val messageControls = LinearLayout(this).apply {
+        messageControls.addView(connector, FrameLayout.LayoutParams(0, dp(1), android.view.Gravity.TOP or android.view.Gravity.LEFT).apply {
+            topMargin = dp(28)
+        })
+        val messageRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER
-            background = GradientDrawable().apply {
-                cornerRadius = dp(28).toFloat()
-                setColor(Color.TRANSPARENT)
-                setStroke(dp(1), faint)
+        }
+        addQuickControl(messageRow, speakButton, "Speak")
+        addQuickControl(messageRow, chimeButton, "Chime")
+        addQuickControl(messageRow, testButton, "Test")
+        messageControls.addView(messageRow, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
+        messageControls.addOnLayoutChangeListener { _, left, _, right, _, oldLeft, _, oldRight, _ ->
+            val width = right - left
+            if (width > 0 && (width != oldRight - oldLeft || connector.layoutParams.width == 0)) {
+                connector.layoutParams = (connector.layoutParams as FrameLayout.LayoutParams).apply {
+                    this.width = width * 2 / 3
+                    leftMargin = width / 6
+                }
             }
         }
-        listOf(speakButton, chimeButton, testButton).forEach { button ->
-            addQuickControl(messageControls, button)
-        }
-        if (!BuildConfig.PLAY_MEDIA_MODE) quickRow.addView(messageControls, LinearLayout.LayoutParams(0, dp(56), 3f))
+        if (!BuildConfig.PLAY_MEDIA_MODE) quickRow.addView(messageControls,
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 3f))
         addSpaced(root, quickRow)
         syncQuickButtons()
 
