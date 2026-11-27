@@ -392,18 +392,13 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val alert = MediaDescriptionCompat.Builder().setMediaId(CLOCK_ID)
             .setTitle("Alert only")
             .setIconBitmap(sourceIcon(R.drawable.ic_source_travel)).build()
-        var alertAdded = playMode
-        StreamLibrary.displayOrder(StreamLibrary.list(prefs), !playMode).forEach { station ->
-            if (!alertAdded && !StreamLibrary.isBrowseEntry(station, true)) {
-                items.add(MediaBrowserCompat.MediaItem(alert, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
-                alertAdded = true
-            }
+        if (!playMode) items.add(MediaBrowserCompat.MediaItem(alert, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
+        StreamLibrary.list(prefs).forEach { station ->
             val bookFolder = !playMode && station.textFile && BookNavigation.mayHaveContents(station.name)
             val desc = MediaDescriptionCompat.Builder().setMediaId(if (bookFolder) BookNavigation.BOOK_PREFIX + station.id else station.id)
                 .setTitle(station.name).setIconBitmap(sourceIcon(if (station.localFolder) R.drawable.ic_source_folder else if (station.mediaPage) R.drawable.ic_source_web else if (station.textFile) R.drawable.ic_source_text else if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast)).build()
             items.add(MediaBrowserCompat.MediaItem(desc, if (station.browsable || bookFolder) MediaBrowserCompat.MediaItem.FLAG_BROWSABLE else MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
         }
-        if (!alertAdded) items.add(MediaBrowserCompat.MediaItem(alert, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
         result.sendResult(items)
     }
 

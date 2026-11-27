@@ -116,16 +116,6 @@ object StreamLibrary {
     fun newMediaPage(url: String, name: String) = Station("page:" + UUID.randomUUID().toString(), name, url, mediaPage = true)
     fun newFile(uri: String, name: String, textFile: Boolean = false) = Station("file:" + UUID.randomUUID().toString(),
         name.take(128).ifBlank { "Local file" }, uri, local = true, textFile = textFile)
-    internal fun isBrowseEntry(station: Station, lite: Boolean): Boolean =
-        station.browsable || (lite && station.textFile && BookFormat.detect(station.name, null) != BookFormat.PDF)
-    internal fun displayOrder(stations: List<Station>, lite: Boolean): List<Station> =
-        stations.sortedBy { if (isBrowseEntry(it, lite)) 0 else 1 }
-    internal fun moveWithinGroup(stations: List<Station>, from: String, to: String, after: Boolean, lite: Boolean): List<Station> {
-        val a = stations.firstOrNull { it.id == from } ?: return stations
-        val b = stations.firstOrNull { it.id == to } ?: return stations
-        if (isBrowseEntry(a, lite) != isBrowseEntry(b, lite)) return stations
-        return move(stations, from, to, after)
-    }
     fun move(stations: List<Station>, from: String, to: String, after: Boolean): List<Station> {
         if (from == to) return stations
         val source = stations.firstOrNull { it.id == from } ?: return stations

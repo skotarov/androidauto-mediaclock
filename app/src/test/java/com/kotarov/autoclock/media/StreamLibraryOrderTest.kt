@@ -15,6 +15,16 @@ class StreamLibraryOrderTest {
         assertEquals(listOf(a,c,b), StreamLibrary.move(items,"b","c",true))
     }
 
+    @Test fun foldersBooksAndStreamsCanBeMovedAcrossTypesWithoutDroppingEntries() {
+        val folder = StreamLibrary.Station("folder", "Folder", "content://example/tree", local = true, localFolder = true)
+        val book = StreamLibrary.Station("book", "Book.epub", "content://example/book", local = true, textFile = true)
+        val mixed = listOf(a, folder, b, book, c)
+        val moved = StreamLibrary.move(mixed, "folder", "c", true)
+        assertEquals(listOf(a, b, book, c, folder), moved)
+        assertEquals(mixed.map { it.id }.toSet(), moved.map { it.id }.toSet())
+        assertEquals(listOf(book, a, folder, b, c), StreamLibrary.move(mixed, "book", "a", false))
+    }
+
     @Test fun invalidMoveDoesNotChangeList() {
         assertEquals(items, StreamLibrary.move(items,"a",StreamLibrary.ALERT_ID,false))
         assertEquals(items, StreamLibrary.move(items,"b","b",false))

@@ -745,7 +745,7 @@ class MainActivity : Activity() {
     private fun renderStreams() {
         if (!::streamRows.isInitialized) return
         val prefs = settings()
-        val sources = StreamLibrary.displayOrder(StreamLibrary.list(prefs), !BuildConfig.PLAY_MEDIA_MODE)
+        val sources = StreamLibrary.list(prefs)
         if (renderedSources == sources) {
             highlightSelectedSource()
             return
@@ -765,7 +765,7 @@ class MainActivity : Activity() {
             gravity = android.view.Gravity.CENTER_VERTICAL
             setPadding(0, dp(6), 0, dp(6))
             // Match the drag-handle slot and icon size of the stream rows,
-            // but keep Alert only fixed after browsable entries and non-draggable.
+            // but keep Alert only fixed and non-draggable.
             addView(View(this@MainActivity), LinearLayout.LayoutParams(dp(34), dp(48)))
             addView(ImageView(this@MainActivity).apply {
                 setImageResource(R.drawable.ic_source_travel)
@@ -773,12 +773,8 @@ class MainActivity : Activity() {
             addView(alert, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             setOnClickListener { selectPhoneSource(StreamLibrary.ALERT_ID) }
         }
-        var alertAdded = BuildConfig.PLAY_MEDIA_MODE
+        if (!BuildConfig.PLAY_MEDIA_MODE) addSpaced(streamRows, alertRow)
         sources.forEach { station ->
-            if (!alertAdded && !StreamLibrary.isBrowseEntry(station, true)) {
-                addSpaced(streamRows, alertRow)
-                alertAdded = true
-            }
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = android.view.Gravity.CENTER_VERTICAL
@@ -796,7 +792,7 @@ class MainActivity : Activity() {
                                 val after = event.y > view.height / 2f
                                 // Read the latest list after drag dispatch (metadata may have updated).
                                 messageHandler.post {
-                                    StreamLibrary.save(p, StreamLibrary.moveWithinGroup(StreamLibrary.list(p), source, station.id, after, !BuildConfig.PLAY_MEDIA_MODE))
+                                    StreamLibrary.save(p, StreamLibrary.move(StreamLibrary.list(p), source, station.id, after))
                                     if (!isDestroyed) renderStreams()
                                 }
                             }
@@ -861,7 +857,6 @@ class MainActivity : Activity() {
             })
             addSpaced(streamRows, row)
         }
-        if (!alertAdded) addSpaced(streamRows, alertRow)
     }
 
     private fun highlightSelectedSource() {
