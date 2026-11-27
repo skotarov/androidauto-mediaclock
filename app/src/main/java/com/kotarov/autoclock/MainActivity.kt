@@ -8,6 +8,9 @@ import android.content.ClipData
 import android.net.Uri
 import android.view.DragEvent
 import android.support.v4.media.MediaBrowserCompat
+import android.support.v4.media.MediaMetadataCompat
+import android.os.SystemClock
+import com.kotarov.autoclock.media.PhoneSeekPosition
 import android.support.v4.media.session.MediaControllerCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import android.widget.ImageButton
@@ -84,12 +87,30 @@ class MainActivity : Activity() {
     private lateinit var slowerButton: ImageButton
     private lateinit var fasterButton: ImageButton
     private var transportUiKey: String? = null
+    private lateinit var seekPanel: LinearLayout
+    private lateinit var positionSlider: SeekBar
+    private lateinit var elapsedLabel: TextView
+    private lateinit var durationLabel: TextView
+    private var seekState: PlaybackStateCompat? = null
+    private var seekMetadata: MediaMetadataCompat? = null
+    private var seekSource: String? = null
+    private var seekDuration = 0L
+    private var dragSource: String? = null
+    private var dragDuration = 0L
+    private var seekHoldUntil = 0L
+    private val seekTick = Runnable { syncPhoneSeek() }
     private var pendingPhonePlay: Boolean? = null
     private var pendingPhoneSource: String? = null
     private val playbackCallback = object : MediaControllerCompat.Callback() {
         override fun onPlaybackStateChanged(state: PlaybackStateCompat?) {
             syncTransportButtons(state)
+            seekState = state
+            syncPhoneSeek()
             if (BuildConfig.PLAY_MEDIA_MODE) syncWeatherToggle()
+        }
+        override fun onMetadataChanged(metadata: MediaMetadataCompat?) {
+            seekMetadata = metadata
+            syncPhoneSeek()
         }
         override fun onSessionDestroyed() {
             detachPhoneController()
@@ -112,6 +133,7 @@ class MainActivity : Activity() {
         if (key == StreamLibrary.KEY_LIST || key == StreamLibrary.KEY_SELECTED || key == CarLibraryTabs.KEY_ALERT_PIN) {
             if (key != StreamLibrary.KEY_SELECTED) renderStreams() else highlightSelectedSource()
             syncTransportButtons(phoneController?.playbackState)
+            syncPhoneSeek()
         }
         if (key == PhoneAudioMode.KEY || key == NoticeAudio.KEY_SPEAK ||
             key == AutoClockMediaService.KEY_LAYOUT || key == ClockTheme.KEY) {
@@ -365,6 +387,7 @@ class MainActivity : Activity() {
         }
         if (!BuildConfig.PLAY_MEDIA_MODE) transportRow.addView(carAudioButton, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(4) })
         addSpaced(root, transportRow)
+        addPhoneSeekPanel(root)
         syncTransportButtons(null)
         syncWeatherToggle()
 
@@ -466,8 +489,11 @@ class MainActivity : Activity() {
                     phoneController = MediaControllerCompat(this@MainActivity, browser.sessionToken).also {
                         it.registerCallback(playbackCallback, messageHandler)
                         syncTransportButtons(it.playbackState)
+                        seekState = it.playbackState
+                        seekMetadata = it.metadata
                         if (BuildConfig.PLAY_MEDIA_MODE) syncWeatherToggle()
                     }
+                    syncPhoneSeek()
                     val source = pendingPhoneSource
                     val play = pendingPhonePlay
                     pendingPhoneSource = null
@@ -598,9 +624,108 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun addPhoneSeekPanel(root: LinearLayout) {
+        elapsedLabel = text("0:00", 11f, 0)
+        durationLabel = text("0:00", 11f, 0).apply {
+            gravity = android.view.Gravity.END
+            setTextColor(Color.rgb(185, 190, 199))
+        }
+        positionSlider = SeekBar(this).apply {
+            max = PhoneSeekPosition.STEPS
+            contentDescription = "Playback position"
+            progressTintList = ColorStateList.valueOf(accent)
+            thumbTintList = ColorStateList.valueOf(accent)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onStartTrackingTouch(bar: SeekBar) {
+                    dragSource = seekSource
+                    dragDuration = seekDuration
+                    seekHoldUntil = 0L
+                }
+                override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) {
+                    if (!fromUser) return
+                    val duration = if (dragSource != null) dragDuration else seekDuration
+                    elapsedLabel.text = PhoneSeekPosition.format(PhoneSeekPosition.position(progress, duration))
+                    // Accessibility and keyboard changes don't start a touch gesture.
+                    if (dragSource == null) commitPhoneSeek(seekSource, duration, progress)
+                }
+                override fun onStopTrackingTouch(bar: SeekBar) {
+                    val source = dragSource
+                    val duration = dragDuration
+                    dragSource = null
+                    commitPhoneSeek(source, duration, bar.progress)
+                    syncPhoneSeek()
+                }
+            })
+        }
+        seekPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+            addView(positionSlider, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(36)))
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(dp(16), 0, dp(16), dp(8))
+                addView(elapsedLabel, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                addView(durationLabel, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            })
+        }
+        root.addView(seekPanel)
+    }
+
+    private fun commitPhoneSeek(id: String?, duration: Long, progress: Int) {
+        if (id == null || id != seekSource || duration != seekDuration ||
+            id != StreamLibrary.selected(settings())?.id || duration <= 0L) return
+        val controller = phoneController ?: return
+        if ((seekState?.actions ?: 0L) and PlaybackStateCompat.ACTION_SEEK_TO == 0L) return
+        seekHoldUntil = SystemClock.elapsedRealtime() + 1000L
+        controller.transportControls.seekTo(PhoneSeekPosition.position(progress, duration))
+    }
+
+    private fun syncPhoneSeek() {
+        messageHandler.removeCallbacks(seekTick)
+        if (!::seekPanel.isInitialized) return
+        val source = StreamLibrary.selected(settings())
+        val metadata = seekMetadata
+        val state = seekState
+        val duration = metadata?.getLong(MediaMetadataCompat.METADATA_KEY_DURATION) ?: 0L
+        val id = metadata?.getString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID)
+        val valid = phoneController != null && source != null && id == source.id &&
+            duration > 0L && state != null && state.position >= 0L &&
+            (state.actions and PlaybackStateCompat.ACTION_SEEK_TO) != 0L
+        if (!valid || state == null) {
+            seekPanel.visibility = View.GONE
+            seekSource = null
+            seekDuration = 0L
+            dragSource = null
+            seekHoldUntil = 0L
+            return
+        }
+        if (seekSource != id || seekDuration != duration) {
+            dragSource = null
+            seekHoldUntil = 0L
+        }
+        seekSource = id
+        seekDuration = duration
+        seekPanel.visibility = View.VISIBLE
+        durationLabel.text = (if (source?.textFile == true) "≈ " else "") + PhoneSeekPosition.format(duration)
+        val now = SystemClock.elapsedRealtime()
+        val advancing = state.state == PlaybackStateCompat.STATE_PLAYING && state.playbackSpeed > 0f
+        if (dragSource == null && now >= seekHoldUntil) {
+            val position = PhoneSeekPosition.current(state.position, duration, state.lastPositionUpdateTime,
+                now, if (advancing) state.playbackSpeed else 0f)
+            positionSlider.progress = PhoneSeekPosition.progress(position, duration)
+            elapsedLabel.text = PhoneSeekPosition.format(position)
+        }
+        // Only while the phone panel is connected, and only for a moving or pending slider.
+        if (advancing || now < seekHoldUntil) messageHandler.postDelayed(seekTick, 1000L)
+    }
+
     private fun detachPhoneController() {
         phoneController?.unregisterCallback(playbackCallback)
         phoneController = null
+        seekState = null
+        seekMetadata = null
+        syncPhoneSeek()
         syncTransportButtons(null)
     }
 
