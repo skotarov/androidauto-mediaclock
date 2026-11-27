@@ -92,6 +92,8 @@ class MainActivity : Activity() {
     private lateinit var playerProgress: ProgressBar
     private lateinit var playerExpand: TextView
     private var playerExpanded = false
+    private var fullClockDialog: android.app.Dialog? = null
+    private var fullClockImage: ImageView? = null
     private var libraryQuery = ""
     private var libraryFilter = 0
     private var renderedLibraryKey: String? = null
@@ -299,8 +301,16 @@ class MainActivity : Activity() {
             }
         }
         root.addView(pageIndicators)
+        root.addView(text("Full screen", 12f, dp(4)).apply {
+            gravity = android.view.Gravity.CENTER
+            setTextColor(Color.rgb(185, 190, 199))
+            minimumHeight = dp(36)
+            setOnClickListener { showFullClock() }
+        })
         clockPager.onPageChanged = { page -> updateClockPageDots(page) }
         showSelectedClockPage()
+        if (savedInstanceState?.getBoolean("fullClockOpen") == true)
+            root.post { if (!isFinishing && !isDestroyed) showFullClock() }
         val quickRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER
@@ -397,10 +407,19 @@ class MainActivity : Activity() {
             isClickable = true
             isFocusable = true
             contentDescription = "Expand or collapse player"
-            setOnClickListener {
-                playerExpanded = !playerExpanded
-                syncMiniPlayer()
-                syncPhoneSeek()
+            setOnClickListener { setPlayerExpanded(!playerExpanded) }
+            var downY = 0f
+            setOnTouchListener { view, event ->
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> { downY = event.y; true }
+                    MotionEvent.ACTION_UP -> {
+                        val delta = event.y - downY
+                        if (abs(delta) > dp(28)) setPlayerExpanded(delta < 0)
+                        else view.performClick()
+                        true
+                    }
+                    else -> true
+                }
             }
         }
         val labels = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -455,7 +474,10 @@ class MainActivity : Activity() {
                         else c.transportControls.play()
                     }
                 } else {
-                    val enabled = !ClockSelectionStore.weatherEnabled(p)
+                    val current = phoneController?.playbackState?.state
+                    val playing = if (current != null) current == PlaybackStateCompat.STATE_PLAYING ||
+                        current == PlaybackStateCompat.STATE_BUFFERING else pendingPhonePlay == true
+                    val enabled = !playing
                     val controls = phoneController?.transportControls
                     if (controls != null) {
                         if (enabled) controls.play() else controls.pause()
@@ -906,9 +928,9 @@ class MainActivity : Activity() {
 
     private fun syncWeatherToggle() {
         if (!::weatherButton.isInitialized) return
-        val playing = if (BuildConfig.PLAY_MEDIA_MODE) phoneController?.playbackState?.state.let {
-            it == PlaybackStateCompat.STATE_PLAYING || it == PlaybackStateCompat.STATE_BUFFERING
-        } else ClockSelectionStore.weatherEnabled(settings())
+        val state = phoneController?.playbackState?.state
+        val playing = if (state != null) state == PlaybackStateCompat.STATE_PLAYING ||
+            state == PlaybackStateCompat.STATE_BUFFERING else pendingPhonePlay == true
         weatherButton.setImageResource(if (playing) R.drawable.ic_transport_pause
             else R.drawable.ic_transport_play)
         weatherButton.contentDescription = if (playing) "Pause" else "Play"
@@ -1016,10 +1038,13 @@ class MainActivity : Activity() {
                     if (result != null) {
                         analogImage.setImageBitmap(result.analog)
                         digitalImage.setImageBitmap(result.digital)
-                        analogBitmap?.recycle()
-                        digitalBitmap?.recycle()
+                        val oldAnalog = analogBitmap
+                        val oldDigital = digitalBitmap
                         analogBitmap = result.analog
                         digitalBitmap = result.digital
+                        updateFullClockImage()
+                        oldAnalog?.recycle()
+                        oldDigital?.recycle()
                         previewKey = next
                     } else {
                         android.util.Log.w("AutoClock", "Preview render failed", outcome.exceptionOrNull())
@@ -1034,6 +1059,7 @@ class MainActivity : Activity() {
         val selected = ClockSelectionStore.current(prefs).family
         updateSelectionStyle(analogCard, selected == ClockFamily.ANALOG)
         updateSelectionStyle(digitalCard, selected == ClockFamily.DIGITAL)
+        updateFullClockImage()
     }
 
     private fun updateSelectionStyle(
@@ -1090,6 +1116,7 @@ class MainActivity : Activity() {
                 state?.customActions.orEmpty().any { it.action == AutoClockMediaService.ACTION_SPEED_UP }))
             " · " + String.format(java.util.Locale.ROOT, "%.1f×", PlaybackSpeed.read(prefs, source)) else ""
         playerTitle.text = name
+        playerTitle.maxLines = if (playerExpanded) 3 else 1
         playerDetail.text = kind + rate + if (playing) " · Playing" else " · Paused"
         playerExpand.text = if (playerExpanded) "⌄" else "⌃"
         if (playing && source != null) {
@@ -1103,7 +1130,69 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun setPlayerExpanded(expanded: Boolean) {
+        playerExpanded = expanded
+        syncMiniPlayer()
+        syncPhoneSeek()
+    }
+
+    private fun showFullClock() {
+        if (fullClockDialog?.isShowing == true) return
+        val dialog = android.app.Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+        val frame = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = android.view.Gravity.CENTER
+            setBackgroundColor(background)
+        }
+        val controls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(4), dp(12), dp(4))
+        }
+        val keepOn = Switch(this).apply {
+            text = "Keep screen on"
+            isChecked = settings().getBoolean("phone_full_clock_keep_on", false)
+            setOnCheckedChangeListener { _, checked ->
+                settings().edit().putBoolean("phone_full_clock_keep_on", checked).apply()
+                if (checked) dialog.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                else dialog.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+        }
+        controls.addView(keepOn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        controls.addView(Button(this).apply {
+            text = "Close"
+            isAllCaps = false
+            setOnClickListener { dialog.dismiss() }
+        })
+        frame.addView(controls)
+        fullClockImage = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            contentDescription = "Selected live clock"
+        }
+        frame.addView(fullClockImage, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+        dialog.setContentView(frame)
+        fullClockDialog = dialog
+        dialog.setOnDismissListener {
+            fullClockImage?.setImageDrawable(null)
+            fullClockImage = null
+            fullClockDialog = null
+        }
+        dialog.show()
+        dialog.window?.setLayout(android.view.WindowManager.LayoutParams.MATCH_PARENT,
+            android.view.WindowManager.LayoutParams.MATCH_PARENT)
+        if (keepOn.isChecked) dialog.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        updateFullClockImage()
+        updatePreviewTiles()
+    }
+
+    private fun updateFullClockImage() {
+        fullClockImage?.setImageBitmap(if (ClockSelectionStore.current(settings()).family == ClockFamily.ANALOG)
+            analogBitmap else digitalBitmap)
+    }
+
     override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean("fullClockOpen", fullClockDialog?.isShowing == true)
         outState.putBoolean("playerExpanded", playerExpanded)
         outState.putInt("libraryFilter", libraryFilter)
         outState.putString("libraryQuery", libraryQuery)
@@ -1990,6 +2079,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        fullClockDialog?.dismiss()
         webImport?.interrupt()
         webImport = null
         messageHandler.removeCallbacks(hideLocationMessage)
@@ -2002,6 +2092,7 @@ class MainActivity : Activity() {
         requestedPreview = null
         if (::analogImage.isInitialized) analogImage.setImageDrawable(null)
         if (::digitalImage.isInitialized) digitalImage.setImageDrawable(null)
+        fullClockImage?.setImageDrawable(null)
         analogBitmap?.recycle()
         digitalBitmap?.recycle()
         analogBitmap = null
