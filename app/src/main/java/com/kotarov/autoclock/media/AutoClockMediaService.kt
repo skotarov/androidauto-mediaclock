@@ -332,6 +332,9 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         // Google Assistant / search has been observed requesting the Auto
         // dashboard "For You" recommendations as a different controller.
         // Refuse recommendations, NOT the real Android Auto media library.
+        if (AutoClockBrowseRouting.emptySuggestionsRoot(clientPackageName, requestedSuggestions)) {
+            return BrowserRoot(AutoClockBrowseRouting.EMPTY_SUGGESTIONS_ROOT, null)
+        }
         if (!AutoClockBrowseRouting.allowLibrary(
                 clientPackageName, requestedSuggestions
             )) return null
@@ -354,6 +357,10 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         parentId: String,
         result: Result<MutableList<MediaBrowserCompat.MediaItem>>
     ) {
+        if (parentId == AutoClockBrowseRouting.EMPTY_SUGGESTIONS_ROOT) {
+            result.sendResult(mutableListOf())
+            return
+        }
         if (!playMode && parentId.startsWith(BookNavigation.BOOK_PREFIX)) {
             val book = StreamLibrary.book(prefs, parentId.removePrefix(BookNavigation.BOOK_PREFIX))
             if (book == null) { result.sendResult(mutableListOf()); return }
@@ -377,11 +384,15 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             MediaPageDirectory.load(this, page) { outcome ->
                 val valid = StreamLibrary.list(prefs).any { it.id == page.id && it.url == page.url && it.browsable }
                 val children = mutableListOf<MediaBrowserCompat.MediaItem>()
-                val streamIcon = if (valid && page.mediaPage) sourceIcon(R.drawable.ic_source_podcast, 24) else null
-                if (valid) outcome.getOrNull().orEmpty().forEach { item ->
+                val entries = if (valid) outcome.getOrNull().orEmpty() else emptyList()
+                val streamIcon = if (page.mediaPage && entries.size <= 40) sourceIcon(R.drawable.ic_source_podcast, 32) else null
+                entries.forEach { item ->
                     val bookFolder = !playMode && item.textFile && BookNavigation.mayHaveContents(item.name)
                     val desc = MediaDescriptionCompat.Builder().setMediaId(if (bookFolder) BookNavigation.BOOK_PREFIX + item.id else item.id).setTitle(item.name)
-                        .setSubtitle(item.format).apply { streamIcon?.let { setIconBitmap(it) } }.build()
+                        .setSubtitle(item.format).apply {
+                            if (streamIcon != null) setIconBitmap(streamIcon)
+                            else if (page.mediaPage) setIconUri(browseIconUri(R.drawable.ic_source_podcast))
+                        }.build()
                     children.add(MediaBrowserCompat.MediaItem(desc, if (bookFolder) MediaBrowserCompat.MediaItem.FLAG_BROWSABLE else MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
                 }
                 result.sendResult(children)
@@ -389,18 +400,26 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             return
         }
         val items = mutableListOf<MediaBrowserCompat.MediaItem>()
+        val stations = StreamLibrary.list(prefs)
+        val inlineIcons = stations.size <= 40
         val alert = MediaDescriptionCompat.Builder().setMediaId(CLOCK_ID)
             .setTitle("Alert only")
-            .setIconBitmap(sourceIcon(R.drawable.ic_source_travel, 24)).build()
+            .apply { if (inlineIcons) setIconBitmap(sourceIcon(R.drawable.ic_source_travel)) else setIconUri(browseIconUri(R.drawable.ic_source_travel)) }.build()
         if (!playMode) items.add(MediaBrowserCompat.MediaItem(alert, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
-        StreamLibrary.list(prefs).forEach { station ->
+        stations.forEach { station ->
             val bookFolder = !playMode && station.textFile && BookNavigation.mayHaveContents(station.name)
             val desc = MediaDescriptionCompat.Builder().setMediaId(if (bookFolder) BookNavigation.BOOK_PREFIX + station.id else station.id)
-                .setTitle(station.name).setIconBitmap(sourceIcon(if (station.localFolder) R.drawable.ic_source_folder else if (station.mediaPage) R.drawable.ic_source_web else if (station.textFile) R.drawable.ic_source_text else if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast, 24)).build()
+                .setTitle(station.name).apply {
+                    val icon = if (station.localFolder) R.drawable.ic_source_folder else if (station.mediaPage) R.drawable.ic_source_web else if (station.textFile) R.drawable.ic_source_text else if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast
+                    if (inlineIcons) setIconBitmap(sourceIcon(icon)) else setIconUri(browseIconUri(icon))
+                }.build()
             items.add(MediaBrowserCompat.MediaItem(desc, if (station.browsable || bookFolder) MediaBrowserCompat.MediaItem.FLAG_BROWSABLE else MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
         }
         result.sendResult(items)
     }
+
+    private fun browseIconUri(resource: Int): android.net.Uri =
+        android.net.Uri.parse("android.resource://$packageName/$resource")
 
     private fun sourceIcon(resource: Int, size: Int = 64): Bitmap {
         val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)

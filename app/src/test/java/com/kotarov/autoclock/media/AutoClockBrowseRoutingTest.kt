@@ -15,6 +15,12 @@ class AutoClockBrowseRoutingTest {
             "com.google.android.projection.gearhead", true))
     }
 
+    @Test fun autoSuggestionRequestGetsSeparateEmptyRoot() {
+        assertTrue(AutoClockBrowseRouting.emptySuggestionsRoot("com.google.android.projection.gearhead", true))
+        assertFalse(AutoClockBrowseRouting.emptySuggestionsRoot("com.google.android.projection.gearhead", false))
+        assertFalse(AutoClockBrowseRouting.emptySuggestionsRoot("com.google.android.googlequicksearchbox", true))
+    }
+
     @Test fun separateGoogleSearchRecommendationsDeclined() {
         assertFalse(AutoClockBrowseRouting.allowLibrary(
             "com.google.android.googlequicksearchbox", false))
