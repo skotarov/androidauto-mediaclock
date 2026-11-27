@@ -377,7 +377,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             MediaPageDirectory.load(this, page) { outcome ->
                 val valid = StreamLibrary.list(prefs).any { it.id == page.id && it.url == page.url && it.browsable }
                 val children = mutableListOf<MediaBrowserCompat.MediaItem>()
-                val streamIcon = if (valid && page.mediaPage) sourceIcon(R.drawable.ic_source_podcast, 32) else null
+                val streamIcon = if (valid && page.mediaPage) sourceIcon(R.drawable.ic_source_podcast, 24) else null
                 if (valid) outcome.getOrNull().orEmpty().forEach { item ->
                     val bookFolder = !playMode && item.textFile && BookNavigation.mayHaveContents(item.name)
                     val desc = MediaDescriptionCompat.Builder().setMediaId(if (bookFolder) BookNavigation.BOOK_PREFIX + item.id else item.id).setTitle(item.name)
@@ -391,12 +391,12 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val items = mutableListOf<MediaBrowserCompat.MediaItem>()
         val alert = MediaDescriptionCompat.Builder().setMediaId(CLOCK_ID)
             .setTitle("Alert only")
-            .setIconBitmap(sourceIcon(R.drawable.ic_source_travel)).build()
+            .setIconBitmap(sourceIcon(R.drawable.ic_source_travel, 24)).build()
         if (!playMode) items.add(MediaBrowserCompat.MediaItem(alert, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
         StreamLibrary.list(prefs).forEach { station ->
             val bookFolder = !playMode && station.textFile && BookNavigation.mayHaveContents(station.name)
             val desc = MediaDescriptionCompat.Builder().setMediaId(if (bookFolder) BookNavigation.BOOK_PREFIX + station.id else station.id)
-                .setTitle(station.name).setIconBitmap(sourceIcon(if (station.localFolder) R.drawable.ic_source_folder else if (station.mediaPage) R.drawable.ic_source_web else if (station.textFile) R.drawable.ic_source_text else if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast)).build()
+                .setTitle(station.name).setIconBitmap(sourceIcon(if (station.localFolder) R.drawable.ic_source_folder else if (station.mediaPage) R.drawable.ic_source_web else if (station.textFile) R.drawable.ic_source_text else if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast, 24)).build()
             items.add(MediaBrowserCompat.MediaItem(desc, if (station.browsable || bookFolder) MediaBrowserCompat.MediaItem.FLAG_BROWSABLE else MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
         }
         result.sendResult(items)

@@ -7,9 +7,8 @@ import android.provider.DocumentsContract.Document
 import java.security.MessageDigest
 import java.util.Locale
 
-/** SAF tree listing, only direct audio/video and supported book children, all supported entries sorted by name. */
+/** List every direct file in the user-selected SAF folder; format detection is not a visibility filter. */
 internal object LocalMediaFolder {
-    private val extensions = setOf("mp3","aac","m4a","mp4","m4v","ogg","oga","opus","wav","flac","webm","3gp","amr","mkv","wma")
     private data class Candidate(val id: String, val name: String, val ext: String, val sortName: String, val book: BookFormat?)
     private val order = compareBy<Candidate> { it.sortName }.thenBy { it.id }
     fun list(context: Context, folder: StreamLibrary.Station): List<MediaPageParser.Item> {
@@ -22,12 +21,11 @@ internal object LocalMediaFolder {
         context.contentResolver.query(children, columns, null, null, null)?.use { cursor ->
             while (cursor.moveToNext()) {
                 val id = cursor.getString(0) ?: continue
-                val name = cursor.getString(1) ?: continue
+                val name = cursor.getString(1)?.takeIf { it.isNotBlank() } ?: id.substringAfterLast('/').substringAfterLast(':').ifBlank { id }
                 val mime = cursor.getString(2).orEmpty().lowercase(Locale.ROOT)
                 val ext = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
                 if (mime == Document.MIME_TYPE_DIR) continue
                 val book = BookFormat.detect(name, mime)
-                if (book == null && !mime.startsWith("audio/") && !mime.startsWith("video/") && ext !in extensions) continue
                 candidates.add(Candidate(id, name, ext, name.lowercase(Locale.ROOT), book))
             }
         } ?: error("Folder unavailable")

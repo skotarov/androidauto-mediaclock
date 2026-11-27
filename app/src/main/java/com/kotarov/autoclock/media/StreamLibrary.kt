@@ -36,15 +36,17 @@ object StreamLibrary {
         val raw = prefs.getString(KEY_LIST, "[]").orEmpty()
         if (raw == cachedRaw) return cachedList
         cachedList = runCatching {
-        val a = JSONArray(raw)
-        (0 until a.length()).mapNotNull { i ->
-            val o = a.optJSONObject(i) ?: return@mapNotNull null
-            val url = o.optString("url")
-            val local = o.optBoolean("local", false)
-            if (!(if (local) CustomStreamPlayer.validLocal(url) else CustomStreamPlayer.valid(url))) null
-            else Station(o.getString("id"), o.optString("name").ifBlank { defaultName(url) },
-                url, "", local, local && o.optBoolean("textFile", false), o.optString("language", "auto"), !local && o.optBoolean("mediaPage", false), local && o.optBoolean("localFolder", false))
-        }
+            val a = JSONArray(raw)
+            (0 until a.length()).mapNotNull { i ->
+                val o = a.optJSONObject(i) ?: return@mapNotNull null
+                val id = o.optString("id").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                val url = o.optString("url")
+                val local = o.optBoolean("local", false)
+                // Keep saved entries visible even when the source is currently invalid.
+                // Playback and network access still validate the address at use time.
+                Station(id, o.optString("name").ifBlank { defaultName(url) },
+                    url, "", local, local && o.optBoolean("textFile", false), o.optString("language", "auto"), !local && o.optBoolean("mediaPage", false), local && o.optBoolean("localFolder", false))
+            }
         }.getOrDefault(emptyList())
         cachedRaw = raw
         return cachedList

@@ -937,7 +937,7 @@ class MainActivity : Activity() {
                 progress.dismiss()
                 val items = result.getOrNull().orEmpty()
                 if (items.isEmpty()) AlertDialog.Builder(this).setTitle(page.name)
-                    .setMessage(if (page.localFolder) "No supported audio, video or text files found, or folder unavailable." else "No direct playable media found, or page unavailable.")
+                    .setMessage(if (page.localFolder) "No files found, or folder unavailable." else "No direct playable media found, or page unavailable.")
                     .setPositiveButton("OK", null).show()
                 else AlertDialog.Builder(this).setTitle(page.name)
                     .setItems((if (page.localFolder) listOf("▶ Play folder") + items.map { it.name } else items.map { it.name + " · " + it.format }).toTypedArray()) { _, index ->
@@ -1081,10 +1081,6 @@ class MainActivity : Activity() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "*/*"
-            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("audio/*", "video/*", "text/*", "application/epub+zip",
-                "application/x-fictionbook+xml", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                "application/octet-stream", "application/xml", "application/pdf", "application/rtf",
-                "application/x-rtf", "application/xhtml+xml"))
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
         }
         runCatching { startActivityForResult(intent, FILE_REQUEST) }.onFailure {
@@ -1106,11 +1102,6 @@ class MainActivity : Activity() {
                 null, null, null)?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
         }.getOrNull() ?: "Local file"
         val textFile = com.kotarov.autoclock.media.BookFormat.detect(name, mime) != null
-        if (!textFile && mime != null && !mime.startsWith("audio/") && !mime.startsWith("video/") &&
-            mime != "application/octet-stream") {
-            android.widget.Toast.makeText(this, "Select audio, video, TXT, EPUB, FB2, DOCX, PDF, HTML, RTF or Markdown", android.widget.Toast.LENGTH_SHORT).show()
-            return
-        }
         val granted = runCatching {
             contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }.isSuccess

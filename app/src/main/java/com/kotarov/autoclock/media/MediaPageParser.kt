@@ -12,7 +12,6 @@ import java.util.Locale
 internal object MediaPageParser {
     data class Item(val id: String, val name: String, val url: String, val format: String, val textFile: Boolean = false)
     private const val MAX_BYTES = 2 * 1024 * 1024
-    private const val MAX_ITEMS = 100
     private val extensions = setOf("mp3","aac","m4a","mp4","m4v","ogg","oga","opus","wav","flac","webm","m3u8","ts","3gp")
     private fun ext(url: String) = runCatching { URI(url).path.orEmpty().substringAfterLast('/').substringAfterLast('.', "").lowercase(Locale.ROOT) }.getOrDefault("")
     private fun allowed(value: String): Boolean = runCatching {
@@ -74,7 +73,7 @@ internal object MediaPageParser {
     internal fun parse(parent: String, base: String, content: String, mime: String = "text/html", htmlDoc: org.jsoup.nodes.Document? = null): List<Item> {
         val items = LinkedHashMap<String, Item>()
         fun add(raw: String, name: String, type: String = "", explicit: Boolean = false) {
-            if (items.size >= MAX_ITEMS || raw.isBlank()) return
+            if (raw.isBlank()) return
             val url = absolute(base, raw) ?: return
             if (items.containsKey(url)) return
             val e = ext(url)
@@ -115,10 +114,8 @@ internal object MediaPageParser {
                 // Compatible with Radio Browser station API responses.
                 val array = JSONArray(content)
                 for (i in 0 until array.length()) {
-                    if (items.size >= MAX_ITEMS) break
                     val o = array.optJSONObject(i) ?: continue
                     val url = o.optString("url_resolved").ifBlank { o.optString("url") }
-                    if (o.has("lastcheckok") && o.optInt("lastcheckok", 1) == 0) continue
                     val codec = o.optString("codec").trim().lowercase(Locale.ROOT)
                     val type = if (o.optInt("hls", 0) == 1) "audio/mpegurl" else if (codec in setOf("mp3","aac","aac+","ogg","opus","flac","wav")) "audio/$codec" else ""
                     add(url, o.optString("name"), type, explicit = true)
