@@ -149,12 +149,13 @@ object ClockRenderer {
             }
         }
         if (preset.usesWeather && !sourceLabel.isNullOrBlank()) {
-            val sourceY = if (preset.hasAnalog) clockY + radius * 1.28f + 65f * unit
+            // The analog city label occupies the traditional watchmaker's
+            // position below twelve, inside the dial, in both dial sizes.
+            val sourceY = if (preset.hasAnalog) clockY - radius * 0.48f
                 else clockY + (DIGITAL_FORECAST_TOP + DIGITAL_FORECAST_CITY_OFFSET) * unit
-            val sourceX = if (preset.hasAnalog) CENTER_X + 175f * unit else CENTER_X
-            val maxWidth = if (preset.hasAnalog) 160f * unit else 290f * unit
-            drawSourceLabel(canvas, sourceLabel, sourceX, sourceY, unit, maxWidth, theme,
-                alignRight = preset.hasAnalog, size = if (preset.hasAnalog) 22f else 27f)
+            val maxWidth = if (preset.hasAnalog) 130f * unit else 290f * unit
+            drawSourceLabel(canvas, sourceLabel, CENTER_X, sourceY, unit, maxWidth, theme,
+                size = if (preset.hasAnalog) 22f else 27f)
         }
         return bitmap
     }
