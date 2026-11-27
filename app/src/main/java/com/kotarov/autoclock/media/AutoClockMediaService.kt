@@ -137,7 +137,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             if (!playMode && (key == PhoneAudioMode.KEY || key == NoticeAudio.KEY_PHONE_CHANNEL)) publishPlaybackState()
             if (key == StreamLibrary.KEY_LIST || key == StreamLibrary.KEY_SELECTED) {
                 activeSource = StreamLibrary.selected(prefs)
-                if (key == StreamLibrary.KEY_LIST) notifyChildrenChanged(ROOT_ID)
+                if (key == StreamLibrary.KEY_LIST) notifyLibraryChanged()
                 publishPlaybackState()
             }
             return@OnSharedPreferenceChangeListener
@@ -158,7 +158,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             if (key == StreamLibrary.KEY_LIST || key == StreamLibrary.KEY_SELECTED) {
                 if (activeSource == null && requestedPlayback) setPlayRequested(false)
                 else if (requestedPlayback && !focusInterrupted) syncStream()
-                if (key == StreamLibrary.KEY_LIST) notifyChildrenChanged(ROOT_ID)
+                if (key == StreamLibrary.KEY_LIST) notifyLibraryChanged()
                 publishPlayMetadata()
                 publishPlaybackState()
             }
@@ -176,7 +176,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         if (key == StreamLibrary.KEY_SELECTED && running) showNowPlayingTitle()
         if (key == ClockPreset.KEY_ADD_WEATHER ||
             key == StreamLibrary.KEY_LIST || key == StreamLibrary.KEY_SELECTED) syncStream()
-        if (key == StreamLibrary.KEY_LIST) notifyChildrenChanged(ROOT_ID)
+        if (key == StreamLibrary.KEY_LIST) notifyLibraryChanged()
         if (key == StreamLibrary.KEY_LIST || key == StreamLibrary.KEY_SELECTED) {
             if (activeSource == null) clearNowPlayingTitle()
             lastPublished = null
@@ -359,7 +359,11 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 publishPlaybackState()
             }
         }
-        return BrowserRoot(ROOT_ID, null)
+        // The car root contains only navigation tabs, never the playable
+        // library entries. Other clients retain the original flat root.
+        val carRoot = !playMode && clientPackageName == "com.google.android.projection.gearhead"
+        val limit = rootHints?.getInt(androidx.media.utils.MediaConstants.BROWSER_ROOT_HINTS_KEY_ROOT_CHILDREN_LIMIT, 4) ?: 4
+        return BrowserRoot(if (carRoot) CarLibraryTabs.rootId(limit) else ROOT_ID, null)
     }
 
     override fun onLoadChildren(
@@ -368,6 +372,23 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     ) {
         if (parentId == AutoClockBrowseRouting.EMPTY_SUGGESTIONS_ROOT) {
             result.sendResult(mutableListOf())
+            return
+        }
+        val tabLimit = CarLibraryTabs.rootLimit(parentId)
+        if (!playMode && tabLimit != null) {
+            val items = mutableListOf<MediaBrowserCompat.MediaItem>()
+            fun tab(id: String, title: String, icon: Int) {
+                val desc = MediaDescriptionCompat.Builder().setMediaId(id).setTitle(title)
+                    .setIconBitmap(sourceIcon(icon, 64, white = true)).build()
+                items.add(MediaBrowserCompat.MediaItem(desc, MediaBrowserCompat.MediaItem.FLAG_BROWSABLE))
+            }
+            tab(CarLibraryTabs.LIBRARY_ID, "Library", R.drawable.ic_source_folder)
+            CarLibraryTabs.pinned(StreamLibrary.list(prefs), tabLimit).forEach { station ->
+                tab(if (station.browsable) station.id else BookNavigation.BOOK_PREFIX + station.id,
+                    station.name, if (station.localFolder) R.drawable.ic_source_folder
+                        else if (station.mediaPage) R.drawable.ic_source_web else R.drawable.ic_source_text)
+            }
+            result.sendResult(items)
             return
         }
         if (!playMode && parentId.startsWith(BookNavigation.BOOK_PREFIX)) {
@@ -386,7 +407,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             }
             return
         }
-        if (parentId != ROOT_ID) {
+        if (parentId != ROOT_ID && parentId != CarLibraryTabs.LIBRARY_ID) {
             val page = StreamLibrary.list(prefs).firstOrNull { it.browsable && it.id == parentId }
             if (page == null) { result.sendResult(mutableListOf()); return }
             result.detach()
@@ -452,12 +473,21 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         else MediaPageDirectory.load(this, folder) { outcome -> start(outcome.getOrNull().orEmpty()) }
     }
 
+    private fun notifyLibraryChanged() {
+        notifyChildrenChanged(ROOT_ID)
+        if (!playMode) {
+            notifyChildrenChanged(CarLibraryTabs.LIBRARY_ID)
+            for (limit in 1..CarLibraryTabs.MAX_TABS) notifyChildrenChanged(CarLibraryTabs.rootId(limit))
+        }
+    }
+
     private fun browseIconUri(resource: Int): android.net.Uri =
         android.net.Uri.parse("android.resource://$packageName/$resource")
 
-    private fun sourceIcon(resource: Int, size: Int = 64): Bitmap {
+    private fun sourceIcon(resource: Int, size: Int = 64, white: Boolean = false): Bitmap {
         val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-        val drawable = getDrawable(resource)
+        val drawable = getDrawable(resource)?.mutate()
+        if (white) drawable?.setTint(android.graphics.Color.WHITE)
         val padding = size / 16
         drawable?.setBounds(padding, padding, size - padding, size - padding)
         drawable?.draw(android.graphics.Canvas(bitmap))

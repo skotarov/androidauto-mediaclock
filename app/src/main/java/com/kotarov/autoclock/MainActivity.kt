@@ -42,6 +42,7 @@ import com.kotarov.autoclock.media.StreamMetadata
 import com.kotarov.autoclock.media.MediaPageDirectory
 import com.kotarov.autoclock.media.MediaPageParser
 import com.kotarov.autoclock.media.BookNavigation
+import com.kotarov.autoclock.media.CarLibraryTabs
 import com.kotarov.autoclock.media.FolderNavigation
 import com.kotarov.autoclock.media.WebReader
 import com.kotarov.autoclock.media.WebTextProvider
@@ -829,6 +830,26 @@ class MainActivity : Activity() {
             sourceTitles[station.id] = title
             row.addView(title, LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            if (!BuildConfig.PLAY_MEDIA_MODE && CarLibraryTabs.eligible(station)) {
+                row.addView(text(if (station.pinned) "★" else "☆", 23f, 0).apply {
+                    gravity = android.view.Gravity.CENTER
+                    setTextColor(if (station.pinned) Color.rgb(255, 190, 0) else ink)
+                    contentDescription = if (station.pinned) "Remove from car tabs: " + station.name
+                        else "Pin to car tabs: " + station.name
+                    setOnClickListener {
+                        val p = settings()
+                        val latest = StreamLibrary.list(p)
+                        val current = latest.firstOrNull { it.id == station.id } ?: return@setOnClickListener
+                        val updated = CarLibraryTabs.toggle(latest, current.id)
+                        if (updated == null) {
+                            android.widget.Toast.makeText(this@MainActivity, "Up to 3 pinned tabs. Unpin another first.", android.widget.Toast.LENGTH_SHORT).show()
+                        } else {
+                            StreamLibrary.save(p, updated)
+                            renderStreams()
+                        }
+                    }
+                }, LinearLayout.LayoutParams(dp(36), dp(48)))
+            }
             row.addView(Button(this).apply {
                 text = "Edit"
                 isAllCaps = false
