@@ -45,6 +45,7 @@ import com.kotarov.autoclock.media.NoticeAudio
 import com.kotarov.autoclock.media.PhoneAudioMode
 import com.kotarov.autoclock.media.CustomStreamPlayer
 import com.kotarov.autoclock.media.StreamLibrary
+import com.kotarov.autoclock.media.LibraryMediaKind
 import com.kotarov.autoclock.media.PlaybackSpeed
 import com.kotarov.autoclock.media.RemotePlaybackBookmarks
 import com.kotarov.autoclock.media.StreamMetadata
@@ -92,6 +93,9 @@ class MainActivity : Activity() {
     private lateinit var playerProgress: ProgressBar
     private lateinit var playerExpand: TextView
     private var playerExpanded = false
+    private lateinit var playerDock: LinearLayout
+    private lateinit var playerPanel: LinearLayout
+    private lateinit var playerTransport: LinearLayout
     private var fullClockDialog: android.app.Dialog? = null
     private var fullClockImage: ImageView? = null
     private var libraryQuery = ""
@@ -238,6 +242,8 @@ class MainActivity : Activity() {
         }
         shell.addView(View(this).apply { setBackgroundColor(faint) },
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)))
+        playerDock = shell
+        playerPanel = player
         shell.addView(player, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         setContentView(shell)
@@ -507,6 +513,10 @@ class MainActivity : Activity() {
             })
         }
         if (!BuildConfig.PLAY_MEDIA_MODE) transportRow.addView(carAudioButton, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(3) })
+        playerTransport = transportRow
+        transportRow.addOnLayoutChangeListener { _, left, _, right, _, oldLeft, _, oldRight, _ ->
+            if (right - left != oldRight - oldLeft) resizePlayerControls()
+        }
         player.addView(transportRow)
         syncMiniPlayer()
         syncTransportButtons(null)
@@ -805,18 +815,37 @@ class MainActivity : Activity() {
         fasterButton.isEnabled = visible && speed < PlaybackSpeed.MAX
         paintQuickButton(slowerButton, false)
         paintQuickButton(fasterButton, false)
-        // Fit all controls, including Bluetooth, on small phones without clipping.
-        val available = resources.configuration.screenWidthDp - 24
-        val smallDp = ((available - 64 - 36) / 5).coerceIn(32, 48)
-        val small = dp(smallDp)
-        listOf(backButton, forwardButton, slowerButton, fasterButton, carAudioButton).forEach { button ->
+        resizePlayerControls()
+    }
+
+    private fun resizePlayerControls() {
+        if (!::playerTransport.isInitialized) return
+        val buttons = listOf(backButton, forwardButton, slowerButton, fasterButton, carAudioButton)
+        val count = buttons.count { it.parent === playerTransport && it.visibility == View.VISIBLE }.coerceAtLeast(1)
+        val available = playerTransport.width.takeIf { it > 0 } ?: dp(resources.configuration.screenWidthDp - 24)
+        val small = ((available - dp(64 + 6 + count * 6)) / count).coerceIn(dp(28), dp(48))
+        buttons.forEach { button ->
             val lp = button.layoutParams ?: return@forEach
             if (lp.width != small || lp.height != small) {
                 lp.width = small; lp.height = small; button.layoutParams = lp
-                val padding = dp(((smallDp - 24) / 2).coerceAtLeast(4))
+                val padding = ((small - dp(24)) / 2).coerceAtLeast(dp(2))
                 button.setPadding(padding, padding, padding, padding)
             }
         }
+    }
+
+    private fun orderPlayerControls(full: Boolean) {
+        if (!::playerTransport.isInitialized) return
+        val buttons = if (full) listOf(weatherButton, backButton, forwardButton, slowerButton, fasterButton)
+            else listOf(slowerButton, backButton, weatherButton, forwardButton, fasterButton)
+        playerTransport.removeAllViews()
+        (buttons + if (BuildConfig.PLAY_MEDIA_MODE) emptyList() else listOf(carAudioButton)).forEach { button ->
+            playerTransport.addView(button, LinearLayout.LayoutParams(
+                dp(if (button === weatherButton) 64 else 48), dp(48)).apply {
+                marginStart = dp(3); marginEnd = dp(3)
+            })
+        }
+        resizePlayerControls()
     }
 
     private fun addPhoneSeekPanel(root: LinearLayout) {
@@ -902,8 +931,9 @@ class MainActivity : Activity() {
         }
         seekSource = id
         seekDuration = duration
-        seekPanel.visibility = if (playerExpanded) View.VISIBLE else View.GONE
-        playerProgress.visibility = if (playerExpanded) View.GONE else View.VISIBLE
+        val expanded = playerExpanded || fullClockDialog != null
+        seekPanel.visibility = if (expanded) View.VISIBLE else View.GONE
+        playerProgress.visibility = if (expanded) View.GONE else View.VISIBLE
         durationLabel.text = (if (source?.textFile == true) "≈ " else "") + PhoneSeekPosition.format(duration)
         val now = SystemClock.elapsedRealtime()
         val advancing = state.state == PlaybackStateCompat.STATE_PLAYING && state.playbackSpeed > 0f
@@ -1118,9 +1148,10 @@ class MainActivity : Activity() {
                 state?.customActions.orEmpty().any { it.action == AutoClockMediaService.ACTION_SPEED_UP }))
             " · " + String.format(java.util.Locale.ROOT, "%.1f×", PlaybackSpeed.read(prefs, source)) else ""
         playerTitle.text = name
-        playerTitle.maxLines = if (playerExpanded) 3 else 1
+        playerTitle.maxLines = if (playerExpanded || fullClockDialog != null) 3 else 1
         playerDetail.text = kind + rate + if (playing) " · Playing" else " · Paused"
         playerExpand.text = if (playerExpanded) "⌄" else "⌃"
+        playerExpand.visibility = if (fullClockDialog != null) View.GONE else View.VISIBLE
         if (playing && source != null) {
             val rootId = StreamLibrary.selectedRootId(prefs)
             if (rootId != lastRecentSource) {
@@ -1172,14 +1203,32 @@ class MainActivity : Activity() {
             contentDescription = "Selected live clock"
         }
         fullClockImage = image
-        frame.addView(image, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
-        dialog.setContentView(frame)
+        val landscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+        val body = LinearLayout(this).apply {
+            orientation = if (landscape) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
+            gravity = android.view.Gravity.CENTER
+        }
+        frame.addView(body, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+        body.addView(image, if (landscape) LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
+            else LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
         fullClockDialog = dialog
+        playerDock.removeView(playerPanel)
+        body.addView(playerPanel, if (landscape) LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.15f)
+            else LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        orderPlayerControls(true)
+        syncMiniPlayer()
+        syncPhoneSeek()
+        dialog.setContentView(frame)
         dialog.setOnDismissListener {
             fullClockImage?.setImageDrawable(null)
             fullClockImage = null
             fullClockDialog = null
+            (playerPanel.parent as? android.view.ViewGroup)?.removeView(playerPanel)
+            playerDock.addView(playerPanel, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            orderPlayerControls(false)
+            syncMiniPlayer()
+            syncPhoneSeek()
         }
         dialog.show()
         dialog.window?.setLayout(android.view.WindowManager.LayoutParams.MATCH_PARENT,
@@ -1367,7 +1416,7 @@ class MainActivity : Activity() {
                 }
             }, LinearLayout.LayoutParams(dp(24), dp(44)))
             row.addView(ImageView(this).apply {
-                setImageResource(if (station.localFolder) R.drawable.ic_source_folder else if (station.mediaPage) R.drawable.ic_source_web else if (station.textFile) R.drawable.ic_source_text else if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast)
+                setImageResource(LibraryMediaKind.station(station).icon)
                 contentDescription = station.name
                 if (station.browsable || station.textFile) setOnClickListener { if (station.browsable) openMediaPage(station) else openBook(station) }
             }, LinearLayout.LayoutParams(dp(32), dp(32)).apply { marginEnd = dp(8) })
@@ -1381,13 +1430,8 @@ class MainActivity : Activity() {
             val details = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 addView(title)
-                addView(text(when {
-                    station.localFolder -> "Folder"
-                    station.mediaPage -> "Web media"
-                    station.textFile -> "Text reading"
-                    station.local -> "Local audio"
-                    else -> "Stream"
-                } + if (station.pinned) " · Car tab" else "", 11f, 0).apply {
+                addView(text(LibraryMediaKind.station(station).label +
+                    if (station.pinned) " · Car tab" else "", 11f, 0).apply {
                     setTextColor(Color.rgb(185, 190, 199))
                     maxLines = 1
                 })
@@ -1519,9 +1563,34 @@ class MainActivity : Activity() {
                 if (items.isEmpty()) AlertDialog.Builder(this).setTitle(page.name)
                     .setMessage(if (page.localFolder) "No files found, or folder unavailable." else "No direct playable media found, or page unavailable.")
                     .setPositiveButton("OK", null).show()
-                else AlertDialog.Builder(this).setTitle(page.name)
-                    .setItems((if (page.localFolder && !BuildConfig.PLAY_MEDIA_MODE) FolderNavigation.choices(page.id).map { it.title } + items.map { it.name } else items.map { it.name + " · " + it.format }).toTypedArray()) { _, index ->
-                        val choices = if (page.localFolder && !BuildConfig.PLAY_MEDIA_MODE) FolderNavigation.choices(page.id) else emptyList()
+                else {
+                    val choices = if (page.localFolder && !BuildConfig.PLAY_MEDIA_MODE) FolderNavigation.choices(page.id) else emptyList()
+                    val rows = choices.map { Triple(it.title, "Folder playback", R.drawable.ic_source_folder) } +
+                        items.map { item ->
+                            val kind = LibraryMediaKind.item(item, page.localFolder)
+                            Triple(item.name, kind.label + " · " + item.format, kind.icon)
+                        }
+                    val adapter = object : android.widget.BaseAdapter() {
+                        override fun getCount() = rows.size
+                        override fun getItem(position: Int) = rows[position]
+                        override fun getItemId(position: Int) = position.toLong()
+                        override fun getView(position: Int, convertView: View?, parent: android.view.ViewGroup): View {
+                            val (name, detail, icon) = rows[position]
+                            return LinearLayout(this@MainActivity).apply {
+                                orientation = LinearLayout.HORIZONTAL
+                                gravity = android.view.Gravity.CENTER_VERTICAL
+                                setPadding(dp(16), dp(8), dp(16), dp(8))
+                                addView(ImageView(this@MainActivity).apply { setImageResource(icon) },
+                                    LinearLayout.LayoutParams(dp(32), dp(32)).apply { marginEnd = dp(12) })
+                                addView(LinearLayout(this@MainActivity).apply {
+                                    orientation = LinearLayout.VERTICAL
+                                    addView(text(name, 15f, 0))
+                                    addView(text(detail, 12f, 0).apply { setTextColor(Color.rgb(185, 190, 199)) })
+                                }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                            }
+                        }
+                    }
+                    AlertDialog.Builder(this).setTitle(page.name).setAdapter(adapter) { _, index ->
                         if (index < choices.size) selectPhoneSource(choices[index].id)
                         else {
                             val item = items[index - choices.size]
@@ -1529,6 +1598,7 @@ class MainActivity : Activity() {
                             if (book != null) openBook(book) else selectPhoneSource(item.id)
                         }
                     }.setNegativeButton("Cancel", null).show()
+                }
             }
         }
     }
