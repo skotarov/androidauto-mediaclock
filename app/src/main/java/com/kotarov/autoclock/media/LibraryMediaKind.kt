@@ -9,6 +9,7 @@ internal enum class LibraryMediaKind(val label: String, val icon: Int) {
     WEB("Web media", R.drawable.ic_source_web),
     ARTICLE("Article", R.drawable.ic_media_article),
     BOOK("E-book", R.drawable.ic_media_book),
+    AUDIOBOOK("Audiobook", R.drawable.ic_media_book),
     DOCUMENT("Document", R.drawable.ic_media_document),
     AUDIO("Audio", R.drawable.ic_media_audio),
     VIDEO("Video audio", R.drawable.ic_media_video),
@@ -40,7 +41,7 @@ internal enum class LibraryMediaKind(val label: String, val icon: Int) {
                 return DOCUMENT
             }
             if (formats.any { it in video }) return VIDEO
-            if (formats.any { it == "m4b" }) return BOOK
+            if (formats.any { it == "m4b" }) return AUDIOBOOK
             if (formats.any { it in audio } || hint.startsWith("audio/")) return AUDIO
             if (!local && (formats.any { it in stream } || hint.isBlank())) return STREAM
             return if (local) FILE else STREAM
