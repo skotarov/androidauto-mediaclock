@@ -4,28 +4,20 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- Preserve the verified launcher alpha silhouette and circular face. -->
     <path android:fillColor="#0A0A0C"
         android:pathData="M54,4 A50,50 0,1 1,54,104 A50,50 0,1 1,54,4 Z" />
-    <path android:fillColor="#1C2732"
+    <path android:fillColor="#FFFFFF"
         android:pathData="M54,13 A41,41 0,1 1,54,95 A41,41 0,1 1,54,13 Z" />
-    <path android:strokeColor="#70869A"
-        android:strokeWidth="4"
-        android:strokeLineCap="round"
-        android:pathData="M54,18 L54,25 M54,83 L54,90 M18,54 L25,54 M83,54 L90,54" />
-    <path android:strokeColor="#8297A8"
-        android:strokeWidth="4.5"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M54,30 L54,54 L72,66" />
-    <path android:fillColor="#4F8AA8"
-        android:pathData="M54,49 A5,5 0,1 1,54,59 A5,5 0,1 1,54,49 Z" />
-    <!-- Original clock geometry and alpha silhouette, with a blue road inside the face. -->
-    <path android:strokeColor="#269EFF"
-        android:strokeWidth="3.5"
-        android:strokeLineCap="round"
-        android:pathData="M48,67 L35,89 M60,67 L73,89" />
-    <path android:strokeColor="#269EFF"
-        android:strokeWidth="2.8"
-        android:strokeLineCap="round"
-        android:pathData="M54,70 V75 M54,79 V83" />
+    <!-- Graduation cap with ascending road. Solid vector fills for API 23+. -->
+    <path android:fillColor="#0754A4"
+        android:pathData="M18,44 Q15,42 18,40 L51,23 Q54,21 57,23 L91,40 Q94,42 91,45 L75,54 L54,65 L18,45 Z" />
+    <path android:fillColor="#06346D"
+        android:pathData="M33,53 Q53,41 76,52 L76,64 Q76,69 69,72 L33,77 Z" />
+    <path android:fillColor="#008FE1"
+        android:pathData="M26,83 Q34,70 60,64 Q77,60 77,55 L77,66 Q77,70 68,73 Q58,77 51,83 Z" />
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M32,53 Q46,43 63,46 L69,39 L63,37 L81,31 L79,47 L75,42 L70,49 Q82,53 76,60 Q72,65 58,68 Q38,73 26,83 L26,77 Q36,68 56,63 Q70,60 72,57 Q74,53 65,51 Q47,47 33,57 L33,69 L30,71 L30,54 Z" />
+    <path android:fillColor="#FFB800"
+        android:pathData="M30,44 Q22,44 22,48 L22,59 L25,59 L25,49 Q25,46 30,44 Z M23.5,58 A3,3 0,1 1,23.5,64 A3,3 0,1 1,23.5,58 Z M22,63 L19,73 Q23.5,75 28,73 L25,63 Z" />
 </vector>
