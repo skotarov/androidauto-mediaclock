@@ -486,13 +486,14 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                         children.add(MediaBrowserCompat.MediaItem(desc, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
                     }
                 }
-                val streamIcon = if (page.mediaPage && entries.size <= 40) sourceIcon(R.drawable.ic_source_podcast, 32) else null
+                val icons = mutableMapOf<Int, Bitmap>()
                 entries.forEach { item ->
                     val bookFolder = !playMode && item.textFile && BookNavigation.mayHaveContents(item.name)
+                    val kind = LibraryMediaKind.item(item, page.localFolder)
                     val desc = MediaDescriptionCompat.Builder().setMediaId(if (bookFolder) BookNavigation.BOOK_PREFIX + item.id else item.id).setTitle(item.name)
-                        .setSubtitle(item.format).apply {
-                            if (streamIcon != null) setIconBitmap(streamIcon)
-                            else if (page.mediaPage) setIconUri(browseIconUri(R.drawable.ic_source_podcast))
+                        .setSubtitle(kind.label + " · " + item.format).apply {
+                            if (entries.size <= 40) setIconBitmap(icons.getOrPut(kind.icon) { sourceIcon(kind.icon, 32) })
+                            else setIconUri(browseIconUri(kind.icon))
                         }.build()
                     children.add(MediaBrowserCompat.MediaItem(desc, if (bookFolder) MediaBrowserCompat.MediaItem.FLAG_BROWSABLE else MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
                 }
@@ -511,7 +512,9 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             val bookFolder = !playMode && station.textFile && BookNavigation.mayHaveContents(station.name)
             val desc = MediaDescriptionCompat.Builder().setMediaId(if (bookFolder) BookNavigation.BOOK_PREFIX + station.id else station.id)
                 .setTitle(station.name).apply {
-                    val icon = if (station.localFolder) R.drawable.ic_source_folder else if (station.mediaPage) R.drawable.ic_source_web else if (station.textFile) R.drawable.ic_source_text else if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast
+                    val kind = LibraryMediaKind.station(station)
+                    setSubtitle(kind.label)
+                    val icon = kind.icon
                     if (inlineIcons) setIconBitmap(sourceIcon(icon)) else setIconUri(browseIconUri(icon))
                 }.build()
             items.add(MediaBrowserCompat.MediaItem(desc, if (station.browsable || bookFolder) MediaBrowserCompat.MediaItem.FLAG_BROWSABLE else MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
@@ -538,10 +541,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private fun libraryIcon(station: StreamLibrary.Station): Int =
-        if (station.localFolder) R.drawable.ic_source_folder
-        else if (station.mediaPage) R.drawable.ic_source_web
-        else if (station.textFile) R.drawable.ic_source_text
-        else if (station.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast
+        LibraryMediaKind.station(station).icon
 
     private fun notifyLibraryChanged() {
         notifyChildrenChanged(ROOT_ID)
@@ -1206,8 +1206,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                     if (source.textFile) "Text reading · estimated time" else if (source.local) "Local audio" else "Audio stream")
                 .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, subtitle ?: if (source.textFile) "Text reading" else "Audio")
                 .putBitmap(MediaMetadataCompat.METADATA_KEY_ART,
-                    previousArt ?: sourceIcon(if (source.textFile) R.drawable.ic_source_text
-                        else if (source.local) R.drawable.ic_source_file else R.drawable.ic_source_podcast))
+                    previousArt ?: sourceIcon(libraryIcon(source)))
         } else builder.putString(MediaMetadataCompat.METADATA_KEY_TITLE, "Select audio")
         duration?.let { builder.putLong(MediaMetadataCompat.METADATA_KEY_DURATION, it.toLong()) }
         setSessionMetadata(builder.build())
