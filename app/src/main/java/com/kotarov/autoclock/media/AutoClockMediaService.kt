@@ -229,10 +229,16 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             setFlags(MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS)
             setCallback(object : MediaSessionCompat.Callback() {
                 override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
+                    if (mediaId == OPEN_PHONE_ID) {
+                        if (!playMode) openPhonePanel()
+                        return
+                    }
                     if (prepareBookChoice(mediaId) || selectSource(mediaId)) setWeatherEnabled(true)
                 }
 
                 override fun onPrepareFromMediaId(mediaId: String?, extras: Bundle?) {
+                    // Preparing a command must not launch UI or alter playback.
+                    if (mediaId == OPEN_PHONE_ID) return
                     if (playMode) setWeatherEnabled(false)
                     if (prepareBookChoice(mediaId) || selectSource(mediaId)) {
                         publishClock()
@@ -405,7 +411,14 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val alert = MediaDescriptionCompat.Builder().setMediaId(CLOCK_ID)
             .setTitle("Alert only")
             .apply { if (inlineIcons) setIconBitmap(sourceIcon(R.drawable.ic_source_travel)) else setIconUri(browseIconUri(R.drawable.ic_source_travel)) }.build()
-        if (!playMode) items.add(MediaBrowserCompat.MediaItem(alert, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
+        if (!playMode) {
+            items.add(MediaBrowserCompat.MediaItem(alert, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
+            val phone = MediaDescriptionCompat.Builder().setMediaId(OPEN_PHONE_ID)
+                .setTitle("Open on phone")
+                .apply { if (inlineIcons) setIconBitmap(sourceIcon(R.drawable.ic_source_phone)) else setIconUri(browseIconUri(R.drawable.ic_source_phone)) }
+                .build()
+            items.add(MediaBrowserCompat.MediaItem(phone, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
+        }
         stations.forEach { station ->
             val bookFolder = !playMode && station.textFile && BookNavigation.mayHaveContents(station.name)
             val desc = MediaDescriptionCompat.Builder().setMediaId(if (bookFolder) BookNavigation.BOOK_PREFIX + station.id else station.id)
@@ -416,6 +429,16 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             items.add(MediaBrowserCompat.MediaItem(desc, if (station.browsable || bookFolder) MediaBrowserCompat.MediaItem.FLAG_BROWSABLE else MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
         }
         result.sendResult(items)
+    }
+
+    private fun openPhonePanel() {
+        // Explicit beta-only user action. The OS may deny background activity
+        // launches; do not request overlay privileges or circumvent that policy.
+        val launch = Intent(this, com.kotarov.autoclock.MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        runCatching { startActivity(launch) }.onFailure {
+            android.widget.Toast.makeText(this, "Open SmartTrip Clock on your phone", android.widget.Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun browseIconUri(resource: Int): android.net.Uri =
@@ -1153,6 +1176,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         private const val KEY_TEST_STATE_NONE = "try_playback_state_none_v37"
         private const val KEY_TEST_STATE_STOPPED = "try_playback_state_stopped_v39"
         private const val INVISIBLE_TEXT = "\u00A0"
+        private const val OPEN_PHONE_ID = "autoclock_open_phone"
         const val CLOCK_ID = "autoclock_clock"
         const val ROOT_ID = "auto_clock_root"
     }
