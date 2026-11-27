@@ -38,11 +38,14 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private var mediaError: String? = null
     private val focus by lazy { PlayAudioFocus(this) { change -> onFocusChange(change) } }
     private var foregroundAudio = false
+    private var foregroundTitle: String? = null
+    private var liteServiceStarted = false
+    private var phonePlaybackRequested = false
     private val callMonitor by lazy { CallInterruptionMonitor(this, handler) { busy -> onCallChanged(busy) } }
     private var callBlocked = false
     private val liteRequested: Boolean get() = ClockSelectionStore.weatherEnabled(prefs)
     private val running: Boolean
-        get() = if (playMode) requestedPlayback && !focusInterrupted else liteRequested && !callBlocked
+        get() = if (playMode) requestedPlayback && !focusInterrupted else clientActive && liteRequested && !callBlocked && !focusInterrupted
     private val cityAnnouncement = CityAnnouncement()
     private val noticeAudio by lazy { NoticeAudio(this) }
     private val streamPlayer by lazy { CustomStreamPlayer(this) }
@@ -179,7 +182,10 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         }
         if (key == StreamLibrary.KEY_SELECTED && running) showNowPlayingTitle()
         if (key == ClockPreset.KEY_ADD_WEATHER ||
-            key == StreamLibrary.KEY_LIST || key == StreamLibrary.KEY_SELECTED) syncStream()
+            key == StreamLibrary.KEY_LIST || key == StreamLibrary.KEY_SELECTED) {
+            if (liteRequested) updateLiteForeground()
+            syncStream()
+        }
         if (key == StreamLibrary.KEY_LIST) notifyLibraryChanged()
         if (key == StreamLibrary.KEY_LIST || key == StreamLibrary.KEY_SELECTED) {
             if (activeSource == null) clearNowPlayingTitle()
@@ -234,6 +240,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             setFlags(MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS)
             setCallback(object : MediaSessionCompat.Callback() {
                 override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
+                    if (!playMode && session.currentControllerInfo.packageName == packageName) phonePlaybackRequested = true
                     val request = ++folderRequest
                     val folderChoice = FolderNavigation.parse(mediaId)
                     if (folderChoice != null) {
@@ -287,6 +294,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                     }
                 }
                 override fun onPlayFromSearch(query: String?, extras: Bundle?) {
+                    if (!playMode && session.currentControllerInfo.packageName == packageName) phonePlaybackRequested = true
                     val items = StreamLibrary.list(prefs).filterNot { it.mediaPage }
                     val match = if (query.isNullOrBlank()) activeSource ?: items.firstOrNull()
                         else items.firstOrNull { it.name.contains(query, ignoreCase = true) }
@@ -302,9 +310,12 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                         refreshPositionSubtitle()
                     }
                 }
-                override fun onPlay() = setWeatherEnabled(true)
-                override fun onPause() { folderRequest++; setWeatherEnabled(false) }
-                override fun onStop() { folderRequest++; setWeatherEnabled(false) }
+                override fun onPlay() {
+                    if (!playMode && session.currentControllerInfo.packageName == packageName) phonePlaybackRequested = true
+                    setWeatherEnabled(true)
+                }
+                override fun onPause() { folderRequest++; phonePlaybackRequested = false; setWeatherEnabled(false) }
+                override fun onStop() { folderRequest++; phonePlaybackRequested = false; setWeatherEnabled(false) }
             })
             isActive = true
         }
@@ -321,9 +332,15 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         removeProjectionListener = CarProjectionMonitor.subscribe(this) { connected ->
             if (!connected) {
                 externalClient = false
-                suspendedForProjection = clientActive
-                if (clientActive) suspendClientWork()
-                stopSelf()
+                if (!playMode && foregroundAudio && liteRequested && clientActive) {
+                    suspendedForProjection = false
+                    continueOnPhone()
+                } else {
+                    suspendedForProjection = clientActive
+                    if (clientActive) suspendClientWork()
+                    publishPlaybackState()
+                    stopSelf()
+                }
             } else if (suspendedForProjection) {
                 suspendedForProjection = false
                 externalClient = true
@@ -333,8 +350,10 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (playMode && intent?.action == "autoclock.stop_playback") {
-            setPlayRequested(false)
+        if (intent?.action == "autoclock.stop_playback") {
+            phonePlaybackRequested = false
+            folderRequest++
+            setWeatherEnabled(false)
             stopSelf()
         }
         return START_NOT_STICKY
@@ -363,8 +382,11 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             if (clientPackageName != packageName) externalClient = true
             resumeClientWork()
             if (upgrade && !playMode) {
+                focus.abandon()
+                focusInterrupted = false
                 updateWeatherClient()
                 lastPlayback = null
+                syncStream()
                 publishClock()
                 publishPlaybackState()
             }
@@ -577,7 +599,10 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         }
         callBlocked = callMonitor.start()
         NoticeTest.receiver = receiveTest
-        if (startAudio) syncStream()
+        if (startAudio) {
+            if (liteRequested) updateLiteForeground()
+            syncStream()
+        }
         lastWarningRevision = prefs.getLong(WeatherStore.KEY_WARNING_REV, 0L)
         cityAnnouncement.reset(WeatherStore.locality(this))
         updateWeatherClient()
@@ -604,7 +629,12 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             stopPlaybackForeground()
         }
         clientActive = false
-        if (!playMode) callMonitor.stop()
+        if (!playMode) {
+            callMonitor.stop()
+            focus.abandon()
+            focusInterrupted = false
+            stopLiteForeground()
+        }
         callBlocked = false
         if (PerfDiagnostics.enabled) PerfDiagnostics.audio = "Idle"
         if (NoticeTest.receiver === receiveTest) NoticeTest.receiver = null
@@ -638,7 +668,11 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     override fun onUnbind(intent: Intent?): Boolean {
         externalClient = false
         suspendedForProjection = false
-        suspendClientWork()
+        if (!playMode && foregroundAudio && liteRequested && clientActive) continueOnPhone()
+        else {
+            phonePlaybackRequested = false
+            suspendClientWork()
+        }
         return true
     }
 
@@ -716,6 +750,9 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             clearNowPlayingTitle()
             stopNoticeAudio()
             streamPlayer.stop()
+            focus.abandon()
+            focusInterrupted = false
+            stopLiteForeground()
         } else if (running && !noticePlaying) {
             // Retry a failed request without restarting an already playing source.
             streamPlayer.retryFailed()
@@ -724,7 +761,15 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         try { ClockSelectionStore.setWeatherEnabled(prefs, enabled) }
         finally { writingTransportPreference = false }
         if (enabled && !clientActive) resumeClientWork(startAudio = false)
-        if (enabled) showNowPlayingTitle()
+        if (enabled) {
+            updateLiteForeground()
+            if (!externalClient && !focus.request()) {
+                phonePlaybackRequested = false
+                setWeatherEnabled(false)
+                return
+            }
+            showNowPlayingTitle()
+        }
         // The same preference listener handles phone switches. Publish now
         // for car transport commands, avoiding duplicate queued artwork.
         handler.removeCallbacks(settingsRefresh)
@@ -732,7 +777,10 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             syncStream()
             publishClock()
             publishPlaybackState()
-            if (!enabled && !externalClient) suspendClientWork()
+            if (!enabled && !externalClient) {
+                // Keep paused metadata available while the phone remains bound.
+                handler.removeCallbacks(minuteTick)
+            } else if (enabled) scheduleNextMinute()
         }
     }
 
@@ -934,14 +982,15 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val book = bookTimeline()
         val subtitle = value ?: INVISIBLE_TEXT
         val duration = book?.durationMs ?: mediaSeek()?.duration?.toLong()
-        val publication = MediaPublicationKey(key, INVISIBLE_TEXT, subtitle, activeSource?.id ?: CLOCK_ID, duration)
+        val title = if (externalClient) INVISIBLE_TEXT else activeSource?.name ?: "Alert only"
+        val publication = MediaPublicationKey(key, title, subtitle, activeSource?.id ?: CLOCK_ID, duration)
         if (publication == lastPublished) return
         setSessionMetadata(MediaMetadataCompat.Builder(base)
             .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, activeSource?.id ?: CLOCK_ID)
-            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, INVISIBLE_TEXT)
+            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, subtitle)
             .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, INVISIBLE_TEXT)
-            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, INVISIBLE_TEXT)
+            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, title)
             .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, subtitle)
             .apply { duration?.let { putLong(MediaMetadataCompat.METADATA_KEY_DURATION, it.toLong()) } }
             .build())
@@ -968,7 +1017,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             activeSource else null
         val url = station?.url
         streamPlayer.setSpeed(PlaybackSpeed.read(prefs, station), station?.url)
-        streamPlayer.sync(url, !playMode && phoneMode != PhoneAudioMode.OFF,
+        if (!playMode && foregroundAudio) refreshLiteNotification()
+        streamPlayer.sync(url, !playMode && externalClient && phoneMode != PhoneAudioMode.OFF,
             textLanguage = station?.takeIf { it.textFile }?.language,
             bookmarkKey = remoteBookmark(station), onChanged = {
             if (playMode || station?.textFile != true) lastPlayback = null
@@ -1042,7 +1092,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         // Release the HFP route, but retain an already prepared TXT reader.
         streamPlayer.suspendForNotice()
         publishPlaybackState()
-        noticeAudio.play(sound, body, phoneMode != PhoneAudioMode.OFF,
+        noticeAudio.play(sound, body, externalClient && phoneMode != PhoneAudioMode.OFF,
             speakEnabled = speak) {
             noticePlaying = false
             syncStream()
@@ -1190,12 +1240,16 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private fun onFocusChange(change: Int) {
-        if (!playMode || !requestedPlayback) return
+        if (playMode && !requestedPlayback || !playMode && (externalClient || !liteRequested || !clientActive)) return
         when (change) {
-            android.media.AudioManager.AUDIOFOCUS_LOSS -> setPlayRequested(false)
+            android.media.AudioManager.AUDIOFOCUS_LOSS -> {
+                phonePlaybackRequested = false
+                setWeatherEnabled(false)
+            }
             android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
             android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
                 focusInterrupted = true
+                stopNoticeAudio()
                 streamPlayer.suspendForNotice()
                 publishPlaybackState()
             }
@@ -1206,27 +1260,87 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         }
     }
 
+    /** Keep active Lite playback alive after the last browser unbinds. */
+    private fun updateLiteForeground() {
+        if (playMode || !liteRequested || !clientActive) return
+        if (!phonePlaybackRequested && activeSource == null) {
+            stopLiteForeground()
+            return
+        }
+        if (foregroundAudio) {
+            refreshLiteNotification()
+            return
+        }
+        try {
+            startService(Intent(this, AutoClockMediaService::class.java))
+            liteServiceStarted = true
+            if (!startPlaybackForeground()) stopLiteForeground()
+        } catch (e: Exception) {
+            android.util.Log.w("TravelToAwaken", "Background playback unavailable", e)
+            stopLiteForeground()
+        }
+    }
+
+    private fun continueOnPhone() {
+        phonePlaybackRequested = true
+        focusInterrupted = false
+        if (!focus.request()) {
+            phonePlaybackRequested = false
+            setWeatherEnabled(false)
+            return
+        }
+        updateWeatherClient()
+        lastPlayback = null
+        lastPublished = null
+        syncStream()
+        publishClock()
+        publishPlaybackState()
+    }
+
+    private fun stopLiteForeground() {
+        stopPlaybackForeground()
+        if (liteServiceStarted) {
+            liteServiceStarted = false
+            stopSelf()
+        }
+    }
+
+    private fun refreshLiteNotification() {
+        if (!foregroundAudio || foregroundTitle == activeSource?.name.orEmpty()) return
+        runCatching {
+            getSystemService(android.app.NotificationManager::class.java).notify(97, playbackNotification())
+            foregroundTitle = activeSource?.name.orEmpty()
+        }
+    }
+
+    private fun playbackNotification(): android.app.Notification {
+        val manager = getSystemService(android.app.NotificationManager::class.java)
+        if (android.os.Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(
+            android.app.NotificationChannel("playback", "Audio playback", android.app.NotificationManager.IMPORTANCE_LOW))
+        val builder = if (android.os.Build.VERSION.SDK_INT >= 26)
+            android.app.Notification.Builder(this, "playback") else android.app.Notification.Builder(this)
+        val stop = android.app.PendingIntent.getService(this, 2,
+            Intent(this, AutoClockMediaService::class.java).setAction("autoclock.stop_playback"),
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
+        val launch = android.app.PendingIntent.getActivity(this, 1,
+            Intent(this, com.kotarov.autoclock.MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
+        val style = android.app.Notification.MediaStyle().setShowActionsInCompactView(0)
+        (session.sessionToken.token as? android.media.session.MediaSession.Token)?.let { style.setMediaSession(it) }
+        return builder.setSmallIcon(R.drawable.ic_car_attribution)
+            .setContentTitle(activeSource?.name ?: if (playMode) getString(R.string.app_name) else "Alert only")
+            .setContentText("Travel to Awaken").setContentIntent(launch)
+            .setStyle(style).setVisibility(android.app.Notification.VISIBILITY_PUBLIC)
+            .addAction(android.app.Notification.Action.Builder(android.R.drawable.ic_media_pause, "Pause", stop).build())
+            .setOngoing(true).setOnlyAlertOnce(true).build()
+    }
+
     private fun startPlaybackForeground(): Boolean {
         if (foregroundAudio) return true
         return runCatching {
-            val manager = getSystemService(android.app.NotificationManager::class.java)
-            if (android.os.Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(
-                android.app.NotificationChannel("playback", "Audio playback", android.app.NotificationManager.IMPORTANCE_LOW))
-            val builder = if (android.os.Build.VERSION.SDK_INT >= 26)
-                android.app.Notification.Builder(this, "playback") else android.app.Notification.Builder(this)
-            val stop = android.app.PendingIntent.getService(this, 2,
-                Intent(this, AutoClockMediaService::class.java).setAction("autoclock.stop_playback"),
-                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
-            val launch = android.app.PendingIntent.getActivity(this, 1,
-                Intent(this, com.kotarov.autoclock.MainActivity::class.java),
-                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
-            val notification = builder.setSmallIcon(R.drawable.ic_car_attribution)
-                .setContentTitle(activeSource?.name ?: getString(R.string.app_name))
-                .setContentText("Audio playback").setContentIntent(launch)
-                .addAction(android.app.Notification.Action.Builder(android.R.drawable.ic_media_pause, "Stop", stop).build())
-                .setOngoing(true).setOnlyAlertOnce(true).build()
-            startForeground(97, notification)
+            startForeground(97, playbackNotification())
             foregroundAudio = true
+            foregroundTitle = activeSource?.name.orEmpty()
             true
         }.getOrDefault(false)
     }
@@ -1234,6 +1348,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private fun stopPlaybackForeground() {
         if (!foregroundAudio) return
         foregroundAudio = false
+        foregroundTitle = null
         if (android.os.Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_REMOVE)
         else { @Suppress("DEPRECATION") stopForeground(true) }
     }
