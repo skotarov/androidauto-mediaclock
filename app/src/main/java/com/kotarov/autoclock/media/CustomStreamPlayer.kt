@@ -29,6 +29,9 @@ class CustomStreamPlayer(context: Context) {
     private var requested: Triple<String, Boolean, Boolean>? = null
     data class SeekState(val position: Int, val duration: Int)
     private var savedSeek: Pair<String, SeekState>? = null
+    private val remoteBookmarks = RemotePlaybackBookmarks(app)
+    private var remoteBookmarkKey: String? = null
+    private var lastRemoteCheckpoint = 0L
     private var textLanguage: String? = null
     private var reader: TextFileReader? = null
     private var savedBookTimeline: Pair<String, TextReading.Timeline>? = null
@@ -51,10 +54,10 @@ class CustomStreamPlayer(context: Context) {
     fun readingProgress(url: String?): String? =
         if (reading && requested?.first == url) reader?.progress() else null
 
-    fun seekState(url: String?): SeekState? {
+    fun seekState(url: String?, bookmarkKey: String? = remoteBookmarkKey): SeekState? {
         if (url == null) return null
         val media = player
-        if (requested?.first == url) {
+        if (requested?.first == url && remoteBookmarkKey == bookmarkKey) {
             // An active request must establish its own timeline. Never reuse a
             // previous finite duration while the new connection is live/loading.
             if (!prepared || !seekable) return null
@@ -63,6 +66,7 @@ class CustomStreamPlayer(context: Context) {
             return runCatching { SeekState(media.currentPosition, media.duration) }.getOrNull()
                 ?.takeIf { PlaybackTimeline.known(it.position, it.duration) }
         }
+        if (!validLocal(url)) return remoteBookmarks.read(bookmarkKey)
         return savedSeek?.takeIf { it.first == url }?.second
             ?.takeIf { PlaybackTimeline.known(it.position, it.duration) }
     }
@@ -107,13 +111,13 @@ class CustomStreamPlayer(context: Context) {
     fun skipText(url: String?, deltaMs: Int): Boolean =
         url != null && reader?.skipBy(url, deltaMs) == true
 
-    fun seekBy(url: String?, deltaMs: Int): Boolean {
-        val current = seekState(url) ?: return false
-        return seekTo(url, current.position.toLong() + deltaMs)
+    fun seekBy(url: String?, deltaMs: Int, bookmarkKey: String? = remoteBookmarkKey): Boolean {
+        val current = seekState(url, bookmarkKey) ?: return false
+        return seekTo(url, current.position.toLong() + deltaMs, bookmarkKey)
     }
 
-    fun seekTo(url: String?, position: Long): Boolean {
-        val current = seekState(url) ?: return false
+    fun seekTo(url: String?, position: Long, bookmarkKey: String? = remoteBookmarkKey): Boolean {
+        val current = seekState(url, bookmarkKey) ?: return false
         val target = position.coerceIn(0L, current.duration.toLong()).toInt()
         val media = player
         if (prepared && seekable && requested?.first == url && media != null) {
@@ -123,17 +127,20 @@ class CustomStreamPlayer(context: Context) {
             if (fallback?.seek(target) != true) return false
         }
         if (url != null) {
-            savedSeek = url to current.copy(position = target)
-            if (validLocal(url)) localBookmarks.edit().putInt(url, target).apply()
+            if (validLocal(url)) {
+                savedSeek = url to current.copy(position = target)
+                localBookmarks.edit().putInt(url, target).apply()
+            } else remoteBookmarks.save(bookmarkKey, current.copy(position = target))
         }
         return true
     }
 
     fun sync(url: String?, phone: Boolean, sharedPhoneChannel: Boolean = false,
-             textLanguage: String? = null, onChanged: () -> Unit = {}, onError: (String) -> Unit) {
+             textLanguage: String? = null, bookmarkKey: String? = null,
+             onChanged: () -> Unit = {}, onError: (String) -> Unit) {
         changed = onChanged
         val next = url?.takeIf { valid(it) || validLocal(it) }?.let { Triple(it, phone, sharedPhoneChannel) }
-        if (requested == next && this.textLanguage == textLanguage) {
+        if (requested == next && this.textLanguage == textLanguage && remoteBookmarkKey == bookmarkKey) {
             if (suspendedMedia && next != null) {
                 suspendedMedia = false
                 try {
@@ -147,6 +154,8 @@ class CustomStreamPlayer(context: Context) {
         val reuse = next != null && textLanguage != null && reader?.matches(next.first, textLanguage) == true
         stop(keepReader = reuse)
         if (next == null) return
+        remoteBookmarkKey = bookmarkKey
+        lastRemoteCheckpoint = SystemClock.elapsedRealtime()
         this.textLanguage = textLanguage
         requested = next
         val token = generation
@@ -273,8 +282,9 @@ class CustomStreamPlayer(context: Context) {
                         prepared = true
                         seekable = it.duration > 0
                         if (!seekable && savedSeek?.first == url) savedSeek = null
-                        val position = savedSeek?.takeIf { p -> p.first == url }?.second?.position
-                            ?: if (validLocal(url)) localBookmarks.getInt(url, 0) else 0
+                        val position = if (validLocal(url)) {
+                            savedSeek?.takeIf { p -> p.first == url }?.second?.position ?: localBookmarks.getInt(url, 0)
+                        } else RemotePlaybackBookmarks.resumePosition(remoteBookmarks.read(remoteBookmarkKey), it.duration)
                         if (seekable && position > 0 && position < it.duration) it.seekTo(position)
                         it.start()
                         if (speed != 1f) applyMediaSpeed(it)
@@ -299,6 +309,9 @@ class CustomStreamPlayer(context: Context) {
                 if (token == generation && (validLocal(url) || seekable)) {
                     savedSeek = null
                     if (validLocal(url)) localBookmarks.edit().remove(url).apply()
+                    else if (seekable) runCatching { it.duration }.getOrNull()?.takeIf { it > 0 }?.let { duration ->
+                        remoteBookmarks.save(remoteBookmarkKey, SeekState(duration, duration))
+                    }
                     requested = null
                     stop()
                     onError("Media ended")
@@ -349,7 +362,8 @@ class CustomStreamPlayer(context: Context) {
                     prepared = true
                     seekable = engine.seekState() != null
                     if (first && seekable) {
-                        val pos = savedSeek?.takeIf { it.first == url }?.second?.position ?: 0
+                        val duration = engine.seekState()?.duration ?: 0
+                        val pos = RemotePlaybackBookmarks.resumePosition(remoteBookmarks.read(remoteBookmarkKey), duration)
                         if (pos > 0) engine.seek(pos)
                         engine.setSpeed(speed)
                     }
@@ -361,6 +375,7 @@ class CustomStreamPlayer(context: Context) {
             }, onEnded = {
                 if (token == generation && fallback === engine) {
                     val finite = seekable
+                    if (finite) engine.seekState()?.let { remoteBookmarks.save(remoteBookmarkKey, SeekState(it.duration, it.duration)) }
                     savedSeek = null
                     requested = null
                     stop()
@@ -380,8 +395,10 @@ class CustomStreamPlayer(context: Context) {
         // a weather refresh must never trigger an infinite reconnect loop.
         val previous = requested
         val language = textLanguage
+        val bookmark = remoteBookmarkKey
         stop()
         requested = previous
+        remoteBookmarkKey = bookmark
         textLanguage = language
         failed = true
         onError(message)
@@ -421,6 +438,17 @@ class CustomStreamPlayer(context: Context) {
         app.getSharedPreferences("text_bookmarks", Context.MODE_PRIVATE).edit().remove(url).apply()
     }
 
+    // Reuse the service's existing position refreshes; no new timer or network work.
+    fun checkpointRemote() {
+        val key = remoteBookmarkKey ?: return
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastRemoteCheckpoint < 30_000L || !isPlaying()) return
+        val url = requested?.first ?: return
+        val state = seekState(url, key) ?: return
+        remoteBookmarks.save(key, state)
+        lastRemoteCheckpoint = now
+    }
+
     fun stop(keepReader: Boolean = false) {
         generation++
         handler.removeCallbacksAndMessages(null)
@@ -434,20 +462,24 @@ class CustomStreamPlayer(context: Context) {
         reading = false
         textLanguage = null
         val previous = requested
+        val bookmark = remoteBookmarkKey
+        remoteBookmarkKey = null
         requested = null
         val old = player
         val alternate = fallback
         if (alternate != null && previous != null && prepared && seekable) {
-            alternate.seekState()?.let { savedSeek = previous.first to it }
+            alternate.seekState()?.let { remoteBookmarks.save(bookmark, it) }
         }
         fallback = null
         alternate?.release()
         if (old != null && previous != null && prepared && seekable) {
             runCatching { SeekState(old.currentPosition, old.duration) }.getOrNull()
                 ?.takeIf { it.duration > 0 }?.let {
-                    savedSeek = previous.first to it
-                    if (validLocal(previous.first)) localBookmarks.edit().putInt(previous.first,
-                        it.position.takeIf { pos -> pos < it.duration } ?: 0).apply()
+                    if (validLocal(previous.first)) {
+                        savedSeek = previous.first to it
+                        localBookmarks.edit().putInt(previous.first,
+                            it.position.takeIf { pos -> pos < it.duration } ?: 0).apply()
+                    } else remoteBookmarks.save(bookmark, it)
                 }
         }
         prepared = false

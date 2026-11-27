@@ -37,6 +37,7 @@ import com.kotarov.autoclock.media.PhoneAudioMode
 import com.kotarov.autoclock.media.CustomStreamPlayer
 import com.kotarov.autoclock.media.StreamLibrary
 import com.kotarov.autoclock.media.PlaybackSpeed
+import com.kotarov.autoclock.media.RemotePlaybackBookmarks
 import com.kotarov.autoclock.media.StreamMetadata
 import com.kotarov.autoclock.media.MediaPageDirectory
 import com.kotarov.autoclock.media.MediaPageParser
@@ -846,6 +847,7 @@ class MainActivity : Activity() {
                             val prefs = settings()
                             val remaining = StreamLibrary.list(prefs).filterNot { it.id == station.id }
                             StreamLibrary.save(prefs, remaining)
+                            RemotePlaybackBookmarks(this@MainActivity).removeRoot(station.id)
                             if (station.local && remaining.none { it.url == station.url }) {
                                 if (WebTextProvider.owns(station.url)) WebTextProvider.delete(this@MainActivity, station.url)
                                 else runCatching { contentResolver.releasePersistableUriPermission(Uri.parse(station.url), Intent.FLAG_GRANT_READ_URI_PERMISSION) }

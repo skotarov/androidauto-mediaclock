@@ -269,7 +269,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                     }
                     val station = activeSource
                     val moved = if (station?.textFile == true) streamPlayer.skipText(station.url, delta)
-                        else streamPlayer.seekBy(station?.url, delta)
+                        else streamPlayer.seekBy(station?.url, delta, remoteBookmark(station))
                     if (moved) {
                         lastPlayback = null
                         publishPlaybackState()
@@ -285,7 +285,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 override fun onSeekTo(pos: Long) {
                     val source = activeSource
                     val moved = if (source?.textFile == true) streamPlayer.seekTextTo(source.url, pos)
-                        else streamPlayer.seekTo(source?.url, pos)
+                        else streamPlayer.seekTo(source?.url, pos, remoteBookmark(source))
                     if (moved) {
                         lastPlayback = null
                         publishPlaybackState()
@@ -821,6 +821,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     private fun refreshPositionSubtitle() {
         if (!clientActive) return
+        streamPlayer.checkpointRemote()
         updateDiagnosticAudio()
         val caption = if (playMode) null else currentCaption(SystemClock.elapsedRealtime())
         val position = if (caption == null) currentMediaPosition() else null
@@ -870,6 +871,11 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         lastPublished = publication
     }
 
+    private fun remoteBookmark(station: StreamLibrary.Station?): String? =
+        station?.takeUnless { it.local || it.textFile || it.browsable }?.let {
+            RemotePlaybackBookmarks.key(StreamLibrary.selectedRootId(prefs), it.id, it.url)
+        }
+
     private fun syncStream() {
         if (!playMode && callBlocked) {
             publishPlaybackState()
@@ -886,7 +892,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val url = station?.url
         streamPlayer.setSpeed(PlaybackSpeed.read(prefs, station), station?.url)
         streamPlayer.sync(url, !playMode && phoneMode != PhoneAudioMode.OFF,
-            textLanguage = station?.takeIf { it.textFile }?.language, onChanged = {
+            textLanguage = station?.takeIf { it.textFile }?.language,
+            bookmarkKey = remoteBookmark(station), onChanged = {
             if (playMode || station?.textFile != true) lastPlayback = null
             publishPlaybackState()
             refreshPositionSubtitle()
@@ -970,7 +977,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         ?.let { streamPlayer.bookTimeline(it.url) }
 
     private fun mediaSeek(): CustomStreamPlayer.SeekState? = activeSource?.takeUnless { it.textFile }
-        ?.let { streamPlayer.seekState(it.url) }
+        ?.let { streamPlayer.seekState(it.url, remoteBookmark(it)) }
 
     private fun setSessionMetadata(value: MediaMetadataCompat?) {
         PerfDiagnostics.metadata()
