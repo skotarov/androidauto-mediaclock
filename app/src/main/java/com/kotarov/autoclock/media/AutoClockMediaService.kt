@@ -475,10 +475,12 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             return
         }
         if (parentId != ROOT_ID && parentId != CarLibraryTabs.LIBRARY_ID) {
-            val page = ContentNavigation.resolve(prefs, parentId)
-            if (page == null) { result.sendResult(mutableListOf()); return }
+            // The expanded link list is a virtual browse level, never a playable source.
+            val allLinks = parentId.startsWith("alllinks:")
+            val page = ContentNavigation.resolve(prefs, if (allLinks) parentId.removePrefix("alllinks:") else parentId)
+            if (page == null || (allLinks && !page.mediaPage)) { result.sendResult(mutableListOf()); return }
             result.detach()
-            MediaPageDirectory.load(this, page) { outcome ->
+            MediaPageDirectory.load(this, page, allLinks) { outcome ->
                 val valid = ContentNavigation.resolve(prefs, page.id)?.url == page.url
                 val children = mutableListOf<MediaBrowserCompat.MediaItem>()
                 val entries = if (valid) outcome.getOrNull().orEmpty() else emptyList()
@@ -504,6 +506,18 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                             else setIconUri(browseIconUri(if (downloaded) downloadedLibraryIcon(kind.icon) else kind.icon))
                         }.build()
                     children.add(MediaBrowserCompat.MediaItem(desc, if (bookFolder || item.browsable) MediaBrowserCompat.MediaItem.FLAG_BROWSABLE else MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
+                }
+                // Offer the same fallback as on the phone, even if filtering
+                // produced zero rows. The car's Back returns to the filtered list.
+                if (valid && page.mediaPage && !allLinks && !playMode) {
+                    val desc = MediaDescriptionCompat.Builder()
+                        .setMediaId("alllinks:" + page.id)
+                        .setTitle("Show all links")
+                        .setSubtitle("Open expanded website links")
+                        .setIconBitmap(sourceIcon(R.drawable.ic_source_web, 32))
+                        .build()
+                    val entry = MediaBrowserCompat.MediaItem(desc, MediaBrowserCompat.MediaItem.FLAG_BROWSABLE)
+                    if (children.isEmpty()) children.add(entry) else children.add(0, entry)
                 }
                 result.sendResult(children)
             }
