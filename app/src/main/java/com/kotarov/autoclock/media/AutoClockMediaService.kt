@@ -494,7 +494,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 entries.forEach { item ->
                     val bookFolder = !playMode && page.localFolder && item.textFile && BookNavigation.mayHaveContents(item.name)
                     val kind = LibraryMediaKind.item(item, page.localFolder)
-                    val downloaded = item.url in downloads || (item.browsable && !page.localFolder &&
+                    val downloaded = item.url in downloads || (page.localFolder && item.textFile && BookDiskCache.hasSource(this, item.url)) || (item.browsable && !page.localFolder &&
                         MediaPageDirectory.cachedPage(this, ContentNavigation.id(page.id, item.url)))
                     val childId = if (item.browsable) ContentNavigation.id(page.id, item.url)
                         else if (bookFolder) BookNavigation.BOOK_PREFIX + item.id else item.id
@@ -521,8 +521,10 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             val desc = MediaDescriptionCompat.Builder().setMediaId(if (bookFolder) BookNavigation.BOOK_PREFIX + station.id else station.id)
                 .setTitle(station.name).apply {
                     val kind = LibraryMediaKind.station(station)
-                    val downloaded = DownloadAvailability.available(contentResolver, station)
-                    setSubtitle(kind.label + if (downloaded) " · Downloaded" else if (station.downloadSourceUrl != null) " · File unavailable" else "")
+                    val downloaded = DownloadAvailability.available(contentResolver, station) ||
+                        (station.mediaPage && MediaPageDirectory.cachedPage(this@AutoClockMediaService, station.id)) ||
+                        (station.local && station.textFile && BookDiskCache.hasSource(this@AutoClockMediaService, station.url))
+                    setSubtitle(kind.label + if (downloaded) (if (CacheOwnership.ownsCopy(station)) " · Downloaded" else " · Cached") else if (station.downloadSourceUrl != null) " · File unavailable" else "")
                     val icon = kind.icon
                     if (inlineIcons) setIconBitmap(sourceIcon(icon, downloaded = downloaded))
                     else setIconUri(browseIconUri(if (downloaded) downloadedLibraryIcon(icon) else icon))
