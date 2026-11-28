@@ -1,0 +1,105 @@
+name: Auto Clock Beta APK
+
+on:
+  push:
+    branches: [revamp/low-power-v2]
+  workflow_dispatch:
+
+concurrency:
+  group: autoclock-beta-preview
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout beta
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.11.1
+
+      - name: Run unit tests and compile with permanent beta key
+        env:
+          BETA_SIGNING_SECRET: ${{ secrets.AUTO_CLOCK_BETA_SIGNING }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${BETA_SIGNING_SECRET:-}" ]]; then
+            echo "::error::Configure repository secret AUTO_CLOCK_BETA_SIGNING before publishing a beta."
+            exit 1
+          fi
+          mapfile -t signing_lines <<< "$BETA_SIGNING_SECRET"
+          if [[ "${#signing_lines[@]}" -lt 2 ]]; then
+            echo "::error::Invalid beta signing secret."
+            exit 1
+          fi
+          export AUTO_CLOCK_BETA_PASSWORD="${signing_lines[0]%$'\r'}"
+          encoded_store="${signing_lines[1]%$'\r'}"
+          echo "::add-mask::$AUTO_CLOCK_BETA_PASSWORD"
+          echo "::add-mask::$encoded_store"
+          export AUTO_CLOCK_BETA_STORE="$RUNNER_TEMP/autoclock-beta.p12"
+          umask 077
+          trap 'rm -f "$AUTO_CLOCK_BETA_STORE"' EXIT
+          printf '%s' "$encoded_store" | base64 --decode > "$AUTO_CLOCK_BETA_STORE"
+          unset BETA_SIGNING_SECRET encoded_store signing_lines
+          fingerprint=$(keytool -exportcert -storetype PKCS12 -keystore "$AUTO_CLOCK_BETA_STORE" -storepass:env AUTO_CLOCK_BETA_PASSWORD -alias autoclock-beta | sha256sum | cut -d' ' -f1)
+          if [[ "$fingerprint" != "b29e5f80e27dd8aeebb7ede5329a9ffe46a1d8ef7270e2981aae32233fd9b2b1" ]]; then
+            echo "::error::Beta certificate does not match the permanent signing identity."
+            exit 1
+          fi
+          gradle --no-daemon clean testDebugUnitTest assembleDebug --no-build-cache --stacktrace
+          signer=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)
+          mkdir -p dist
+          "$signer" sign --ks "$AUTO_CLOCK_BETA_STORE" --ks-type PKCS12 \
+            --ks-key-alias autoclock-beta --ks-pass env:AUTO_CLOCK_BETA_PASSWORD \
+            --key-pass env:AUTO_CLOCK_BETA_PASSWORD \
+            --out dist/Travel-to-Awaken-Lite-v0.168-beta.apk app/build/outputs/apk/debug/app-debug.apk
+          "$signer" verify --verbose --print-certs dist/Travel-to-Awaken-Lite-v0.168-beta.apk
+          lite_actual=$("$signer" verify --print-certs dist/Travel-to-Awaken-Lite-v0.168-beta.apk | awk '/certificate SHA-256 digest:/ {print $NF}' | tr -d ':\r' | tr '[:upper:]' '[:lower:]')
+          [[ "$lite_actual" == "$fingerprint" ]]
+          python3 - <<'PY'
+          import zipfile, os
+          path = "dist/Travel-to-Awaken-Lite-v0.168-beta.apk"
+          size = os.path.getsize(path)
+          with zipfile.ZipFile(path) as z:
+              total = sum(i.compress_size for i in z.infolist())
+              assert z.testzip() is None
+              assert not any("pdfbox" in n.lower() or "fontbox" in n.lower() for n in z.namelist())
+              print("Lite APK size:", size, "ZIP overhead:", size-total)
+              # Media3 AAC/HLS adds about 1 MB; retain a strict Lite size and padding budget.
+          assert size < 2500000 and size-total < 150000, "Unexpected Lite APK size or padding"
+          PY
+          stat -c "APK size: %s bytes" dist/Travel-to-Awaken-Lite-v0.168-beta.apk
+
+      - name: Create or update public beta download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Recheck after transient API errors; never leave a failed upload silently.
+          for attempt in 1 2 3 4; do
+            if ! gh release view v0.168.0-beta >/dev/null 2>&1; then
+              gh release create v0.168.0-beta \
+              --target "$GITHUB_SHA" \
+              --title "Travel to Awaken — beta 0.168.0" \
+              --notes "Lite beta. Show all links fallback in Android Auto website browser." \
+              --prerelease || true
+            fi
+            if gh release upload v0.168.0-beta dist/Travel-to-Awaken-Lite-v0.168-beta.apk --clobber &&
+              gh release view v0.168.0-beta --json assets --jq '.assets[] | select(.name == "Travel-to-Awaken-Lite-v0.168-beta.apk" and .size > 0) | .name' | grep -Fxq "Travel-to-Awaken-Lite-v0.168-beta.apk"; then
+              exit 0
+            fi
+            sleep $((attempt * 10))
+          done
+          exit 1

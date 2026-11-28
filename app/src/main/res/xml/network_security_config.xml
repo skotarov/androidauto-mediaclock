@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Users may enter public radio streams hosted on arbitrary domains. -->
+    <base-config cleartextTrafficPermitted="true" />
+    <!-- Known non-media providers must never use cleartext. -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">open-meteo.com</domain>
+        <domain includeSubdomains="true">aviationweather.gov</domain>
+        <domain includeSubdomains="true">creativecommons.org</domain>
+        <domain includeSubdomains="true">github.com</domain>
+    </domain-config>
+</network-security-config>
