@@ -15,7 +15,8 @@ object StreamLibrary {
     private const val KEY_CHILD = "stream_selected_web_child_v120"
     const val ALERT_ID = "autoclock_clock"
     data class Station(val id: String, val name: String, val url: String, val icon: String = "", val local: Boolean = false,
-        val textFile: Boolean = false, val language: String = "auto", val mediaPage: Boolean = false, val localFolder: Boolean = false, val pinned: Boolean = false) {
+        val textFile: Boolean = false, val language: String = "auto", val mediaPage: Boolean = false, val localFolder: Boolean = false, val pinned: Boolean = false,
+        val articleUrl: String? = null) {
         val browsable: Boolean get() = mediaPage || localFolder
         fun bitmap(): Bitmap? = if (icon.isBlank()) null else runCatching {
             val bytes = Base64.decode(icon, Base64.DEFAULT)
@@ -45,7 +46,8 @@ object StreamLibrary {
                 // Keep saved entries visible even when the source is currently invalid.
                 // Playback and network access still validate the address at use time.
                 Station(id, o.optString("name").ifBlank { defaultName(url) },
-                    url, "", local, local && o.optBoolean("textFile", false), o.optString("language", "auto"), !local && o.optBoolean("mediaPage", false), local && o.optBoolean("localFolder", false), o.optBoolean("pinned", false))
+                    url, "", local, local && o.optBoolean("textFile", false), o.optString("language", "auto"), !local && o.optBoolean("mediaPage", false), local && o.optBoolean("localFolder", false), o.optBoolean("pinned", false),
+                    o.optString("articleUrl").takeIf { local && WebReader.valid(it) })
             }
         }.getOrDefault(emptyList())
         cachedRaw = raw
@@ -114,7 +116,8 @@ object StreamLibrary {
     fun save(prefs: SharedPreferences, stations: List<Station>) {
         val a = JSONArray()
         stations.forEach { s ->
-            a.put(JSONObject().put("id", s.id).put("name", s.name).put("url", s.url).put("icon", "").put("local", s.local).put("textFile", s.textFile).put("language", s.language).put("mediaPage", s.mediaPage).put("localFolder", s.localFolder).put("pinned", s.pinned))
+            a.put(JSONObject().put("id", s.id).put("name", s.name).put("url", s.url).put("icon", "").put("local", s.local).put("textFile", s.textFile).put("language", s.language).put("mediaPage", s.mediaPage).put("localFolder", s.localFolder).put("pinned", s.pinned)
+                .put("articleUrl", s.articleUrl ?: ""))
         }
         val edit = prefs.edit().putString(KEY_LIST, a.toString())
         list(prefs).filter { old -> old.localFolder && stations.none { it.id == old.id && it.url == old.url && it.localFolder } }
