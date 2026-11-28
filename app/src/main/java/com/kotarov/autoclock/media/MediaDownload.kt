@@ -8,7 +8,9 @@ import java.util.Locale
 
 /** Explicit finite media download to a user-created SAF document, not an app cache. */
 internal object MediaDownload {
-    data class Spec(val url: String, val name: String, val mime: String, val length: Long, val replaceId: String? = null)
+    data class Spec(val url: String, val name: String, val mime: String, val length: Long, val replaceId: String? = null) {
+        val textFile: Boolean get() = BookFormat.detect(name, mime) != null
+    }
 
     private val mimeByExtension = mapOf(
         "mp3" to "audio/mpeg", "mp2" to "audio/mpeg", "m4a" to "audio/mp4",
@@ -17,7 +19,12 @@ internal object MediaDownload {
         "opus" to "audio/opus", "wma" to "audio/x-ms-wma", "aiff" to "audio/aiff",
         "amr" to "audio/amr", "mp4" to "video/mp4", "m4v" to "video/mp4",
         "webm" to "video/webm", "mkv" to "video/x-matroska", "avi" to "video/x-msvideo",
-        "mov" to "video/quicktime", "3gp" to "video/3gpp"
+        "mov" to "video/quicktime", "3gp" to "video/3gpp",
+        "pdf" to "application/pdf", "epub" to "application/epub+zip",
+        "fb2" to "application/x-fictionbook+xml",
+        "docx" to "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "rtf" to "application/rtf", "txt" to "text/plain", "md" to "text/markdown",
+        "markdown" to "text/markdown", "html" to "text/html", "htm" to "text/html", "xhtml" to "application/xhtml+xml"
     )
     private val preferredExtension = mapOf(
         "audio/mpeg" to "mp3", "audio/mp3" to "mp3", "audio/mp4" to "m4a",
@@ -28,7 +35,13 @@ internal object MediaDownload {
         "audio/aiff" to "aiff", "audio/x-aiff" to "aiff", "audio/amr" to "amr",
         "video/mp4" to "mp4", "video/webm" to "webm", "audio/webm" to "webm",
         "video/x-matroska" to "mkv", "video/x-msvideo" to "avi",
-        "video/quicktime" to "mov", "video/3gpp" to "3gp"
+        "video/quicktime" to "mov", "video/3gpp" to "3gp",
+        "application/pdf" to "pdf", "application/epub+zip" to "epub",
+        "application/x-fictionbook+xml" to "fb2", "application/fb2+xml" to "fb2",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" to "docx",
+        "application/rtf" to "rtf", "text/rtf" to "rtf", "application/x-rtf" to "rtf",
+        "text/plain" to "txt", "text/markdown" to "md", "text/x-markdown" to "md",
+        "text/html" to "html", "application/xhtml+xml" to "xhtml"
     )
     private fun extension(name: String): String =
         name.substringAfterLast('.', "").lowercase(Locale.ROOT)
@@ -40,16 +53,23 @@ internal object MediaDownload {
         urlExtension(url) !in setOf("m3u", "m3u8", "pls", "asx", "xspf", "mpd")
 
     internal fun describe(url: String, name: String, type: String?, length: Long, icy: Boolean): Spec {
-        require(offer(url) && !icy && length > 0) { "Only finite audio or video files can be downloaded." }
+        require(offer(url) && !icy && length > 0) { "Only finite media or document files can be downloaded." }
         val mime = type.orEmpty().substringBefore(';').trim().lowercase(Locale.ROOT)
         val ext = urlExtension(url)
+        // Do not mistake login/error HTML returned for a media URL for a file.
+        require(mime !in setOf("text/html", "application/xhtml+xml") ||
+            ext in setOf("html", "htm", "xhtml") || extension(name) in setOf("html", "htm", "xhtml")) {
+            "Not an explicit HTML document"
+        }
         val actual = when {
             mime in preferredExtension -> mime
             mime in setOf("", "application/octet-stream", "binary/octet-stream") -> mimeByExtension[ext]
             else -> null
         } ?: throw IllegalArgumentException("The link is not a supported downloadable media file.")
         val fileExt = ext.takeIf { mimeByExtension[it] == actual ||
-            (it == "m4b" && actual in setOf("audio/mp4", "audio/x-m4a")) }
+            (it == "m4b" && actual in setOf("audio/mp4", "audio/x-m4a")) ||
+            (BookFormat.detect("file.$it", null) != null &&
+                BookFormat.detect("file.$it", null) == BookFormat.detect("", actual)) }
             ?: preferredExtension[actual] ?: error("Unknown media format")
         val clean = name.replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), "_").trim().trim('.')
             .take(110).ifBlank { "Media" }
@@ -105,16 +125,23 @@ internal object MediaDownload {
         }
 
     fun save(resolver: ContentResolver, destination: Uri, spec: Spec,
-             cancelled: () -> Boolean, progress: (Long, Long) -> Unit) {
+             cancelled: () -> Boolean, progress: (Long, Long) -> Unit) =
+        saveTo(spec, cancelled, progress) {
+            requireNotNull(resolver.openOutputStream(destination, "w")) { "Cannot write to selected location" }
+        }
+
+    fun saveTo(spec: Spec, cancelled: () -> Boolean, progress: (Long, Long) -> Unit,
+               maxBytes: Long = Long.MAX_VALUE, output: () -> java.io.OutputStream) {
         connect(spec.url) { c, url ->
             val response = describeResponse(c, url, spec.name)
             require(response.mime == spec.mime) { "Media format changed" }
             require(c.getHeaderField("Content-Encoding").orEmpty().let { it.isBlank() || it.equals("identity", true) })
             val length = response.length
+            require(length <= maxBytes) { "File too large" }
             var copied = 0L
             var lastUpdate = 0L
             c.inputStream.use { input ->
-                requireNotNull(resolver.openOutputStream(destination, "w")) { "Cannot write to selected location" }.use { output ->
+                output().use { output ->
                     val buffer = ByteArray(64 * 1024)
                     while (true) {
                         require(!cancelled() && !Thread.currentThread().isInterrupted) { "Download cancelled" }
