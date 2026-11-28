@@ -48,6 +48,7 @@ import com.kotarov.autoclock.media.StreamLibrary
 import com.kotarov.autoclock.media.LibraryMediaKind
 import com.kotarov.autoclock.media.MediaDownload
 import com.kotarov.autoclock.media.DownloadLocation
+import com.kotarov.autoclock.media.DownloadAvailability
 import com.kotarov.autoclock.media.PlaybackSpeed
 import com.kotarov.autoclock.media.RemotePlaybackBookmarks
 import com.kotarov.autoclock.media.StreamMetadata
@@ -111,6 +112,8 @@ class MainActivity : Activity() {
     private var libraryQuery = ""
     private var libraryFilter = 0
     private var renderedLibraryKey: String? = null
+    private var checkedDownloadSources: List<StreamLibrary.Station>? = null
+    private var availableDownloadIds = emptySet<String>()
     private var lastRecentSource: String? = null
     private var phoneBrowser: MediaBrowserCompat? = null
     private var phoneController: MediaControllerCompat? = null
@@ -242,7 +245,7 @@ class MainActivity : Activity() {
             val mime = state.getString("downloadMime").orEmpty()
             val length = state.getLong("downloadLength", 0)
             if (pendingDownloadMode != null && MediaDownload.offer(url) && name.isNotBlank() && mime.isNotBlank() && length > 0)
-                pendingDownload = MediaDownload.Spec(url, name, mime, length)
+                pendingDownload = MediaDownload.Spec(url, name, mime, length, state.getString("downloadReplaceId"))
         }
         val shell = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1005,6 +1008,8 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        checkedDownloadSources = null
+        renderStreams()
         if (::analogImage.isInitialized) updatePreviewTiles()
         // Every opening of settings starts a current observation refresh.
         if (BuildConfig.PLAY_MEDIA_MODE) return
@@ -1281,6 +1286,7 @@ class MainActivity : Activity() {
             outState.putString("downloadName", it.name)
             outState.putString("downloadMime", it.mime)
             outState.putLong("downloadLength", it.length)
+            outState.putString("downloadReplaceId", it.replaceId)
         }
         super.onSaveInstanceState(outState)
     }
@@ -1350,11 +1356,15 @@ class MainActivity : Activity() {
         if (!::streamRows.isInitialized) return
         val prefs = settings()
         val sources = StreamLibrary.list(prefs)
+        if (checkedDownloadSources != sources) {
+            checkedDownloadSources = sources
+            availableDownloadIds = sources.filter { DownloadAvailability.available(contentResolver, it) }.map { it.id }.toSet()
+        }
         val alertPinned = prefs.getBoolean(CarLibraryTabs.KEY_ALERT_PIN, false)
         val favorites = favoriteSources()
         val recent = recentSources()
         val query = libraryQuery.trim()
-        val key = "${libraryFilter}|${query}|${favorites.sorted()}|${if (libraryFilter == 2) recent else emptyList<String>()}"
+        val key = "${libraryFilter}|${query}|${favorites.sorted()}|${if (libraryFilter == 2) recent else emptyList<String>()}|${availableDownloadIds.sorted()}"
         if (renderedSources == sources && renderedAlertPin == alertPinned && renderedLibraryKey == key) {
             highlightSelectedSource()
             return
@@ -1449,7 +1459,7 @@ class MainActivity : Activity() {
                     true
                 }
             }, LinearLayout.LayoutParams(dp(24), dp(44)))
-            val downloaded = station.downloadSourceUrl != null
+            val downloaded = station.id in availableDownloadIds
             val mediaIcon = FrameLayout(this).apply {
                 addView(ImageView(this@MainActivity).apply {
                     setImageResource(LibraryMediaKind.station(station).icon)
@@ -1477,7 +1487,7 @@ class MainActivity : Activity() {
                 orientation = LinearLayout.VERTICAL
                 addView(title)
                 addView(text(LibraryMediaKind.station(station).label +
-                    (if (station.downloadSourceUrl != null) " · Downloaded" else "") +
+                    (if (downloaded) " · Downloaded" else if (station.downloadSourceUrl != null) " · File unavailable" else "") +
                     (if (station.pinned) " · Car tab" else ""), 11f, 0).apply {
                     setTextColor(Color.rgb(185, 190, 199))
                     maxLines = 1
@@ -1494,6 +1504,13 @@ class MainActivity : Activity() {
                             if (station.localFolder) editFileName(station) else if (station.mediaPage) editMediaPage(station)
                             else if (station.local) editFileName(station) else editStream(station)
                             true
+                        }
+                        if (station.downloadSourceUrl != null && !DownloadAvailability.available(contentResolver, station)) {
+                            checkedDownloadSources = null
+                            menu.add("Download again").setOnMenuItemClickListener {
+                                requestMediaDownload(station.downloadSourceUrl, station.name, station.id)
+                                true
+                            }
                         }
                         if (!station.local && !station.browsable && MediaDownload.offer(station.url))
                             menu.add("Download").setOnMenuItemClickListener { requestMediaDownload(station.url, station.name); true }
@@ -1594,6 +1611,20 @@ class MainActivity : Activity() {
 
     private fun selectPhoneSource(id: String) {
         val prefs = settings()
+        val entry = StreamLibrary.list(prefs).firstOrNull { it.id == id }
+        val source = entry?.downloadSourceUrl
+        if (entry != null && source != null && !DownloadAvailability.available(contentResolver, entry)) {
+            checkedDownloadSources = null
+            renderStreams()
+            val online = StreamLibrary.list(prefs).firstOrNull { !it.local && !it.browsable && it.url == source }
+            val dialog = AlertDialog.Builder(this).setTitle(entry.name)
+                .setMessage("The downloaded file is missing or the storage is unavailable.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Download again") { _, _ -> requestMediaDownload(source, entry.name, entry.id) }
+            if (online != null) dialog.setNeutralButton("Play online") { _, _ -> selectPhoneSource(online.id) }
+            dialog.show()
+            return
+        }
         if (BuildConfig.PLAY_MEDIA_MODE) {
             phoneController?.transportControls?.playFromMediaId(id, null)
             return
@@ -1941,10 +1972,10 @@ class MainActivity : Activity() {
         worker.start()
     }
 
-    private fun requestMediaDownload(address: String, name: String) {
+    private fun requestMediaDownload(address: String, name: String, replaceId: String? = null) {
         if (downloadJob != null || pendingDownload != null || pendingDownloadMode != null || webImport != null) return
         if (!MediaDownload.offer(address)) return
-        runUrlWork("Checking downloadable media…", { MediaDownload.inspect(address, name) }) { result ->
+        runUrlWork("Checking downloadable media…", { MediaDownload.inspect(address, name).copy(replaceId = replaceId) }) { result ->
             result.fold(onSuccess = { spec ->
                 val mode = DownloadLocation.selected(settings())
                 val tree = DownloadLocation.tree(settings(), mode)
@@ -2086,12 +2117,19 @@ class MainActivity : Activity() {
                         resolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
                             null, null, null)?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
                     }.getOrNull()?.ifBlank { spec.name } ?: spec.name
-                    val station = StreamLibrary.newFile(uri.toString(), actualName)
-                        .copy(downloadSourceUrl = spec.url)
                     val prefs = settings()
-                    val original = StreamLibrary.list(prefs).firstOrNull { !it.local && it.url == spec.url }
+                    val entries = StreamLibrary.list(prefs)
+                    val replace = entries.firstOrNull { it.id == spec.replaceId && it.downloadSourceUrl == spec.url &&
+                        !DownloadAvailability.available(resolver, it) }
+                    val station = if (replace != null) replace.copy(url = uri.toString())
+                        else StreamLibrary.newFile(uri.toString(), actualName).copy(downloadSourceUrl = spec.url)
+                    val original = replace ?: entries.firstOrNull { !it.local && it.url == spec.url }
                     if (original != null) PlaybackSpeed.write(prefs, station, PlaybackSpeed.read(prefs, original))
-                    saveLibrarySource(station)
+                    if (replace != null) {
+                        StreamLibrary.save(prefs, entries.map { if (it.id == replace.id) station else it })
+                        checkedDownloadSources = null
+                        renderStreams()
+                    } else saveLibrarySource(station)
                     android.widget.Toast.makeText(this, "Saved to selected folder and added to library", android.widget.Toast.LENGTH_LONG).show()
                 }
             }
