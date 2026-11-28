@@ -232,10 +232,11 @@ class MainActivity : Activity() {
         playerExpanded = savedInstanceState?.getBoolean("playerExpanded", false) ?: false
         libraryFilter = savedInstanceState?.getInt("libraryFilter", 0)?.coerceIn(0, 2) ?: 0
         libraryQuery = savedInstanceState?.getString("libraryQuery").orEmpty()
-        savedInstanceState?.getString("downloadUrl")?.let { url ->
-            val name = savedInstanceState.getString("downloadName").orEmpty()
-            val mime = savedInstanceState.getString("downloadMime").orEmpty()
-            val length = savedInstanceState.getLong("downloadLength", 0)
+        savedInstanceState?.let { state ->
+            val url = state.getString("downloadUrl").orEmpty()
+            val name = state.getString("downloadName").orEmpty()
+            val mime = state.getString("downloadMime").orEmpty()
+            val length = state.getLong("downloadLength", 0)
             if (MediaDownload.offer(url) && name.isNotBlank() && mime.isNotBlank() && length > 0)
                 pendingDownload = MediaDownload.Spec(url, name, mime, length)
         }
@@ -1624,6 +1625,7 @@ class MainActivity : Activity() {
                                     addView(text("⋮", 24f, 0).apply {
                                         gravity = android.view.Gravity.CENTER
                                         contentDescription = "Options: " + item.name
+                                        isFocusable = false
                                         setOnClickListener { anchor ->
                                             PopupMenu(this@MainActivity, anchor).apply {
                                                 menu.add("Download").setOnMenuItemClickListener {
@@ -1881,6 +1883,7 @@ class MainActivity : Activity() {
                     addCategory(Intent.CATEGORY_OPENABLE)
                     type = spec.mime
                     putExtra(Intent.EXTRA_TITLE, spec.name)
+                    putExtra(Intent.EXTRA_LOCAL_ONLY, true)
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
                         Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
                 }
@@ -2033,7 +2036,14 @@ class MainActivity : Activity() {
         if (requestCode == DOWNLOAD_REQUEST) {
             val spec = pendingDownload
             pendingDownload = null
-            if (resultCode == RESULT_OK && spec != null) data?.data?.let { saveMediaDownload(spec, it) }
+            if (resultCode == RESULT_OK) data?.data?.let { uri ->
+                if (spec != null) saveMediaDownload(spec, uri)
+                else {
+                    val removed = removeIncompleteDownload(uri)
+                    showDownloadError("Download request expired. Please start again." +
+                        if (removed) "" else " Check the selected location for an empty file.")
+                }
+            }
             return
         }
         if (resultCode != RESULT_OK) return
