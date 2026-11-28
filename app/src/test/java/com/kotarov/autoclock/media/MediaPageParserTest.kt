@@ -67,4 +67,15 @@ class MediaPageParserTest {
         assertTrue(rows.last().next)
         assertTrue(MediaPageParser.navigationLinks("root", base, doc, all = true).size > rows.size)
     }
+    @Test fun catalogKeepsBookHeadingsOverRepeatedReadNowLinks() {
+        val base = "https://example.org/books/"
+        val doc = org.jsoup.Jsoup.parse("""
+            <main><h2><a href="one/">Революционна Психология</a></h2>
+            <a href="one/">Четете сега</a>
+            <h2><a href="two/">Големият Бунт</a></h2><a href="two/">Четете сега</a></main>
+        """.trimIndent(), base)
+        val rows = MediaPageParser.navigationLinks("root", base, doc)
+        assertEquals(listOf("Революционна Психология", "Големият Бунт"), rows.map { it.name })
+        assertEquals("Browse website", MediaPageParser.Inspection(items = rows).suggested().first())
+    }
 }
