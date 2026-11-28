@@ -33,14 +33,62 @@ internal object MediaPageDirectory {
     fun cachedPage(context: Context, id: String): Boolean =
         context.getSharedPreferences("offline_page_index_v163", Context.MODE_PRIVATE).contains(id)
 
-    fun linkedRoots(context: Context, url: String): Set<String> {
+    fun linkedPages(context: Context, url: String): Set<String> {
         val prefs = context.getSharedPreferences("offline_page_index_v163", Context.MODE_PRIVATE)
         return prefs.all.mapNotNull { (key, value) ->
             val matched = runCatching {
                 val a = JSONObject(value as String).getJSONArray("items")
                 (0 until a.length()).any { a.getJSONObject(it).optString("url") == url }
             }.getOrDefault(false)
-            if (matched) ContentNavigation.rootId(key) else null
+            if (matched) key else null
+        }.toSet()
+    }
+
+    fun linkedRoots(context: Context, url: String): Set<String> =
+        linkedPages(context, url).map(ContentNavigation::rootId).toSet()
+
+    fun subtree(context: Context, page: StreamLibrary.Station): Set<String> {
+        val prefs = context.getSharedPreferences("offline_page_index_v163", Context.MODE_PRIVATE)
+        val root = ContentNavigation.rootId(page.id)
+        if (root == page.id) return prefs.all.keys.filter { ContentNavigation.rootId(it) == root }.toSet() + root
+        val visited = mutableSetOf<String>()
+        val pending = java.util.ArrayDeque<String>()
+        pending.add(page.id)
+        while (pending.isNotEmpty()) {
+            val id = pending.removeFirst()
+            if (!visited.add(id)) continue
+            val a = runCatching { JSONObject(prefs.getString(id, "{}").orEmpty()).getJSONArray("items") }.getOrNull() ?: continue
+            for (i in 0 until a.length()) {
+                val item = a.getJSONObject(i)
+                if (item.optBoolean("browsable", false)) {
+                    val child = ContentNavigation.id(root, item.getString("url"))
+                    if (child != id && child !in visited && prefs.contains(child)) pending.add(child)
+                }
+            }
+        }
+        // Shared pages reachable from outside the branch are kept.
+        val outside = prefs.all.keys.filter { ContentNavigation.rootId(it) == root && it !in visited }
+        val protected = mutableSetOf<String>()
+        for (id in outside) {
+            val a = runCatching { JSONObject(prefs.getString(id, "{}").orEmpty()).getJSONArray("items") }.getOrNull() ?: continue
+            for (i in 0 until a.length()) {
+                val item = a.getJSONObject(i)
+                if (item.optBoolean("browsable", false)) {
+                    val child = ContentNavigation.id(root, item.getString("url"))
+                    if (child != page.id && child in visited) protected.add(child)
+                }
+            }
+        }
+        return visited - protected
+    }
+
+    fun cachedUrls(context: Context, pages: Set<String>): Set<String> {
+        val prefs = context.getSharedPreferences("offline_page_index_v163", Context.MODE_PRIVATE)
+        return pages.flatMap { id ->
+            runCatching {
+                val a = JSONObject(prefs.getString(id, "{}").orEmpty()).getJSONArray("items")
+                (0 until a.length()).mapNotNull { i -> a.getJSONObject(i).takeUnless { it.optBoolean("browsable") }?.getString("url") }
+            }.getOrDefault(emptyList())
         }.toSet()
     }
 
@@ -63,7 +111,7 @@ internal object MediaPageDirectory {
 
     private fun remember(context: Context, page: StreamLibrary.Station, items: List<MediaPageParser.Item>) {
         val a = JSONArray()
-        items.filter { it.browsable || MediaDownload.offer(it.url) }.take(1000).forEach {
+        items.filter { page.localFolder || it.browsable || MediaDownload.offer(it.url) }.take(1000).forEach {
             a.put(JSONObject().put("id", it.id).put("name", it.name).put("url", it.url).put("format", it.format).put("textFile", it.textFile).put("browsable", it.browsable).put("next", it.next))
         }
         context.getSharedPreferences("offline_page_index_v163", Context.MODE_PRIVATE).edit()
@@ -91,7 +139,7 @@ internal object MediaPageDirectory {
         try {
             worker.execute {
                 val result = runCatching {
-                    if (page.localFolder) LocalMediaFolder.list(app, page)
+                    if (page.localFolder) LocalMediaFolder.list(app, page).also { runCatching { remember(app, page, it) } }
                     else {
                         val fresh = runCatching { MediaPageParser.fetch(page.id, page.url) }.getOrNull()
                         if (!fresh.isNullOrEmpty()) {
