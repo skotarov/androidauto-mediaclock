@@ -196,12 +196,13 @@ internal class TextFileReader(context: Context) {
             val sample = StringBuilder(4000)
             val uri = Uri.parse(source)
             val remote = CustomStreamPlayer.valid(source)
-            val remoteSpec = if (remote) MediaDownload.inspect(source, StreamLibrary.defaultName(source)) else null
+            val remoteSpec = if (remote) runCatching { MediaDownload.inspect(source, StreamLibrary.defaultName(source)) }.getOrNull() else null
+            val webPage = remote && (remoteSpec == null || remoteSpec.mime in setOf("text/html", "application/xhtml+xml"))
             val name = remoteSpec?.name ?: runCatching {
                 app.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
                     null, null, null)?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
             }.getOrNull().orEmpty()
-            val format = BookFormat.detect(name, remoteSpec?.mime ?: app.contentResolver.getType(uri))
+            val format = if (webPage) BookFormat.PLAIN else BookFormat.detect(name, remoteSpec?.mime ?: app.contentResolver.getType(uri))
                 ?: if (remote) error("Unsupported document format") else BookFormat.PLAIN
             val backendKey = "pdf_backend:" + source
             val previousBackend = prefs.getString(backendKey, null)
@@ -212,7 +213,13 @@ internal class TextFileReader(context: Context) {
             if (format == BookFormat.PDF && !tryNative && !LegacyPdfExtractor.available)
                 error("PDF needs Android 15 or Android 12–14 with S Extension 13; install Universal")
             val sourceKey = if (remote) null else BookDiskCache.fingerprint(app, uri, signal)
-            if (remoteSpec != null) {
+            if (webPage) {
+                signal.throwIfCanceled()
+                val raw = File.createTempFile("book-remote-", ".txt", dir)
+                remoteFile = raw
+                raw.writeText(WebReader.fetch(source).text, Charsets.UTF_8)
+                signal.throwIfCanceled()
+            } else if (remoteSpec != null) {
                 val limit = 64L * 1024 * 1024
                 require(remoteSpec.textFile && remoteSpec.length <= limit) { "Document too large" }
                 signal.throwIfCanceled()
