@@ -554,6 +554,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         R.drawable.ic_media_audio -> R.drawable.ic_downloaded_audio
         R.drawable.ic_media_book -> R.drawable.ic_downloaded_book
         R.drawable.ic_media_video -> R.drawable.ic_downloaded_video
+        R.drawable.ic_media_document -> R.drawable.ic_downloaded_document
+        R.drawable.ic_media_article -> R.drawable.ic_downloaded_article
         else -> R.drawable.ic_downloaded_file
     }
 
