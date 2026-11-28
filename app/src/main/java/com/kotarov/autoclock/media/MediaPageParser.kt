@@ -10,7 +10,7 @@ import java.util.Locale
 
 /** Direct public media only. No script execution, converter, login or player scraping. */
 internal object MediaPageParser {
-    data class Item(val id: String, val name: String, val url: String, val format: String, val textFile: Boolean = false)
+    data class Item(val id: String, val name: String, val url: String, val format: String, val textFile: Boolean = false, val browsable: Boolean = false, val next: Boolean = false)
     private const val MAX_BYTES = 2 * 1024 * 1024
     private val extensions = setOf("mp3","aac","m4a","m4b","mp4","m4v","ogg","oga","opus","wav","flac","webm","m3u8","ts","3gp","wma","aiff","amr","mkv","avi","mov")
     private val documents = setOf("pdf","epub","fb2","docx","rtf","txt","md","markdown","html","htm","xhtml")
@@ -96,8 +96,11 @@ internal object MediaPageParser {
                 if (mime.contains("html")) {
                     val doc = Jsoup.parse(bytes.inputStream(), charset, uri.toString())
                     val items = parse(parent, uri.toString(), "", mime, doc)
-                    val article = if (inspect) runCatching { WebReader.extract(doc, uri.host) }.getOrNull() else null
-                    return Inspection(items, article)
+                    val article = runCatching { WebReader.extract(doc.clone(), uri.host) }.getOrNull()
+                    // One explicit Read page action, separate from its outgoing links.
+                    val read = article?.let { Item(itemId(parent, address), it.title, address, "ARTICLE", textFile = true) }
+                    val navigation = navigationLinks(parent, uri.toString(), doc, items.map { it.url }.toSet())
+                    return Inspection(listOfNotNull(read) + items + navigation, article)
                 }
                 val text = RadioText.decode(bytes, charset, mime.contains("json"))
                 val items = parse(parent, uri.toString(), text, mime)
@@ -107,6 +110,37 @@ internal object MediaPageParser {
         }
         error("Too many redirects")
     }
+    private fun itemId(parent: String, url: String): String = "webmedia:" +
+        MessageDigest.getInstance("SHA-256").digest((parent + "|" + url).toByteArray())
+            .take(16).joinToString("") { "%02x".format(it.toInt() and 255) }
+
+    internal fun navigationLinks(parent: String, base: String, doc: org.jsoup.nodes.Document,
+                                 existing: Set<String> = emptySet(), all: Boolean = false): List<Item> {
+        val result = LinkedHashMap<String, Item>()
+        val excluded = Regex("(?iu)(^|[\\s_-])(menu|navbar|footer|sidebar|cookie|consent|advert|ads|social|share|comment|related|breadcrumb|login|search|widget)([\\s_-]|$)")
+        val junk = Regex("(?iu)^(home|about|contact|privacy(?: policy)?|terms|login|sign in|register|search|начало|за нас|контакти|вход|регистрация|търсене|прочети още|read more)$")
+        val nextPattern = Regex("(?iu)^(next(?: (?:post|chapter|page))?|следващ[аои]?(?: (?:глава|страница|публикация))?|напред)[\\s»›→:]*$")
+        val blockedPath = Regex("(?i)/(?:wp-admin|wp-login|feed|cart|checkout|privacy-policy|search)(?:/|$)")
+        for (a in doc.select("a[href],link[rel=next][href]")) {
+            val url = absolute(base, a.attr("href")) ?: continue
+            if (url == base || url.trimEnd('/') == base.trimEnd('/') || url in existing ||
+                !ContentNavigation.sameSite(base, url) || blockedPath.containsMatchIn(URI(url).path.orEmpty())) continue
+            if (ext(url) in extensions || ext(url) in documents - setOf("html","htm","xhtml")) continue
+            if (ext(url) in setOf("jpg","jpeg","png","gif","svg","webp","zip","css","js","ico","xml")) continue
+            val label = a.text().ifBlank { a.attr("title") }.ifBlank { a.attr("aria-label") }.trim()
+            val next = a.attr("rel").split(' ').any { it.equals("next",true) } ||
+                nextPattern.matches(label) || a.parents().any { it.className().contains("nav-next",true) || it.className().contains("post-next",true) }
+            val noise = a.parents().any { it.tagName() in setOf("header","footer","aside","nav") ||
+                excluded.containsMatchIn(it.id() + " " + it.className()) }
+            if (!all && !next && (noise || label.length < 2 || junk.matches(label))) continue
+            if (label.isBlank() && !next && !all) continue
+            val name = if (next && label.isBlank()) "Next chapter" else label.ifBlank { StreamLibrary.defaultName(url) }
+            result[url] = Item(itemId(parent, url), name.take(128), url, "WEB", browsable = true, next = next)
+            if (result.size >= 300) break
+        }
+        return result.values.toList()
+    }
+
     internal fun parse(parent: String, base: String, content: String, mime: String = "text/html", htmlDoc: org.jsoup.nodes.Document? = null): List<Item> {
         val items = LinkedHashMap<String, Item>()
         fun add(raw: String, name: String, type: String = "", explicit: Boolean = false) {
