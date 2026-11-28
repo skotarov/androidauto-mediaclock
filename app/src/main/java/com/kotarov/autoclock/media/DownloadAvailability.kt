@@ -5,6 +5,13 @@ import android.net.Uri
 
 /** Do not infer existence from a saved URI, or delete entries when a card is removed. */
 internal object DownloadAvailability {
+    fun find(resolver: ContentResolver, stations: List<StreamLibrary.Station>, url: String): StreamLibrary.Station? =
+        stations.firstOrNull { it.downloadSourceUrl == url && available(resolver, it) }
+
+    fun byUrl(resolver: ContentResolver, stations: List<StreamLibrary.Station>): Map<String, StreamLibrary.Station> =
+        stations.filter { it.downloadSourceUrl != null && available(resolver, it) }
+            .associateBy { requireNotNull(it.downloadSourceUrl) }
+
     fun available(resolver: ContentResolver, station: StreamLibrary.Station): Boolean {
         if (station.downloadSourceUrl == null) return false
         return runCatching {
