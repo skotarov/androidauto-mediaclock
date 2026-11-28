@@ -490,7 +490,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 val icons = mutableMapOf<Pair<Int, Boolean>, Bitmap>()
                 val downloads = if (page.mediaPage) DownloadAvailability.byUrl(contentResolver, StreamLibrary.list(prefs)) else emptyMap()
                 entries.forEach { item ->
-                    val bookFolder = !playMode && item.textFile && BookNavigation.mayHaveContents(item.name)
+                    val bookFolder = !playMode && page.localFolder && item.textFile && BookNavigation.mayHaveContents(item.name)
                     val kind = LibraryMediaKind.item(item, page.localFolder)
                     val downloaded = item.url in downloads
                     val desc = MediaDescriptionCompat.Builder().setMediaId(if (bookFolder) BookNavigation.BOOK_PREFIX + item.id else item.id).setTitle(item.name)
