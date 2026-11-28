@@ -517,7 +517,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             .apply { if (inlineIcons) setIconBitmap(sourceIcon(R.drawable.ic_source_alert)) else setIconUri(browseIconUri(R.drawable.ic_source_alert)) }.build()
         if (!playMode) items.add(MediaBrowserCompat.MediaItem(alert, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
         stations.forEach { station ->
-            val bookFolder = !playMode && station.textFile && BookNavigation.mayHaveContents(station.name)
+            val bookFolder = !playMode && station.local && station.textFile && BookNavigation.mayHaveContents(station.name)
             val desc = MediaDescriptionCompat.Builder().setMediaId(if (bookFolder) BookNavigation.BOOK_PREFIX + station.id else station.id)
                 .setTitle(station.name).apply {
                     val kind = LibraryMediaKind.station(station)
@@ -620,6 +620,14 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             return true
         }
         val entry = entries.firstOrNull { it.id == id }
+        if (entry != null && !entry.local && !entry.browsable && entry.articleUrl == null) {
+            val saved = DownloadAvailability.find(contentResolver, entries, entry.url)
+            if (saved != null) {
+                if (!StreamLibrary.select(prefs, saved.id)) return false
+                activeSource = StreamLibrary.selected(prefs)
+                return true
+            }
+        }
         val originalUrl = entry?.downloadSourceUrl
         if (entry != null && originalUrl != null && !DownloadAvailability.available(contentResolver, entry)) {
             notifyLibraryChanged()
