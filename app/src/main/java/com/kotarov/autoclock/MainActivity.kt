@@ -103,6 +103,8 @@ class MainActivity : Activity() {
     private var fullClockImage: ImageView? = null
     private var pendingDownload: MediaDownload.Spec? = null
     private var pendingDownloadMode: String? = null
+    private var pendingCourseId: String? = null
+    private var courseRefresh: (() -> Unit)? = null
     private lateinit var downloadLocationButton: Button
     private class DownloadJob {
         @Volatile var cancelled = false
@@ -240,6 +242,7 @@ class MainActivity : Activity() {
         libraryQuery = savedInstanceState?.getString("libraryQuery").orEmpty()
         savedInstanceState?.let { state ->
             pendingDownloadMode = state.getString("downloadLocationMode")
+            pendingCourseId = state.getString("downloadCourseId")
             val url = state.getString("downloadUrl").orEmpty()
             val name = state.getString("downloadName").orEmpty()
             val mime = state.getString("downloadMime").orEmpty()
@@ -1281,6 +1284,7 @@ class MainActivity : Activity() {
         outState.putInt("libraryFilter", libraryFilter)
         outState.putString("libraryQuery", libraryQuery)
         outState.putString("downloadLocationMode", pendingDownloadMode)
+        outState.putString("downloadCourseId", pendingCourseId)
         pendingDownload?.let {
             outState.putString("downloadUrl", it.url)
             outState.putString("downloadName", it.name)
@@ -1356,6 +1360,7 @@ class MainActivity : Activity() {
         if (!::streamRows.isInitialized) return
         val prefs = settings()
         val sources = StreamLibrary.list(prefs)
+        courseRefresh?.invoke()
         if (checkedDownloadSources != sources) {
             checkedDownloadSources = sources
             availableDownloadIds = sources.filter { DownloadAvailability.available(contentResolver, it) }.map { it.id }.toSet()
@@ -1590,6 +1595,7 @@ class MainActivity : Activity() {
         prefs.edit().putStringSet("phone_library_favorites", favoriteSources() - station.id)
             .putString("phone_library_recent", recentSources().filterNot { it == station.id }.joinToString("\n")).apply()
         RemotePlaybackBookmarks(this).removeRoot(station.id)
+        if (station.mediaPage) MediaPageDirectory.forget(this, station.id)
         if (station.local && remaining.none { it.url == station.url }) {
             if (WebTextProvider.owns(station.url)) WebTextProvider.delete(this, station.url)
             else {
@@ -1611,7 +1617,14 @@ class MainActivity : Activity() {
 
     private fun selectPhoneSource(id: String) {
         val prefs = settings()
-        val entry = StreamLibrary.list(prefs).firstOrNull { it.id == id }
+        val entries = StreamLibrary.list(prefs)
+        val hit = MediaPageDirectory.find(id)?.takeIf { it.parent.mediaPage }
+        val offline = hit?.let { DownloadAvailability.find(contentResolver, entries, it.item.url) }
+        if (offline != null) {
+            selectPhoneSource(offline.id)
+            return
+        }
+        val entry = entries.firstOrNull { it.id == id }
         val source = entry?.downloadSourceUrl
         if (entry != null && source != null && !DownloadAvailability.available(contentResolver, entry)) {
             checkedDownloadSources = null
@@ -1702,24 +1715,31 @@ class MainActivity : Activity() {
                             val kind = LibraryMediaKind.item(item, page.localFolder)
                             Triple(item.name, kind.label + " · " + item.format, kind.icon)
                         }
+                    var downloads = if (page.mediaPage) DownloadAvailability.byUrl(contentResolver, StreamLibrary.list(settings())) else emptyMap()
                     val adapter = object : android.widget.BaseAdapter() {
                         override fun getCount() = rows.size
                         override fun getItem(position: Int) = rows[position]
                         override fun getItemId(position: Int) = position.toLong()
                         override fun getView(position: Int, convertView: View?, parent: android.view.ViewGroup): View {
                             val (name, detail, icon) = rows[position]
+                            val item = items.getOrNull(position - choices.size)
+                            val downloaded = item != null && item.url in downloads
                             return LinearLayout(this@MainActivity).apply {
                                 orientation = LinearLayout.HORIZONTAL
                                 gravity = android.view.Gravity.CENTER_VERTICAL
                                 setPadding(dp(16), dp(8), dp(16), dp(8))
-                                addView(ImageView(this@MainActivity).apply { setImageResource(icon) },
-                                    LinearLayout.LayoutParams(dp(32), dp(32)).apply { marginEnd = dp(12) })
+                                addView(FrameLayout(this@MainActivity).apply {
+                                    addView(ImageView(this@MainActivity).apply { setImageResource(icon) },
+                                        FrameLayout.LayoutParams(dp(32), dp(32), android.view.Gravity.CENTER))
+                                    if (downloaded) addView(ImageView(this@MainActivity).apply {
+                                        setImageResource(R.drawable.ic_download_badge)
+                                    }, FrameLayout.LayoutParams(dp(17), dp(17), android.view.Gravity.BOTTOM or android.view.Gravity.END))
+                                }, LinearLayout.LayoutParams(dp(36), dp(36)).apply { marginEnd = dp(12) })
                                 addView(LinearLayout(this@MainActivity).apply {
                                     orientation = LinearLayout.VERTICAL
                                     addView(text(name, 15f, 0))
-                                    addView(text(detail, 12f, 0).apply { setTextColor(Color.rgb(185, 190, 199)) })
+                                    addView(text(detail + if (downloaded) " · Downloaded" else "", 12f, 0).apply { setTextColor(Color.rgb(185, 190, 199)) })
                                 }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-                                val item = items.getOrNull(position - choices.size)
                                 if (!page.localFolder && item != null && MediaDownload.offer(item.url)) {
                                     addView(text("⋮", 24f, 0).apply {
                                         gravity = android.view.Gravity.CENTER
@@ -1727,7 +1747,9 @@ class MainActivity : Activity() {
                                         isFocusable = false
                                         setOnClickListener { anchor ->
                                             PopupMenu(this@MainActivity, anchor).apply {
-                                                menu.add("Download").setOnMenuItemClickListener {
+                                                if (DownloadAvailability.find(contentResolver, StreamLibrary.list(settings()), item.url) != null)
+                                                    menu.add("Downloaded").isEnabled = false
+                                                else menu.add("Download").setOnMenuItemClickListener {
                                                     requestMediaDownload(item.url, item.name)
                                                     true
                                                 }
@@ -1739,14 +1761,28 @@ class MainActivity : Activity() {
                             }
                         }
                     }
-                    AlertDialog.Builder(this).setTitle(page.name).setAdapter(adapter) { _, index ->
+                    val builder = AlertDialog.Builder(this).setTitle(page.name).setAdapter(adapter) { _, index ->
                         if (index < choices.size) selectPhoneSource(choices[index].id)
                         else {
                             val item = items[index - choices.size]
                             val book = if (item.textFile) StreamLibrary.book(settings(), item.id) else null
                             if (book != null) openBook(book) else selectPhoneSource(item.id)
                         }
-                    }.setNegativeButton("Cancel", null).show()
+                    }.setNegativeButton("Cancel", null)
+                    if (page.mediaPage && items.any { !it.textFile && MediaDownload.offer(it.url) })
+                        builder.setPositiveButton("Download all", null)
+                    val dialog = builder.create()
+                    courseRefresh = {
+                        if (page.mediaPage) downloads = DownloadAvailability.byUrl(contentResolver, StreamLibrary.list(settings()))
+                        adapter.notifyDataSetChanged()
+                    }
+                    dialog.setOnDismissListener { courseRefresh = null }
+                    dialog.setOnShowListener {
+                        dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setOnClickListener {
+                            requestCourseDownload(page, items)
+                        }
+                    }
+                    dialog.show()
                 }
             }
         }
@@ -1975,7 +2011,13 @@ class MainActivity : Activity() {
     private fun requestMediaDownload(address: String, name: String, replaceId: String? = null) {
         if (downloadJob != null || pendingDownload != null || pendingDownloadMode != null || webImport != null) return
         if (!MediaDownload.offer(address)) return
-        runUrlWork("Checking downloadable media…", { MediaDownload.inspect(address, name).copy(replaceId = replaceId) }) { result ->
+        val entries = StreamLibrary.list(settings())
+        if (DownloadAvailability.find(contentResolver, entries, address) != null) {
+            android.widget.Toast.makeText(this, "Already downloaded", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        val missing = replaceId ?: entries.firstOrNull { it.downloadSourceUrl == address }?.id
+        runUrlWork("Checking downloadable media…", { MediaDownload.inspect(address, name).copy(replaceId = missing) }) { result ->
             result.fold(onSuccess = { spec ->
                 val mode = DownloadLocation.selected(settings())
                 val tree = DownloadLocation.tree(settings(), mode)
@@ -1994,6 +2036,138 @@ class MainActivity : Activity() {
                 showDownloadError("This link does not provide a downloadable audio or video file with a known size. Live radio and playlists remain streaming only.")
             })
         }
+    }
+
+    private fun requestCourseDownload(page: StreamLibrary.Station, items: List<MediaPageParser.Item>) {
+        if (downloadJob != null || pendingDownload != null || pendingDownloadMode != null || webImport != null) return
+        val downloads = DownloadAvailability.byUrl(contentResolver, StreamLibrary.list(settings()))
+        val candidates = items.filter { !it.textFile && MediaDownload.offer(it.url) && it.url !in downloads }.distinctBy { it.url }
+        if (candidates.isEmpty()) {
+            android.widget.Toast.makeText(this, "All downloadable items are already saved", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        AlertDialog.Builder(this).setTitle("Download all")
+            .setMessage("Download up to " + candidates.size + " remaining media files? Live streams and unsupported links will be skipped. Mobile data may be used.")
+            .setNegativeButton("Cancel", null).setPositiveButton("Download") { _, _ ->
+                val mode = DownloadLocation.selected(settings())
+                val tree = DownloadLocation.tree(settings(), mode)
+                if (tree != null && DownloadLocation.hasAccess(contentResolver, tree, mode))
+                    startCourseDownload(page, candidates, tree)
+                else {
+                    pendingCourseId = page.id
+                    openDownloadTree(mode)
+                }
+            }.show()
+    }
+
+    private fun startCourseDownload(page: StreamLibrary.Station, items: List<MediaPageParser.Item>, tree: Uri) {
+        if (downloadJob != null || isDestroyed || isFinishing) return
+        val resolver = contentResolver
+        val prefs = settings()
+        val snapshot = StreamLibrary.list(prefs)
+        val available = DownloadAvailability.byUrl(resolver, snapshot)
+        val queue = items.filter { !it.textFile && MediaDownload.offer(it.url) && it.url !in available }.distinctBy { it.url }
+        if (queue.isEmpty()) {
+            android.widget.Toast.makeText(this, "No remaining downloadable files", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        val job = DownloadJob()
+        downloadJob = job
+        val info = text("Preparing…", 14f, dp(8))
+        val bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100 }
+        val fields = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(12), dp(20), dp(12))
+            addView(info)
+            addView(bar, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(12)))
+        }
+        val dialog = AlertDialog.Builder(this).setTitle(page.name).setView(fields)
+            .setCancelable(false).setNegativeButton("Cancel", null).create()
+        val worker = Thread({
+            var done = 0
+            var failed = 0
+            var partial = 0
+            for ((index, item) in queue.withIndex()) {
+                if (job.cancelled || Thread.currentThread().isInterrupted) break
+                val prefix = "${index + 1}/${queue.size} · ${item.name}"
+                messageHandler.post {
+                    if (downloadJob === job && !job.cancelled && !isDestroyed) {
+                        info.text = prefix
+                        bar.progress = 0
+                    }
+                }
+                var destination: Uri? = null
+                val result = runCatching {
+                    val spec = MediaDownload.inspect(item.url, item.name)
+                        .copy(replaceId = snapshot.firstOrNull { it.downloadSourceUrl == item.url }?.id)
+                    require(!job.cancelled)
+                    val uri = DownloadLocation.create(resolver, tree, spec)
+                    destination = uri
+                    MediaDownload.save(resolver, uri, spec, { job.cancelled }) { bytes, total ->
+                        messageHandler.post {
+                            if (downloadJob === job && !job.cancelled && !isDestroyed) {
+                                info.text = prefix
+                                bar.progress = (bytes.toDouble() / total * 100).toInt().coerceIn(0, 100)
+                            }
+                        }
+                    }
+                    spec to uri
+                }
+                if (result.isSuccess) {
+                    val (spec, uri) = result.getOrThrow()
+                    done++
+                    // Register each completed file before starting the next one.
+                    // Completed downloads survive cancellation and activity recreation.
+                    messageHandler.post {
+                        registerMediaDownload(spec, uri)
+                        if (!isDestroyed && !isFinishing) renderStreams()
+                    }
+                } else {
+                    destination?.let { if (!removeIncompleteDownload(it)) partial++ }
+                    if (!job.cancelled) failed++
+                }
+            }
+            val summary = "Downloaded: $done · Skipped/failed: $failed" +
+                (if (job.cancelled) " · Cancelled" else "") +
+                (if (partial > 0) "\n$partial incomplete files could not be removed." else "")
+            messageHandler.post {
+                if (downloadJob === job) downloadJob = null
+                if (!isDestroyed && !isFinishing) {
+                    dialog.dismiss()
+                    renderStreams()
+                    AlertDialog.Builder(this).setTitle("Download all").setMessage(summary)
+                        .setPositiveButton("OK", null).show()
+                }
+            }
+        }, "AutoClockCourseDownload")
+        job.worker = worker
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener {
+                job.cancelled = true
+                worker.interrupt()
+                info.text = "Cancelling…"
+                dialog.getButton(AlertDialog.BUTTON_NEGATIVE).isEnabled = false
+            }
+        }
+        dialog.show()
+        worker.start()
+    }
+
+    private fun registerMediaDownload(spec: MediaDownload.Spec, uri: Uri) {
+        val prefs = settings()
+        val entries = StreamLibrary.list(prefs)
+        val actualName = runCatching {
+            contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
+                null, null, null)?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+        }.getOrNull()?.ifBlank { spec.name } ?: spec.name
+        val replace = entries.firstOrNull { it.id == spec.replaceId && it.downloadSourceUrl == spec.url &&
+            !DownloadAvailability.available(contentResolver, it) }
+        val station = if (replace != null) replace.copy(url = uri.toString())
+            else StreamLibrary.newFile(uri.toString(), actualName).copy(downloadSourceUrl = spec.url)
+        val original = replace ?: entries.firstOrNull { !it.local && it.url == spec.url }
+        if (original != null) PlaybackSpeed.write(prefs, station, PlaybackSpeed.read(prefs, original))
+        StreamLibrary.save(prefs, if (replace == null) entries + station else entries.map { if (it.id == replace.id) station else it })
+        checkedDownloadSources = null
     }
 
     private fun syncDownloadLocation() {
@@ -2031,6 +2205,7 @@ class MainActivity : Activity() {
         } else null
         if (mode == DownloadLocation.CARD && android.os.Build.VERSION.SDK_INT >= 24 && volume == null) {
             pendingDownload = null
+            pendingCourseId = null
             showDownloadError("No writable SD card found. Insert a card or select internal storage.")
             return
         }
@@ -2046,6 +2221,7 @@ class MainActivity : Activity() {
         runCatching { startActivityForResult(picker, DOWNLOAD_REQUEST) }.onFailure {
             pendingDownloadMode = null
             pendingDownload = null
+            pendingCourseId = null
             showDownloadError("Folder authorization is unavailable.")
         }
     }
@@ -2113,23 +2289,8 @@ class MainActivity : Activity() {
                         else if (!job.cancelled) showDownloadError("Download failed. No incomplete file was kept.")
                     }
                 } else {
-                    val actualName = runCatching {
-                        resolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
-                            null, null, null)?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
-                    }.getOrNull()?.ifBlank { spec.name } ?: spec.name
-                    val prefs = settings()
-                    val entries = StreamLibrary.list(prefs)
-                    val replace = entries.firstOrNull { it.id == spec.replaceId && it.downloadSourceUrl == spec.url &&
-                        !DownloadAvailability.available(resolver, it) }
-                    val station = if (replace != null) replace.copy(url = uri.toString())
-                        else StreamLibrary.newFile(uri.toString(), actualName).copy(downloadSourceUrl = spec.url)
-                    val original = replace ?: entries.firstOrNull { !it.local && it.url == spec.url }
-                    if (original != null) PlaybackSpeed.write(prefs, station, PlaybackSpeed.read(prefs, original))
-                    if (replace != null) {
-                        StreamLibrary.save(prefs, entries.map { if (it.id == replace.id) station else it })
-                        checkedDownloadSources = null
-                        renderStreams()
-                    } else saveLibrarySource(station)
+                    registerMediaDownload(spec, uri)
+                    renderStreams()
                     android.widget.Toast.makeText(this, "Saved to selected folder and added to library", android.widget.Toast.LENGTH_LONG).show()
                 }
             }
@@ -2197,8 +2358,10 @@ class MainActivity : Activity() {
         if (requestCode == DOWNLOAD_REQUEST) {
             val spec = pendingDownload
             val mode = pendingDownloadMode
+            val courseId = pendingCourseId
             pendingDownload = null
             pendingDownloadMode = null
+            pendingCourseId = null
             if (resultCode != RESULT_OK || mode == null) return
             val tree = data?.data ?: return
             if (!DownloadLocation.validTree(tree, mode)) {
@@ -2215,6 +2378,12 @@ class MainActivity : Activity() {
             DownloadLocation.remember(settings(), mode, tree)
             syncDownloadLocation()
             if (spec != null) createMediaDownload(spec, tree)
+            else if (courseId != null) {
+                val page = StreamLibrary.list(settings()).firstOrNull { it.id == courseId && it.mediaPage }
+                if (page != null) MediaPageDirectory.load(this, page) { result ->
+                    if (!isDestroyed && !isFinishing) startCourseDownload(page, result.getOrNull().orEmpty(), tree)
+                }
+            }
             return
         }
         if (resultCode != RESULT_OK) return
