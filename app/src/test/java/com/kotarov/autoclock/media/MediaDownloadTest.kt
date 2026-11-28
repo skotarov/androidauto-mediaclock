@@ -42,4 +42,9 @@ class MediaDownloadTest {
         assertFalse(MediaDownload.offer("https://example.org/list.pls"))
         assertTrue(MediaDownload.offer("https://example.org/file.mp3"))
     }
+    @Test fun downloadableDocumentRetainsFormat() {
+        val spec = MediaDownload.describe("https://example.org/lesson.pdf", "Lesson", "application/pdf", 100L, false)
+        assertEquals("Lesson.pdf", spec.name)
+        assertTrue(spec.textFile)
+    }
 }
