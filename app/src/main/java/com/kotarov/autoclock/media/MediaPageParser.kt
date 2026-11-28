@@ -38,11 +38,11 @@ internal object MediaPageParser {
             listOfNotNull("Read article".takeIf { article != null }, "Browse media".takeIf { items.isNotEmpty() })
     }
 
-    fun fetch(parent: String, address: String): List<Item> = download(parent, address, false).items
+    fun fetch(parent: String, address: String, allLinks: Boolean = false): List<Item> = download(parent, address, false, allLinks).items
 
     fun inspect(address: String): Inspection = download("inspect", address, true)
 
-    private fun download(parent: String, address: String, inspect: Boolean): Inspection {
+    private fun download(parent: String, address: String, inspect: Boolean, allLinks: Boolean = false): Inspection {
         require(if (inspect) CustomStreamPlayer.valid(address) else WebReader.valid(address))
         var uri = URI(address)
         val deadline = System.nanoTime() + 30_000_000_000L
@@ -99,7 +99,7 @@ internal object MediaPageParser {
                     val article = runCatching { WebReader.extract(doc.clone(), uri.host) }.getOrNull()
                     // One explicit Read page action, separate from its outgoing links.
                     val read = article?.let { Item(itemId(parent, address), it.title, address, "ARTICLE", textFile = true) }
-                    val navigation = navigationLinks(parent, uri.toString(), doc, items.map { it.url }.toSet())
+                    val navigation = navigationLinks(parent, uri.toString(), doc, items.map { it.url }.toSet(), allLinks)
                     return Inspection(listOfNotNull(read) + items + navigation, article)
                 }
                 val text = RadioText.decode(bytes, charset, mime.contains("json"))
