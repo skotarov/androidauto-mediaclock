@@ -473,14 +473,14 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             return
         }
         if (parentId != ROOT_ID && parentId != CarLibraryTabs.LIBRARY_ID) {
-            val page = StreamLibrary.list(prefs).firstOrNull { it.browsable && it.id == parentId }
+            val page = ContentNavigation.resolve(prefs, parentId)
             if (page == null) { result.sendResult(mutableListOf()); return }
             result.detach()
             MediaPageDirectory.load(this, page) { outcome ->
-                val valid = StreamLibrary.list(prefs).any { it.id == page.id && it.url == page.url && it.browsable }
+                val valid = ContentNavigation.resolve(prefs, page.id)?.url == page.url
                 val children = mutableListOf<MediaBrowserCompat.MediaItem>()
                 val entries = if (valid) outcome.getOrNull().orEmpty() else emptyList()
-                if (!playMode && page.localFolder && entries.isNotEmpty()) {
+                if (!playMode && page.localFolder && entries.any { !it.browsable }) {
                     FolderNavigation.choices(page.id).forEach { choice ->
                         val desc = MediaDescriptionCompat.Builder().setMediaId(choice.id)
                             .setTitle(choice.title).build()
@@ -492,13 +492,16 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 entries.forEach { item ->
                     val bookFolder = !playMode && page.localFolder && item.textFile && BookNavigation.mayHaveContents(item.name)
                     val kind = LibraryMediaKind.item(item, page.localFolder)
-                    val downloaded = item.url in downloads
-                    val desc = MediaDescriptionCompat.Builder().setMediaId(if (bookFolder) BookNavigation.BOOK_PREFIX + item.id else item.id).setTitle(item.name)
+                    val downloaded = item.url in downloads || (item.browsable && !page.localFolder &&
+                        MediaPageDirectory.cachedPage(this, ContentNavigation.id(page.id, item.url)))
+                    val childId = if (item.browsable) ContentNavigation.id(page.id, item.url)
+                        else if (bookFolder) BookNavigation.BOOK_PREFIX + item.id else item.id
+                    val desc = MediaDescriptionCompat.Builder().setMediaId(childId).setTitle(item.name)
                         .setSubtitle(kind.label + " · " + item.format + if (downloaded) " · Downloaded" else "").apply {
                             if (entries.size <= 40) setIconBitmap(icons.getOrPut(kind.icon to downloaded) { sourceIcon(kind.icon, 32, downloaded = downloaded) })
                             else setIconUri(browseIconUri(if (downloaded) downloadedLibraryIcon(kind.icon) else kind.icon))
                         }.build()
-                    children.add(MediaBrowserCompat.MediaItem(desc, if (bookFolder) MediaBrowserCompat.MediaItem.FLAG_BROWSABLE else MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
+                    children.add(MediaBrowserCompat.MediaItem(desc, if (bookFolder || item.browsable) MediaBrowserCompat.MediaItem.FLAG_BROWSABLE else MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
                 }
                 result.sendResult(children)
             }
@@ -528,12 +531,13 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     }
 
     private fun playFolder(choice: FolderNavigation.Request, request: Long) {
-        val folder = StreamLibrary.list(prefs).firstOrNull { it.localFolder && it.id == choice.folderId } ?: return
+        val folder = ContentNavigation.resolve(prefs, choice.folderId)?.takeIf { it.localFolder } ?: return
         fun start(items: List<MediaPageParser.Item>) {
-            if (request != folderRequest || !StreamLibrary.list(prefs).any { it.localFolder && it.id == folder.id && it.url == folder.url }) return
+            if (request != folderRequest || ContentNavigation.resolve(prefs, folder.id)?.url != folder.url) return
+            val playable = items.filterNot { it.browsable }
             val remembered = if (choice.resume) StreamLibrary.folderPosition(prefs, folder) else null
-            val id = FolderNavigation.target(items.map { it.id }, remembered) ?: return
-            val item = items.first { it.id == id }
+            val id = FolderNavigation.target(playable.map { it.id }, remembered) ?: return
+            val item = playable.first { it.id == id }
             if (!choice.resume || remembered != id) {
                 setWeatherEnabled(false)
                 streamPlayer.resetBookmark(item.url)
@@ -607,7 +611,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val hit = id?.let { MediaPageDirectory.find(it) }?.takeIf { it.parent.mediaPage }
         val offline = hit?.let { DownloadAvailability.find(contentResolver, entries, it.item.url) }
         if (offline != null) {
-            if (!StreamLibrary.select(prefs, offline.id)) return false
+            if (!StreamLibrary.select(prefs, id, offline)) return false
             activeSource = StreamLibrary.selected(prefs)
             return true
         }
@@ -1114,8 +1118,9 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         fun advance(items: List<MediaPageParser.Item>) {
             if (!clientActive || !liteRequested || activeSource?.id != ended.id ||
                 StreamLibrary.selectedFolder(prefs)?.id != folder.id) return
-            val index = items.indexOfFirst { it.id == ended.id }
-            val next = if (index >= 0) items.getOrNull(index + 1) else null
+            val playable = items.filterNot { it.browsable }
+            val index = playable.indexOfFirst { it.id == ended.id }
+            val next = if (index >= 0) playable.getOrNull(index + 1) else null
             if (next != null) {
                 streamPlayer.resetBookmark(next.url)
                 if (selectSource(next.id)) setWeatherEnabled(true) else setWeatherEnabled(false)
