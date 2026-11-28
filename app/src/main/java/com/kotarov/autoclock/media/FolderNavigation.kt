@@ -17,7 +17,7 @@ internal object FolderNavigation {
         val prefix = if (resume) RESUME else PLAY
         if (!value.startsWith(prefix)) return null
         val folder = value.removePrefix(prefix)
-        return folder.takeIf { it.startsWith("folder:") && it.length > 7 }?.let { Request(it, resume) }
+        return folder.takeIf { (it.startsWith("folder:") && it.length > 7) || it.startsWith("nav:folder:") }?.let { Request(it, resume) }
     }
 
     fun target(ids: List<String>, remembered: String?): String? =
