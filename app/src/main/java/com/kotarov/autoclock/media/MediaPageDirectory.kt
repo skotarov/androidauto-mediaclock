@@ -131,9 +131,9 @@ internal object MediaPageDirectory {
         edit.apply()
     }
 
-    fun load(context: Context, page: StreamLibrary.Station, done: (Result<List<MediaPageParser.Item>>) -> Unit) {
+    fun load(context: Context, page: StreamLibrary.Station, allLinks: Boolean = false, done: (Result<List<MediaPageParser.Item>>) -> Unit) {
         val app = context.applicationContext
-        val key = page.id + "|" + page.url
+        val key = page.id + "|" + page.url + "|" + allLinks
         pending[key]?.let { it.add(done); return }
         pending[key] = mutableListOf(done)
         try {
@@ -141,9 +141,9 @@ internal object MediaPageDirectory {
                 val result = runCatching {
                     if (page.localFolder) LocalMediaFolder.list(app, page).also { runCatching { remember(app, page, it) } }
                     else {
-                        val fresh = runCatching { MediaPageParser.fetch(page.id, page.url) }.getOrNull()
+                        val fresh = runCatching { MediaPageParser.fetch(page.id, page.url, allLinks) }.getOrNull()
                         if (!fresh.isNullOrEmpty()) {
-                            runCatching { remember(app, page, fresh) }
+                            if (!allLinks) runCatching { remember(app, page, fresh) }
                             fresh
                         } else saved(app, page)
                     }
