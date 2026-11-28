@@ -435,7 +435,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                     CarLibraryTabs.browsable(station) -> BookNavigation.BOOK_PREFIX + station.id
                     else -> CarLibraryTabs.sourceTab(station.id)
                 }
-                tab(id, station.name, libraryIcon(station), station.downloadSourceUrl != null)
+                tab(id, station.name, libraryIcon(station), DownloadAvailability.available(contentResolver, station))
             }
             result.sendResult(items)
             return
@@ -449,7 +449,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                     .setMediaId(station?.id ?: CLOCK_ID)
                     .setTitle(station?.name ?: "Alert only")
                     .setIconBitmap(sourceIcon(station?.let { libraryIcon(it) } ?: R.drawable.ic_source_alert,
-                        downloaded = station?.downloadSourceUrl != null))
+                        downloaded = station?.let { DownloadAvailability.available(contentResolver, it) } == true))
                     .build()
                 items.add(MediaBrowserCompat.MediaItem(desc, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
             }
@@ -514,8 +514,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             val desc = MediaDescriptionCompat.Builder().setMediaId(if (bookFolder) BookNavigation.BOOK_PREFIX + station.id else station.id)
                 .setTitle(station.name).apply {
                     val kind = LibraryMediaKind.station(station)
-                    val downloaded = station.downloadSourceUrl != null
-                    setSubtitle(kind.label + if (downloaded) " · Downloaded" else "")
+                    val downloaded = DownloadAvailability.available(contentResolver, station)
+                    setSubtitle(kind.label + if (downloaded) " · Downloaded" else if (station.downloadSourceUrl != null) " · File unavailable" else "")
                     val icon = kind.icon
                     if (inlineIcons) setIconBitmap(sourceIcon(icon, downloaded = downloaded))
                     else setIconUri(browseIconUri(if (downloaded) downloadedLibraryIcon(icon) else icon))
@@ -598,7 +598,16 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     private fun selectSource(id: String?): Boolean {
         if (playMode && id == CLOCK_ID) return false
-        if (!StreamLibrary.select(prefs, id)) return false
+        val entry = StreamLibrary.list(prefs).firstOrNull { it.id == id }
+        val originalUrl = entry?.downloadSourceUrl
+        if (entry != null && originalUrl != null && !DownloadAvailability.available(contentResolver, entry)) {
+            notifyLibraryChanged()
+            // Car browsing cannot launch a download dialog. Use the existing
+            // online entry when available, without deleting the offline record.
+            val online = StreamLibrary.list(prefs).firstOrNull { !it.local && !it.browsable && it.url == originalUrl }
+                ?: return false
+            if (!StreamLibrary.select(prefs, online.id)) return false
+        } else if (!StreamLibrary.select(prefs, id)) return false
         activeSource = StreamLibrary.selected(prefs)
         return true
     }
