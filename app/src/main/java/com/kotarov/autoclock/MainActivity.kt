@@ -47,6 +47,7 @@ import com.kotarov.autoclock.media.CustomStreamPlayer
 import com.kotarov.autoclock.media.StreamLibrary
 import com.kotarov.autoclock.media.LibraryMediaKind
 import com.kotarov.autoclock.media.MediaDownload
+import com.kotarov.autoclock.media.DownloadLocation
 import com.kotarov.autoclock.media.PlaybackSpeed
 import com.kotarov.autoclock.media.RemotePlaybackBookmarks
 import com.kotarov.autoclock.media.StreamMetadata
@@ -100,6 +101,8 @@ class MainActivity : Activity() {
     private var fullClockDialog: android.app.Dialog? = null
     private var fullClockImage: ImageView? = null
     private var pendingDownload: MediaDownload.Spec? = null
+    private var pendingDownloadMode: String? = null
+    private lateinit var downloadLocationButton: Button
     private class DownloadJob {
         @Volatile var cancelled = false
         var worker: Thread? = null
@@ -233,6 +236,7 @@ class MainActivity : Activity() {
         libraryFilter = savedInstanceState?.getInt("libraryFilter", 0)?.coerceIn(0, 2) ?: 0
         libraryQuery = savedInstanceState?.getString("libraryQuery").orEmpty()
         savedInstanceState?.let { state ->
+            pendingDownloadMode = state.getString("downloadLocationMode")
             val url = state.getString("downloadUrl").orEmpty()
             val name = state.getString("downloadName").orEmpty()
             val mime = state.getString("downloadMime").orEmpty()
@@ -597,6 +601,14 @@ class MainActivity : Activity() {
         streams.addView(streamRows)
         renderStreams()
 
+        val storage = settingsGroup(root, "Downloads")
+        downloadLocationButton = Button(this).apply {
+            isAllCaps = false
+            setOnClickListener { chooseDownloadLocation() }
+        }
+        storage.addView(downloadLocationButton, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        syncDownloadLocation()
         // Weather attribution stays at the bottom of the phone settings.
         root.addView(View(this), LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
@@ -1263,6 +1275,7 @@ class MainActivity : Activity() {
         outState.putBoolean("playerExpanded", playerExpanded)
         outState.putInt("libraryFilter", libraryFilter)
         outState.putString("libraryQuery", libraryQuery)
+        outState.putString("downloadLocationMode", pendingDownloadMode)
         pendingDownload?.let {
             outState.putString("downloadUrl", it.url)
             outState.putString("downloadName", it.name)
@@ -1933,23 +1946,86 @@ class MainActivity : Activity() {
         if (!MediaDownload.offer(address)) return
         runUrlWork("Checking downloadable media…", { MediaDownload.inspect(address, name) }) { result ->
             result.fold(onSuccess = { spec ->
-                pendingDownload = spec
-                val picker = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                    type = spec.mime
-                    putExtra(Intent.EXTRA_TITLE, spec.name)
-                    putExtra(Intent.EXTRA_LOCAL_ONLY, true)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
-                        Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
-                }
-                runCatching { startActivityForResult(picker, DOWNLOAD_REQUEST) }.onFailure {
-                    pendingDownload = null
-                    showDownloadError("Save As is unavailable on this device.")
+                val mode = DownloadLocation.selected(settings())
+                val tree = DownloadLocation.tree(settings(), mode)
+                if (tree != null && DownloadLocation.hasAccess(contentResolver, tree, mode)) {
+                    createMediaDownload(spec, tree)
+                } else {
+                    pendingDownload = spec
+                    AlertDialog.Builder(this).setTitle("Download location")
+                        .setMessage("Allow access to Music on the selected storage once. Future downloads go to Music/Travel to Awaken automatically.")
+                        .setNegativeButton("Cancel") { _, _ -> pendingDownload = null }
+                        .setOnCancelListener { pendingDownload = null }
+                        .setPositiveButton("Allow") { _, _ -> openDownloadTree(mode) }.show()
                 }
             }, onFailure = {
                 showDownloadError("This link does not provide a downloadable audio or video file with a known size. Live radio and playlists remain streaming only.")
             })
         }
+    }
+
+    private fun syncDownloadLocation() {
+        if (!::downloadLocationButton.isInitialized) return
+        val mode = DownloadLocation.selected(settings())
+        val tree = DownloadLocation.tree(settings(), mode)
+        val ready = tree != null && DownloadLocation.hasAccess(contentResolver, tree, mode)
+        val name = if (mode == DownloadLocation.CARD) "SD card" else "Internal storage"
+        downloadLocationButton.text = "Download location: $name" +
+            if (ready) "\nMusic/Travel to Awaken" else "\nTap to authorize"
+    }
+
+    private fun chooseDownloadLocation() {
+        if (downloadJob != null || pendingDownload != null || pendingDownloadMode != null || webImport != null) return
+        val modes = arrayOf(DownloadLocation.INTERNAL, DownloadLocation.CARD)
+        val selected = modes.indexOf(DownloadLocation.selected(settings())).coerceAtLeast(0)
+        AlertDialog.Builder(this).setTitle("Download location")
+            .setSingleChoiceItems(arrayOf("Internal storage", "SD card"), selected) { dialog, index ->
+                dialog.dismiss()
+                val mode = modes[index]
+                val tree = DownloadLocation.tree(settings(), mode)
+                if (tree != null && DownloadLocation.hasAccess(contentResolver, tree, mode)) {
+                    DownloadLocation.remember(settings(), mode, tree)
+                    syncDownloadLocation()
+                } else openDownloadTree(mode)
+            }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun openDownloadTree(mode: String) {
+        val volume = if (android.os.Build.VERSION.SDK_INT >= 24) {
+            val storage = getSystemService(android.os.storage.StorageManager::class.java)
+            if (mode == DownloadLocation.CARD)
+                storage?.storageVolumes?.firstOrNull { it.isRemovable && !it.isPrimary && it.state == android.os.Environment.MEDIA_MOUNTED }
+            else storage?.primaryStorageVolume
+        } else null
+        if (mode == DownloadLocation.CARD && android.os.Build.VERSION.SDK_INT >= 24 && volume == null) {
+            pendingDownload = null
+            showDownloadError("No writable SD card found. Insert a card or select internal storage.")
+            return
+        }
+        val volumeId = if (mode == DownloadLocation.INTERNAL) "primary" else volume?.uuid
+        val picker = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+            putExtra(Intent.EXTRA_LOCAL_ONLY, true)
+            addFlags(DownloadLocation.MODES or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
+                Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
+            if (android.os.Build.VERSION.SDK_INT >= 26 && volumeId != null)
+                putExtra(android.provider.DocumentsContract.EXTRA_INITIAL_URI, DownloadLocation.initialUri(volumeId))
+        }
+        pendingDownloadMode = mode
+        runCatching { startActivityForResult(picker, DOWNLOAD_REQUEST) }.onFailure {
+            pendingDownloadMode = null
+            pendingDownload = null
+            showDownloadError("Folder authorization is unavailable.")
+        }
+    }
+
+    private fun createMediaDownload(spec: MediaDownload.Spec, tree: Uri) {
+        // The persisted tree grant covers all documents created below it;
+        // never request a separate file permission for each download.
+        runCatching { DownloadLocation.create(contentResolver, tree, spec) }
+            .onSuccess { uri -> saveMediaDownload(spec, uri) }
+            .onFailure {
+                showDownloadError("Cannot create the file in Music/Travel to Awaken. Check storage availability or authorize the location again.")
+            }
     }
 
     private fun showDownloadError(message: String) {
@@ -1968,18 +2044,6 @@ class MainActivity : Activity() {
     private fun saveMediaDownload(spec: MediaDownload.Spec, uri: Uri) {
         if (!CustomStreamPlayer.validLocal(uri.toString())) return
         val resolver = contentResolver
-        // Persist write access as well, so confirmed Delete can remove the
-        // specific document created by Download even after an app restart.
-        val granted = runCatching {
-            resolver.takePersistableUriPermission(uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-        }.isSuccess
-        if (!granted) {
-            val removed = removeIncompleteDownload(uri)
-            showDownloadError("Cannot retain access to this file." +
-                if (removed) "" else " Check the selected location for an empty file.")
-            return
-        }
         val job = DownloadJob()
         downloadJob = job
         val info = text("Preparing…", 14f, dp(8))
@@ -2093,15 +2157,25 @@ class MainActivity : Activity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == DOWNLOAD_REQUEST) {
             val spec = pendingDownload
+            val mode = pendingDownloadMode
             pendingDownload = null
-            if (resultCode == RESULT_OK) data?.data?.let { uri ->
-                if (spec != null) saveMediaDownload(spec, uri)
-                else {
-                    val removed = removeIncompleteDownload(uri)
-                    showDownloadError("Download request expired. Please start again." +
-                        if (removed) "" else " Check the selected location for an empty file.")
-                }
+            pendingDownloadMode = null
+            if (resultCode != RESULT_OK || mode == null) return
+            val tree = data?.data ?: return
+            if (!DownloadLocation.validTree(tree, mode)) {
+                showDownloadError("Select the Music folder on the chosen storage, or Music/Travel to Awaken.")
+                return
             }
+            val granted = runCatching {
+                contentResolver.takePersistableUriPermission(tree, DownloadLocation.MODES)
+            }.isSuccess
+            if (!granted || !DownloadLocation.hasAccess(contentResolver, tree, mode)) {
+                showDownloadError("Persistent folder access was not granted.")
+                return
+            }
+            DownloadLocation.remember(settings(), mode, tree)
+            syncDownloadLocation()
+            if (spec != null) createMediaDownload(spec, tree)
             return
         }
         if (resultCode != RESULT_OK) return
