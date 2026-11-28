@@ -1820,15 +1820,17 @@ class MainActivity : Activity() {
         dialog.show()
     }
 
-    private fun openMediaPage(page: StreamLibrary.Station, back: (() -> Unit)? = null) {
+    private fun openMediaPage(page: StreamLibrary.Station, allLinks: Boolean = false, back: (() -> Unit)? = null) {
         var cancelled = false
         val progress = AlertDialog.Builder(this).setTitle(page.name).setMessage("Finding media…")
             .setNegativeButton(if (back == null) "Cancel" else "Back") { _, _ -> cancelled = true; back?.invoke() }
             .setOnCancelListener { cancelled = true; back?.invoke() }.create()
         progress.show()
-        MediaPageDirectory.load(this, page) { result ->
+        MediaPageDirectory.load(this, page, allLinks) { result ->
             if (!cancelled && !isDestroyed && !isFinishing) {
                 progress.dismiss()
+                checkedDownloadSources = null
+                renderStreams()
                 val items = result.getOrNull().orEmpty()
                 if (items.isEmpty()) AlertDialog.Builder(this).setTitle(page.name)
                     .setMessage(if (page.localFolder) "No files found, or folder unavailable." else "No direct playable media found, or page unavailable.")
@@ -1880,12 +1882,12 @@ class MainActivity : Activity() {
                                                     if (child != null) {
                                                         menu.add("Open").setOnMenuItemClickListener {
                                                             levelDialog?.dismiss()
-                                                            openMediaPage(child) { openMediaPage(page, back) }; true
+                                                            openMediaPage(child) { openMediaPage(page, allLinks, back) }; true
                                                         }
                                                         if (child.mediaPage) {
                                                             menu.add("Refresh").setOnMenuItemClickListener {
                                                                 levelDialog?.dismiss()
-                                                            openMediaPage(child) { openMediaPage(page, back) }; true
+                                                            openMediaPage(child) { openMediaPage(page, allLinks, back) }; true
                                                             }
                                                             menu.add("Remove cache").setOnMenuItemClickListener {
                                                                 removePageCache(child); true
@@ -1924,7 +1926,7 @@ class MainActivity : Activity() {
                             val item = items[index - choices.size]
                             if (item.browsable) {
                                 ContentNavigation.child(settings(), page, item)?.let { child ->
-                                    openMediaPage(child) { openMediaPage(page, back) }
+                                    openMediaPage(child) { openMediaPage(page, allLinks, back) }
                                 }
                                 return@setAdapter
                             }
@@ -1937,6 +1939,9 @@ class MainActivity : Activity() {
                     }.setNegativeButton(if (back == null) "Cancel" else "Back") { _, _ -> back?.invoke() }
                     if (page.mediaPage && items.any { !it.browsable && MediaDownload.offer(it.url) })
                         builder.setPositiveButton("Download all", null)
+                    if (page.mediaPage) builder.setNeutralButton(if (allLinks) "Filter links" else "Show all links") { _, _ ->
+                        openMediaPage(page, !allLinks, back)
+                    }
                     val dialog = builder.create()
                     levelDialog = dialog
                     courseRefresh = {
@@ -2340,6 +2345,10 @@ class MainActivity : Activity() {
         val prefs = settings()
         val entries = StreamLibrary.list(prefs)
         val article = WebTextProvider.owns(uri.toString())
+        if (spec.owner != null && entries.none { it.id == ContentNavigation.rootId(spec.owner) }) {
+            if (article) WebTextProvider.delete(this, uri.toString()) else removeIncompleteDownload(uri)
+            return
+        }
         val actualName = if (article) spec.name else runCatching {
             contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
                 null, null, null)?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
