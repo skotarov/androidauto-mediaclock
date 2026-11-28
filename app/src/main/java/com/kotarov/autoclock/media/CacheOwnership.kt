@@ -30,7 +30,7 @@ internal object CacheOwnership {
     }
 
     fun roots(context: Context, s: StreamLibrary.Station, entries: List<StreamLibrary.Station>): Set<String> {
-        val existing = entries.filter { it.browsable }.map { it.id }.toSet()
+        val existing = entries.map { it.id }.toSet()
         return (s.cacheOwners + (original(s)?.let { MediaPageDirectory.linkedRoots(context, it) } ?: emptySet()))
             .intersect(existing)
     }
