@@ -37,4 +37,17 @@ class MediaPageParserTest {
         val items = MediaPageParser.parse("p","https://example.org/", """<a href="https://u:p@example.org/a.mp3">bad</a><a href="javascript:alert(1)">bad</a><a href="/article">article</a>""")
         assertTrue(items.isEmpty())
     }
+    @Test fun mixedCourseIncludesReadableAttachmentsNotNavigation() {
+        val items = MediaPageParser.parse("course", "https://example.org/course/", """
+            <a href="lesson.mp3">Lesson</a><a href="notes.pdf">Notes</a>
+            <a href="book.epub">Book</a><a href="exercise.docx">Exercise</a>
+            <a href="readme.txt">Text</a><a href="home.html">Home</a>
+            <a href="download.html" download>Document</a>
+            <a href="/fetch/42" type="application/pdf">PDF attachment</a>
+        """.trimIndent())
+        assertEquals(7, items.size)
+        assertFalse(items.first().textFile)
+        assertTrue(items.drop(1).all { it.textFile })
+        assertFalse(items.any { it.name == "Home" })
+    }
 }
