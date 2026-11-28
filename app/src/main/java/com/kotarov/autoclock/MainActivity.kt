@@ -1498,7 +1498,7 @@ class MainActivity : Activity() {
                 orientation = LinearLayout.VERTICAL
                 addView(title)
                 addView(text(LibraryMediaKind.station(station).label +
-                    (if (downloaded) " · Downloaded" else if (station.downloadSourceUrl != null) " · File unavailable" else "") +
+                    (if (downloaded) " · Downloaded" else if (station.local && (station.downloadSourceUrl != null || station.articleUrl != null)) " · File unavailable" else "") +
                     (if (station.pinned) " · Car tab" else ""), 11f, 0).apply {
                     setTextColor(Color.rgb(185, 190, 199))
                     maxLines = 1
@@ -1523,9 +1523,24 @@ class MainActivity : Activity() {
                                 true
                             }
                         }
-                        if (!station.local && !station.browsable && MediaDownload.offer(station.url))
-                            menu.add("Download").setOnMenuItemClickListener { requestMediaDownload(station.url, station.name); true }
-                        if (station.textFile && WebTextProvider.owns(station.url)) {
+                        if (!station.local && !station.browsable && MediaDownload.offer(station.url) && station.articleUrl == null)
+                            menu.add("Download").setOnMenuItemClickListener { requestMediaDownload(station.url, station.name, owner = station.id); true }
+                        if (station.mediaPage) {
+                            menu.add("Refresh").setOnMenuItemClickListener { openMediaPage(station); true }
+                            menu.add("Remove cache").setOnMenuItemClickListener { removePageCache(station); true }
+                        }
+                        if (CacheOwnership.ownsCopy(station) && CacheOwnership.original(station) != null) {
+                            menu.add("Remove cache").setOnMenuItemClickListener { confirmRemoveCache(station); true }
+                            if (!WebTextProvider.owns(station.url)) menu.add("Refresh").setOnMenuItemClickListener {
+                                requestMediaDownload(requireNotNull(CacheOwnership.original(station)), station.name, station.id, refresh = true); true
+                            }
+                        } else if (station.textFile && station.local && !station.browsable) {
+                            menu.add("Remove cache").setOnMenuItemClickListener {
+                                BookDiskCache.removeSource(this@MainActivity, station.url); true
+                            }
+                        }
+                        if (station.textFile && (WebTextProvider.owns(station.url) || station.articleUrl != null)) {
+                            if (!station.local) menu.add("Download").setOnMenuItemClickListener { refreshArticle(station); true }
                             menu.add("Refresh").setOnMenuItemClickListener { refreshArticle(station); true }
                             if (station.articleUrl != null) menu.add("Open original").setOnMenuItemClickListener {
                                 runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(station.articleUrl))) }
@@ -1552,7 +1567,7 @@ class MainActivity : Activity() {
     private fun deleteLibrarySource(station: StreamLibrary.Station) {
         AlertDialog.Builder(this).setTitle(station.name)
             .setMessage(if (station.downloadSourceUrl != null) "Delete the downloaded file from storage and remove it from the library? The original online link is kept."
-                else if (station.browsable) "Remove folder from list?" else if (station.local) "Remove file from list?" else "Delete stream?")
+                else if (station.browsable) "Remove this source and its application-created offline copies? Original user files are not deleted." else if (station.local) "Remove file from list?" else "Delete stream and its offline copies?")
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Delete") { _, _ ->
                 val prefs = settings()
@@ -1560,13 +1575,14 @@ class MainActivity : Activity() {
                 val entry = current.firstOrNull { it.id == station.id && it.url == station.url }
                     ?: return@setPositiveButton
                 val remaining = current.filterNot { it.id == entry.id }
+                if (!CacheOwnership.ownsCopy(entry) && !entry.local || entry.browsable) {
+                    if (!clearOwnedCache(entry, deleting = true)) return@setPositiveButton
+                    removeLibraryEntry(entry, StreamLibrary.list(prefs).filterNot { it.id == entry.id })
+                    return@setPositiveButton
+                }
                 val lastReference = remaining.none { it.url == entry.url }
                 if (entry.downloadSourceUrl != null && lastReference) {
-                    val uri = Uri.parse(entry.url)
-                    // Only delete documents created by our explicit Download action.
-                    val deleted = runCatching {
-                        android.provider.DocumentsContract.deleteDocument(contentResolver, uri)
-                    }.getOrDefault(false)
+                    val deleted = CacheOwnership.removeCopy(this, entry)
                     if (!deleted) {
                         showDownloadedFileDeleteError(entry)
                         return@setPositiveButton
@@ -1603,6 +1619,7 @@ class MainActivity : Activity() {
         RemotePlaybackBookmarks(this).removeRoot(station.id)
         if (station.mediaPage) MediaPageDirectory.forget(this, station.id)
         if (station.local && remaining.none { it.url == station.url }) {
+            if (!station.browsable) BookDiskCache.removeSource(this, station.url)
             if (WebTextProvider.owns(station.url)) WebTextProvider.delete(this, station.url)
             else {
                 val uri = Uri.parse(station.url)
@@ -1611,6 +1628,91 @@ class MainActivity : Activity() {
             }
         }
         renderStreams()
+    }
+
+    private fun cacheArticle(address: String, name: String, owner: String) {
+        if (webImport != null || downloadJob != null) return
+        val existing = DownloadAvailability.find(contentResolver, StreamLibrary.list(settings()), address)
+        runUrlWork("Extracting article text…", { WebReader.fetch(address) }) { result ->
+            result.fold(onSuccess = { page ->
+                runCatching {
+                    val uri = Uri.parse(WebTextProvider.save(this, page.text))
+                    val spec = MediaDownload.Spec(address, name.ifBlank { page.title }, "text/plain",
+                        page.text.toByteArray(Charsets.UTF_8).size.toLong(), existing?.id, owner, existing != null)
+                    registerMediaDownload(spec, uri)
+                    renderStreams()
+                }.onFailure { showArticleRefreshError() }
+            }, onFailure = { showArticleRefreshError() })
+        }
+    }
+
+    private fun confirmRemoveCache(station: StreamLibrary.Station) {
+        val original = CacheOwnership.original(station) ?: return
+        AlertDialog.Builder(this).setTitle("Remove cache")
+            .setMessage("Remove the offline copy from storage? Online links will be kept.")
+            .setNegativeButton("Cancel", null).setPositiveButton("Remove") { _, _ ->
+                val prefs = settings()
+                val entries = StreamLibrary.list(prefs)
+                val entry = entries.firstOrNull { it.id == station.id && it.url == station.url } ?: return@setPositiveButton
+                if (entries.any { it.id != entry.id && it.url == entry.url }) {
+                    showDownloadError("This file is shared by another local entry. Remove that reference first.")
+                    return@setPositiveButton
+                }
+                if (!CacheOwnership.removeCopy(this, entry)) {
+                    showDownloadError("Could not remove the copy. Check storage access.")
+                    return@setPositiveButton
+                }
+                val hasOnline = entries.any { it.id != entry.id && !it.local && it.url == original }
+                if (entry.independent && !hasOnline) {
+                    val online = entry.copy(url = original, local = false, downloadSourceUrl = null,
+                        articleUrl = original.takeIf { WebTextProvider.owns(entry.url) }, cacheOwners = emptySet())
+                    StreamLibrary.save(prefs, entries.map { if (it.id == entry.id) online else it })
+                } else removeLibraryEntry(entry, entries.filterNot { it.id == entry.id })
+                checkedDownloadSources = null
+                renderStreams()
+            }.show()
+    }
+
+    private fun removePageCache(page: StreamLibrary.Station) {
+        AlertDialog.Builder(this).setTitle("Remove cache")
+            .setMessage("Remove saved content belonging to this source? Shared and independent copies are kept.")
+            .setNegativeButton("Cancel", null).setPositiveButton("Remove") { _, _ ->
+                clearOwnedCache(page, deleting = false)
+                checkedDownloadSources = null
+                renderStreams()
+            }.show()
+    }
+
+    private fun clearOwnedCache(page: StreamLibrary.Station, deleting: Boolean): Boolean {
+        val prefs = settings()
+        val entries = StreamLibrary.list(prefs)
+        val root = ContentNavigation.rootId(page.id)
+        val isRoot = root == page.id
+        val remove = mutableSetOf<String>()
+        val updates = mutableMapOf<String, StreamLibrary.Station>()
+        var failures = 0
+        for (entry in entries) {
+            if (!CacheOwnership.ownsCopy(entry) || entry.id == page.id) continue
+            val roots = CacheOwnership.roots(this, entry, entries)
+            if (!isRoot || root !in roots) continue
+            val other = roots - root
+            if (entry.independent || other.isNotEmpty() || entries.any { it.id != entry.id && it.url == entry.url }) {
+                updates[entry.id] = entry.copy(cacheOwners = entry.cacheOwners - root + other)
+                continue
+            }
+            if (CacheOwnership.removeCopy(this, entry)) remove.add(entry.id) else failures++
+        }
+        StreamLibrary.save(prefs, entries.filterNot { it.id in remove }.map { updates[it.id] ?: it })
+        remove.forEach { RemotePlaybackBookmarks(this).removeRoot(it) }
+        if (remove.isNotEmpty()) prefs.edit().putStringSet("phone_library_favorites", favoriteSources() - remove)
+            .putString("phone_library_recent", recentSources().filterNot { it in remove }.joinToString("\n")).apply()
+        if (failures == 0) {
+            MediaPageDirectory.forget(this, page.id)
+            if (deleting) RemotePlaybackBookmarks(this).removeRoot(page.id)
+        } else showDownloadError("$failures saved files could not be removed. The source is kept so you can retry.")
+        checkedDownloadSources = null
+        renderStreams()
+        return failures == 0
     }
 
     private fun highlightSelectedSource() {
@@ -1986,7 +2088,7 @@ class MainActivity : Activity() {
                     ?: return@fold
                 runCatching {
                     val uri = WebTextProvider.save(this, page.text)
-                    val updated = old.copy(url = uri, articleUrl = address)
+                    val updated = old.copy(url = uri, articleUrl = address, local = true, textFile = true)
                     try {
                         // A new URI prevents an existing TTS reader from reusing
                         // stale text and offsets. Preserve source-specific speed.
@@ -2135,8 +2237,16 @@ class MainActivity : Activity() {
                 }
                 var destination: Uri? = null
                 val result = runCatching {
+                    val existing = snapshot.firstOrNull { CacheOwnership.original(it) == item.url }
+                    if (item.format == "ARTICLE") {
+                        val article = WebReader.fetch(item.url)
+                        require(!job.cancelled)
+                        val uri = Uri.parse(WebTextProvider.save(this, article.text))
+                        MediaDownload.Spec(item.url, item.name, "text/plain",
+                            article.text.toByteArray(Charsets.UTF_8).size.toLong(), existing?.id, page.id) to uri
+                    } else {
                     val spec = MediaDownload.inspect(item.url, item.name)
-                        .copy(replaceId = snapshot.firstOrNull { it.downloadSourceUrl == item.url }?.id, owner = page.id)
+                        .copy(replaceId = existing?.id, owner = page.id)
                     require(!job.cancelled)
                     val uri = DownloadLocation.create(resolver, tree, spec)
                     destination = uri
@@ -2149,6 +2259,7 @@ class MainActivity : Activity() {
                         }
                     }
                     spec to uri
+                    }
                 }
                 if (result.isSuccess) {
                     val (spec, uri) = result.getOrThrow()
@@ -2193,24 +2304,27 @@ class MainActivity : Activity() {
     private fun registerMediaDownload(spec: MediaDownload.Spec, uri: Uri) {
         val prefs = settings()
         val entries = StreamLibrary.list(prefs)
-        val actualName = runCatching {
+        val article = WebTextProvider.owns(uri.toString())
+        val actualName = if (article) spec.name else runCatching {
             contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
                 null, null, null)?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
         }.getOrNull()?.ifBlank { spec.name } ?: spec.name
-        val replace = entries.firstOrNull { it.id == spec.replaceId && it.downloadSourceUrl == spec.url &&
+        val replace = entries.firstOrNull { it.id == spec.replaceId && CacheOwnership.original(it) == spec.url &&
             (spec.refresh || !DownloadAvailability.available(contentResolver, it)) }
         val owners = setOfNotNull(spec.owner?.let(ContentNavigation::rootId))
         if (replace != null && spec.refresh && DownloadAvailability.available(contentResolver, replace)) {
             if (!CacheOwnership.removeCopy(this, replace)) {
-                removeIncompleteDownload(uri)
+                if (article) WebTextProvider.delete(this, uri.toString()) else removeIncompleteDownload(uri)
                 showDownloadError("Refresh failed: the old copy could not be removed.")
                 return
             }
         }
-        val station = if (replace != null) replace.copy(url = uri.toString(), textFile = spec.textFile,
-            cacheOwners = replace.cacheOwners + owners)
+        val station = if (replace != null) replace.copy(url = uri.toString(), textFile = spec.textFile, local = true,
+            cacheOwners = replace.cacheOwners + owners, articleUrl = spec.url.takeIf { article },
+            downloadSourceUrl = spec.url.takeUnless { article })
             else StreamLibrary.newFile(uri.toString(), actualName, textFile = spec.textFile).copy(
-                downloadSourceUrl = spec.url, cacheOwners = owners, independent = spec.owner == null)
+                articleUrl = spec.url.takeIf { article }, downloadSourceUrl = spec.url.takeUnless { article },
+                cacheOwners = owners, independent = spec.owner == null)
         val original = replace ?: entries.firstOrNull { !it.local && it.url == spec.url }
         if (original != null) PlaybackSpeed.write(prefs, station, PlaybackSpeed.read(prefs, original))
         StreamLibrary.save(prefs, if (replace == null) entries + station else entries.map { if (it.id == replace.id) station else it })
