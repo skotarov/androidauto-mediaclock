@@ -71,7 +71,8 @@ object StreamLibrary {
         val url = o.getString("url")
         if (!(if (folder.localFolder) CustomStreamPlayer.validLocal(url) else CustomStreamPlayer.valid(url))) return@runCatching null
         val name = o.getString("name")
-        val textFile = folder.localFolder && (o.optBoolean("textFile", false) || BookFormat.detect(name, null) != null)
+        val textFile = o.optBoolean("textFile", false) ||
+            (folder.localFolder && BookFormat.detect(name, null) != null)
         folder.id to Station(id, name, url, local = folder.localFolder, textFile = textFile, language = "auto")
     }.getOrNull()
     fun selectedFolder(prefs: SharedPreferences): Station? = selectedChild(prefs)?.first?.let { id ->
