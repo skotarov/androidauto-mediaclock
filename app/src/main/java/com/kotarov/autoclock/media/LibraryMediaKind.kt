@@ -28,7 +28,8 @@ internal enum class LibraryMediaKind(val label: String, val icon: Int) {
         }
 
         fun item(i: MediaPageParser.Item, local: Boolean): LibraryMediaKind =
-            classify(i.name, i.url, i.format, i.textFile, local)
+            if (i.browsable) (if (local) FOLDER else WEB) else if (i.format == "ARTICLE") ARTICLE
+            else classify(i.name, i.url, i.format, i.textFile, local)
 
         private fun classify(name: String, url: String, format: String, text: Boolean, local: Boolean): LibraryMediaKind {
             val ext = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
