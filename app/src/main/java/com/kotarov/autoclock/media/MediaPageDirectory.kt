@@ -3,6 +3,8 @@ package com.kotarov.autoclock.media
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import org.json.JSONArray
+import org.json.JSONObject
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
@@ -25,6 +27,33 @@ internal object MediaPageDirectory {
     fun folderSnapshot(page: StreamLibrary.Station): List<MediaPageParser.Item>? =
         if (page.localFolder) cache[page.id]?.takeIf { it.parent.url == page.url }?.items else null
 
+    private fun saved(context: Context, page: StreamLibrary.Station): List<MediaPageParser.Item> = runCatching {
+        val prefs = context.getSharedPreferences("offline_page_index_v163", Context.MODE_PRIVATE)
+        val root = JSONObject(prefs.getString(page.id, "{}").orEmpty())
+        if (root.optString("url") != page.url) return@runCatching emptyList()
+        val a = root.getJSONArray("items")
+        val downloads = DownloadAvailability.byUrl(context.contentResolver,
+            StreamLibrary.list(context.getSharedPreferences(AutoClockMediaService.PREFERENCES, Context.MODE_PRIVATE)))
+        (0 until a.length()).mapNotNull { i ->
+            val o = a.getJSONObject(i)
+            val url = o.getString("url")
+            if (url !in downloads) null else MediaPageParser.Item(o.getString("id"), o.getString("name"), url, o.getString("format"))
+        }
+    }.getOrDefault(emptyList())
+
+    private fun remember(context: Context, page: StreamLibrary.Station, items: List<MediaPageParser.Item>) {
+        val a = JSONArray()
+        items.filter { MediaDownload.offer(it.url) && !it.textFile }.take(1000).forEach {
+            a.put(JSONObject().put("id", it.id).put("name", it.name).put("url", it.url).put("format", it.format))
+        }
+        context.getSharedPreferences("offline_page_index_v163", Context.MODE_PRIVATE).edit()
+            .putString(page.id, JSONObject().put("url", page.url).put("items", a).toString()).apply()
+    }
+
+    fun forget(context: Context, id: String) {
+        context.getSharedPreferences("offline_page_index_v163", Context.MODE_PRIVATE).edit().remove(id).apply()
+    }
+
     fun load(context: Context, page: StreamLibrary.Station, done: (Result<List<MediaPageParser.Item>>) -> Unit) {
         val app = context.applicationContext
         val key = page.id + "|" + page.url
@@ -32,7 +61,16 @@ internal object MediaPageDirectory {
         pending[key] = mutableListOf(done)
         try {
             worker.execute {
-                val result = runCatching { if (page.localFolder) LocalMediaFolder.list(app, page) else MediaPageParser.fetch(page.id, page.url) }
+                val result = runCatching {
+                    if (page.localFolder) LocalMediaFolder.list(app, page)
+                    else {
+                        val fresh = runCatching { MediaPageParser.fetch(page.id, page.url) }.getOrNull()
+                        if (!fresh.isNullOrEmpty()) {
+                            runCatching { remember(app, page, fresh) }
+                            fresh
+                        } else saved(app, page)
+                    }
+                }
                 handler.post {
                     result.getOrNull()?.let { items ->
                         cache.remove(page.id)
