@@ -421,9 +421,9 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         val tabLimit = CarLibraryTabs.rootLimit(parentId)
         if (!playMode && tabLimit != null) {
             val items = mutableListOf<MediaBrowserCompat.MediaItem>()
-            fun tab(id: String, title: String, icon: Int) {
+            fun tab(id: String, title: String, icon: Int, downloaded: Boolean = false) {
                 val desc = MediaDescriptionCompat.Builder().setMediaId(id).setTitle(title)
-                    .setIconBitmap(sourceIcon(icon, 64, white = icon != R.drawable.ic_source_alert)).build()
+                    .setIconBitmap(sourceIcon(icon, 64, white = icon != R.drawable.ic_source_alert, downloaded = downloaded)).build()
                 items.add(MediaBrowserCompat.MediaItem(desc, MediaBrowserCompat.MediaItem.FLAG_BROWSABLE))
             }
             tab(CarLibraryTabs.LIBRARY_ID, "Library", R.drawable.ic_source_folder)
@@ -435,7 +435,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                     CarLibraryTabs.browsable(station) -> BookNavigation.BOOK_PREFIX + station.id
                     else -> CarLibraryTabs.sourceTab(station.id)
                 }
-                tab(id, station.name, libraryIcon(station))
+                tab(id, station.name, libraryIcon(station), station.downloadSourceUrl != null)
             }
             result.sendResult(items)
             return
@@ -448,7 +448,8 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 val desc = MediaDescriptionCompat.Builder()
                     .setMediaId(station?.id ?: CLOCK_ID)
                     .setTitle(station?.name ?: "Alert only")
-                    .setIconBitmap(sourceIcon(station?.let { libraryIcon(it) } ?: R.drawable.ic_source_alert))
+                    .setIconBitmap(sourceIcon(station?.let { libraryIcon(it) } ?: R.drawable.ic_source_alert,
+                        downloaded = station?.downloadSourceUrl != null))
                     .build()
                 items.add(MediaBrowserCompat.MediaItem(desc, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
             }
@@ -513,9 +514,11 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
             val desc = MediaDescriptionCompat.Builder().setMediaId(if (bookFolder) BookNavigation.BOOK_PREFIX + station.id else station.id)
                 .setTitle(station.name).apply {
                     val kind = LibraryMediaKind.station(station)
-                    setSubtitle(kind.label)
+                    val downloaded = station.downloadSourceUrl != null
+                    setSubtitle(kind.label + if (downloaded) " · Downloaded" else "")
                     val icon = kind.icon
-                    if (inlineIcons) setIconBitmap(sourceIcon(icon)) else setIconUri(browseIconUri(icon))
+                    if (inlineIcons) setIconBitmap(sourceIcon(icon, downloaded = downloaded))
+                    else setIconUri(browseIconUri(if (downloaded) downloadedLibraryIcon(icon) else icon))
                 }.build()
             items.add(MediaBrowserCompat.MediaItem(desc, if (station.browsable || bookFolder) MediaBrowserCompat.MediaItem.FLAG_BROWSABLE else MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
         }
@@ -543,6 +546,15 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private fun libraryIcon(station: StreamLibrary.Station): Int =
         LibraryMediaKind.station(station).icon
 
+    // Large lists use resource URIs rather than embedding a bitmap in each
+    // item; retain the badge without increasing Binder transaction size.
+    private fun downloadedLibraryIcon(icon: Int): Int = when (icon) {
+        R.drawable.ic_media_audio -> R.drawable.ic_downloaded_audio
+        R.drawable.ic_media_book -> R.drawable.ic_downloaded_book
+        R.drawable.ic_media_video -> R.drawable.ic_downloaded_video
+        else -> R.drawable.ic_downloaded_file
+    }
+
     private fun notifyLibraryChanged() {
         notifyChildrenChanged(ROOT_ID)
         if (!playMode) {
@@ -554,13 +566,21 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private fun browseIconUri(resource: Int): android.net.Uri =
         android.net.Uri.parse("android.resource://$packageName/$resource")
 
-    private fun sourceIcon(resource: Int, size: Int = 64, white: Boolean = false): Bitmap {
+    private fun sourceIcon(resource: Int, size: Int = 64, white: Boolean = false,
+                           downloaded: Boolean = false): Bitmap {
         val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bitmap)
         val drawable = getDrawable(resource)?.mutate()
         if (white) drawable?.setTint(android.graphics.Color.WHITE)
         val padding = size / 16
         drawable?.setBounds(padding, padding, size - padding, size - padding)
-        drawable?.draw(android.graphics.Canvas(bitmap))
+        drawable?.draw(canvas)
+        if (downloaded) {
+            val badge = getDrawable(R.drawable.ic_download_badge)?.mutate()
+            val corner = size * 9 / 16
+            badge?.setBounds(corner, corner, size, size)
+            badge?.draw(canvas)
+        }
         return bitmap
     }
 
