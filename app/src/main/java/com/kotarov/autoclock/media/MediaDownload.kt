@@ -91,9 +91,18 @@ internal object MediaDownload {
             c.getHeaderField("icy-name") != null || c.getHeaderField("icy-metaint") != null ||
                 c.getHeaderField("icy-br") != null)
 
-    // Read headers only before opening the Android Save As picker.
+    // Prefer the actual filename from the direct link; use the library title
+    // for extensionless streaming endpoints that resolve to finite media.
+    private fun originalName(url: String, fallback: String): String {
+        val candidate = runCatching { URI(url).path.orEmpty().substringAfterLast('/') }.getOrDefault("")
+        return candidate.takeIf { extension(it) in mimeByExtension } ?: fallback
+    }
+
+    // Read headers only before creating the destination document.
     fun inspect(address: String, name: String): Spec =
-        connect(address) { c, url -> describeResponse(c, url, name).copy(url = address) }
+        connect(address) { c, url ->
+            describeResponse(c, url, originalName(url, originalName(address, name))).copy(url = address)
+        }
 
     fun save(resolver: ContentResolver, destination: Uri, spec: Spec,
              cancelled: () -> Boolean, progress: (Long, Long) -> Unit) {
