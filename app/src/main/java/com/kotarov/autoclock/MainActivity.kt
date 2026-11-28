@@ -1436,11 +1436,23 @@ class MainActivity : Activity() {
                     true
                 }
             }, LinearLayout.LayoutParams(dp(24), dp(44)))
-            row.addView(ImageView(this).apply {
-                setImageResource(LibraryMediaKind.station(station).icon)
-                contentDescription = station.name
-                if (station.browsable || station.textFile) setOnClickListener { if (station.browsable) openMediaPage(station) else openBook(station) }
-            }, LinearLayout.LayoutParams(dp(32), dp(32)).apply { marginEnd = dp(8) })
+            val downloaded = station.downloadSourceUrl != null
+            val mediaIcon = FrameLayout(this).apply {
+                addView(ImageView(this@MainActivity).apply {
+                    setImageResource(LibraryMediaKind.station(station).icon)
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                }, FrameLayout.LayoutParams(dp(32), dp(32), android.view.Gravity.CENTER))
+                if (downloaded) addView(ImageView(this@MainActivity).apply {
+                    setImageResource(R.drawable.ic_download_badge)
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                }, FrameLayout.LayoutParams(dp(17), dp(17),
+                    android.view.Gravity.BOTTOM or android.view.Gravity.END))
+                contentDescription = station.name + if (downloaded) ", Downloaded" else ""
+                if (station.browsable || station.textFile) setOnClickListener {
+                    if (station.browsable) openMediaPage(station) else openBook(station)
+                }
+            }
+            row.addView(mediaIcon, LinearLayout.LayoutParams(dp(36), dp(36)).apply { marginEnd = dp(8) })
             val title = text(station.name, 15f, 0).apply {
                 maxLines = 2
                 ellipsize = TextUtils.TruncateAt.END
@@ -1498,22 +1510,65 @@ class MainActivity : Activity() {
 
     private fun deleteLibrarySource(station: StreamLibrary.Station) {
         AlertDialog.Builder(this).setTitle(station.name)
-            .setMessage(if (station.downloadSourceUrl != null) "Remove from library? The downloaded file will stay in your chosen folder."
+            .setMessage(if (station.downloadSourceUrl != null) "Delete the downloaded file from storage and remove it from the library? The original online link is kept."
                 else if (station.browsable) "Remove folder from list?" else if (station.local) "Remove file from list?" else "Delete stream?")
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Delete") { _, _ ->
                 val prefs = settings()
-                val remaining = StreamLibrary.list(prefs).filterNot { it.id == station.id }
-                StreamLibrary.save(prefs, remaining)
-                prefs.edit().putStringSet("phone_library_favorites", favoriteSources() - station.id)
-                    .putString("phone_library_recent", recentSources().filterNot { it == station.id }.joinToString("\n")).apply()
-                RemotePlaybackBookmarks(this).removeRoot(station.id)
-                if (station.local && remaining.none { it.url == station.url }) {
-                    if (WebTextProvider.owns(station.url)) WebTextProvider.delete(this, station.url)
-                    else runCatching { contentResolver.releasePersistableUriPermission(Uri.parse(station.url), Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                val current = StreamLibrary.list(prefs)
+                val entry = current.firstOrNull { it.id == station.id && it.url == station.url }
+                    ?: return@setPositiveButton
+                val remaining = current.filterNot { it.id == entry.id }
+                val lastReference = remaining.none { it.url == entry.url }
+                if (entry.downloadSourceUrl != null && lastReference) {
+                    val uri = Uri.parse(entry.url)
+                    // Only delete documents created by our explicit Download action.
+                    val deleted = runCatching {
+                        android.provider.DocumentsContract.deleteDocument(contentResolver, uri)
+                    }.getOrDefault(false)
+                    if (!deleted) {
+                        showDownloadedFileDeleteError(entry)
+                        return@setPositiveButton
+                    }
                 }
-                renderStreams()
+                if (entry.downloadSourceUrl != null && !lastReference) {
+                    // Preserve download ownership on another reference to this exact URI.
+                    val index = remaining.indexOfFirst { it.url == entry.url && it.local && !it.browsable }
+                    val updated = if (index >= 0 && remaining[index].downloadSourceUrl == null)
+                        remaining.mapIndexed { i, other -> if (i == index) other.copy(downloadSourceUrl = entry.downloadSourceUrl) else other }
+                    else remaining
+                    removeLibraryEntry(entry, updated)
+                } else removeLibraryEntry(entry, remaining)
             }.show()
+    }
+
+    private fun showDownloadedFileDeleteError(station: StreamLibrary.Station) {
+        AlertDialog.Builder(this).setTitle("File not deleted")
+            .setMessage("Android did not allow deleting this downloaded file. It may have been saved by an older version with read-only access, removed already, or the storage may be unavailable. Delete it with your file manager, then remove the library entry if needed.")
+            .setNegativeButton("Keep entry", null)
+            .setPositiveButton("Remove entry only") { _, _ ->
+                val entries = StreamLibrary.list(settings())
+                val current = entries.firstOrNull { it.id == station.id && it.url == station.url }
+                    ?: return@setPositiveButton
+                removeLibraryEntry(current, entries.filterNot { it.id == current.id })
+            }.show()
+    }
+
+    private fun removeLibraryEntry(station: StreamLibrary.Station, remaining: List<StreamLibrary.Station>) {
+        val prefs = settings()
+        StreamLibrary.save(prefs, remaining)
+        prefs.edit().putStringSet("phone_library_favorites", favoriteSources() - station.id)
+            .putString("phone_library_recent", recentSources().filterNot { it == station.id }.joinToString("\n")).apply()
+        RemotePlaybackBookmarks(this).removeRoot(station.id)
+        if (station.local && remaining.none { it.url == station.url }) {
+            if (WebTextProvider.owns(station.url)) WebTextProvider.delete(this, station.url)
+            else {
+                val uri = Uri.parse(station.url)
+                val modes = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                runCatching { contentResolver.releasePersistableUriPermission(uri, modes) }
+            }
+        }
+        renderStreams()
     }
 
     private fun highlightSelectedSource() {
@@ -1905,16 +1960,19 @@ class MainActivity : Activity() {
 
     private fun removeIncompleteDownload(uri: Uri): Boolean {
         val removed = runCatching { android.provider.DocumentsContract.deleteDocument(contentResolver, uri) }.getOrDefault(false)
-        runCatching { contentResolver.releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+        runCatching { contentResolver.releasePersistableUriPermission(uri,
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
         return removed
     }
 
     private fun saveMediaDownload(spec: MediaDownload.Spec, uri: Uri) {
         if (!CustomStreamPlayer.validLocal(uri.toString())) return
         val resolver = contentResolver
-        // Only a read grant is retained; the user owns the new document.
+        // Persist write access as well, so confirmed Delete can remove the
+        // specific document created by Download even after an app restart.
         val granted = runCatching {
-            resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            resolver.takePersistableUriPermission(uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
         }.isSuccess
         if (!granted) {
             val removed = removeIncompleteDownload(uri)
