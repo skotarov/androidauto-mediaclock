@@ -487,14 +487,16 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                         children.add(MediaBrowserCompat.MediaItem(desc, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
                     }
                 }
-                val icons = mutableMapOf<Int, Bitmap>()
+                val icons = mutableMapOf<Pair<Int, Boolean>, Bitmap>()
+                val downloads = if (page.mediaPage) DownloadAvailability.byUrl(contentResolver, StreamLibrary.list(prefs)) else emptyMap()
                 entries.forEach { item ->
                     val bookFolder = !playMode && item.textFile && BookNavigation.mayHaveContents(item.name)
                     val kind = LibraryMediaKind.item(item, page.localFolder)
+                    val downloaded = item.url in downloads
                     val desc = MediaDescriptionCompat.Builder().setMediaId(if (bookFolder) BookNavigation.BOOK_PREFIX + item.id else item.id).setTitle(item.name)
-                        .setSubtitle(kind.label + " · " + item.format).apply {
-                            if (entries.size <= 40) setIconBitmap(icons.getOrPut(kind.icon) { sourceIcon(kind.icon, 32) })
-                            else setIconUri(browseIconUri(kind.icon))
+                        .setSubtitle(kind.label + " · " + item.format + if (downloaded) " · Downloaded" else "").apply {
+                            if (entries.size <= 40) setIconBitmap(icons.getOrPut(kind.icon to downloaded) { sourceIcon(kind.icon, 32, downloaded = downloaded) })
+                            else setIconUri(browseIconUri(if (downloaded) downloadedLibraryIcon(kind.icon) else kind.icon))
                         }.build()
                     children.add(MediaBrowserCompat.MediaItem(desc, if (bookFolder) MediaBrowserCompat.MediaItem.FLAG_BROWSABLE else MediaBrowserCompat.MediaItem.FLAG_PLAYABLE))
                 }
@@ -598,7 +600,15 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
 
     private fun selectSource(id: String?): Boolean {
         if (playMode && id == CLOCK_ID) return false
-        val entry = StreamLibrary.list(prefs).firstOrNull { it.id == id }
+        val entries = StreamLibrary.list(prefs)
+        val hit = id?.let { MediaPageDirectory.find(it) }?.takeIf { it.parent.mediaPage }
+        val offline = hit?.let { DownloadAvailability.find(contentResolver, entries, it.item.url) }
+        if (offline != null) {
+            if (!StreamLibrary.select(prefs, offline.id)) return false
+            activeSource = StreamLibrary.selected(prefs)
+            return true
+        }
+        val entry = entries.firstOrNull { it.id == id }
         val originalUrl = entry?.downloadSourceUrl
         if (entry != null && originalUrl != null && !DownloadAvailability.available(contentResolver, entry)) {
             notifyLibraryChanged()
