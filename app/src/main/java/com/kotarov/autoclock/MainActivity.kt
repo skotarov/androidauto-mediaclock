@@ -49,6 +49,9 @@ import com.kotarov.autoclock.media.LibraryMediaKind
 import com.kotarov.autoclock.media.MediaDownload
 import com.kotarov.autoclock.media.DownloadLocation
 import com.kotarov.autoclock.media.DownloadAvailability
+import com.kotarov.autoclock.media.ContentNavigation
+import com.kotarov.autoclock.media.CacheOwnership
+import com.kotarov.autoclock.media.BookDiskCache
 import com.kotarov.autoclock.media.PlaybackSpeed
 import com.kotarov.autoclock.media.RemotePlaybackBookmarks
 import com.kotarov.autoclock.media.StreamMetadata
@@ -248,7 +251,8 @@ class MainActivity : Activity() {
             val mime = state.getString("downloadMime").orEmpty()
             val length = state.getLong("downloadLength", 0)
             if (pendingDownloadMode != null && MediaDownload.offer(url) && name.isNotBlank() && mime.isNotBlank() && length > 0)
-                pendingDownload = MediaDownload.Spec(url, name, mime, length, state.getString("downloadReplaceId"))
+                pendingDownload = MediaDownload.Spec(url, name, mime, length, state.getString("downloadReplaceId"),
+                    state.getString("downloadOwner"), state.getBoolean("downloadRefresh"))
         }
         val shell = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1291,6 +1295,8 @@ class MainActivity : Activity() {
             outState.putString("downloadMime", it.mime)
             outState.putLong("downloadLength", it.length)
             outState.putString("downloadReplaceId", it.replaceId)
+            outState.putString("downloadOwner", it.owner)
+            outState.putBoolean("downloadRefresh", it.refresh)
         }
         super.onSaveInstanceState(outState)
     }
@@ -1620,10 +1626,7 @@ class MainActivity : Activity() {
         val entries = StreamLibrary.list(prefs)
         val hit = MediaPageDirectory.find(id)?.takeIf { it.parent.mediaPage }
         val offline = hit?.let { DownloadAvailability.find(contentResolver, entries, it.item.url) }
-        if (offline != null) {
-            selectPhoneSource(offline.id)
-            return
-        }
+        if (offline != null && hit != null) CacheOwnership.claim(this, hit.item.url, hit.parent.id)
         val entry = entries.firstOrNull { it.id == id }
         val source = entry?.downloadSourceUrl
         if (entry != null && source != null && !DownloadAvailability.available(contentResolver, entry)) {
@@ -1648,7 +1651,7 @@ class MainActivity : Activity() {
             pendingPhoneSource = id
             pendingPhonePlay = true
             if (BookNavigation.parseChoice(id) == null && FolderNavigation.parse(id) == null) {
-                if (!StreamLibrary.select(prefs, id)) { pendingPhoneSource = null; pendingPhonePlay = null; return }
+                if (!StreamLibrary.select(prefs, id, offline)) { pendingPhoneSource = null; pendingPhonePlay = null; return }
                 ClockSelectionStore.setWeatherEnabled(prefs, true)
             }
         }
@@ -1695,11 +1698,11 @@ class MainActivity : Activity() {
         dialog.show()
     }
 
-    private fun openMediaPage(page: StreamLibrary.Station) {
+    private fun openMediaPage(page: StreamLibrary.Station, back: (() -> Unit)? = null) {
         var cancelled = false
         val progress = AlertDialog.Builder(this).setTitle(page.name).setMessage("Finding media…")
-            .setNegativeButton("Cancel") { _, _ -> cancelled = true }
-            .setOnCancelListener { cancelled = true }.create()
+            .setNegativeButton(if (back == null) "Cancel" else "Back") { _, _ -> cancelled = true; back?.invoke() }
+            .setOnCancelListener { cancelled = true; back?.invoke() }.create()
         progress.show()
         MediaPageDirectory.load(this, page) { result ->
             if (!cancelled && !isDestroyed && !isFinishing) {
@@ -1707,9 +1710,9 @@ class MainActivity : Activity() {
                 val items = result.getOrNull().orEmpty()
                 if (items.isEmpty()) AlertDialog.Builder(this).setTitle(page.name)
                     .setMessage(if (page.localFolder) "No files found, or folder unavailable." else "No direct playable media found, or page unavailable.")
-                    .setPositiveButton("OK", null).show()
+                    .setPositiveButton("OK") { _, _ -> back?.invoke() }.show()
                 else {
-                    val choices = if (page.localFolder && !BuildConfig.PLAY_MEDIA_MODE) FolderNavigation.choices(page.id) else emptyList()
+                    val choices = if (page.localFolder && !BuildConfig.PLAY_MEDIA_MODE && items.any { !it.browsable }) FolderNavigation.choices(page.id) else emptyList()
                     val rows = choices.map { Triple(it.title, "Folder playback", R.drawable.ic_source_folder) } +
                         items.map { item ->
                             val kind = LibraryMediaKind.item(item, page.localFolder)
@@ -1723,7 +1726,8 @@ class MainActivity : Activity() {
                         override fun getView(position: Int, convertView: View?, parent: android.view.ViewGroup): View {
                             val (name, detail, icon) = rows[position]
                             val item = items.getOrNull(position - choices.size)
-                            val downloaded = item != null && item.url in downloads
+                            val downloaded = item != null && (item.url in downloads ||
+                                (item.browsable && page.mediaPage && MediaPageDirectory.cachedPage(this@MainActivity, ContentNavigation.id(page.id, item.url))))
                             return LinearLayout(this@MainActivity).apply {
                                 orientation = LinearLayout.HORIZONTAL
                                 gravity = android.view.Gravity.CENTER_VERTICAL
@@ -1738,20 +1742,40 @@ class MainActivity : Activity() {
                                 addView(LinearLayout(this@MainActivity).apply {
                                     orientation = LinearLayout.VERTICAL
                                     addView(text(name, 15f, 0))
-                                    addView(text(detail + if (downloaded) " · Downloaded" else "", 12f, 0).apply { setTextColor(Color.rgb(185, 190, 199)) })
+                                    addView(text(detail + if (downloaded) (if (item?.browsable == true) " · Cached" else " · Downloaded") else "", 12f, 0).apply { setTextColor(Color.rgb(185, 190, 199)) })
                                 }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-                                if (!page.localFolder && item != null && MediaDownload.offer(item.url)) {
+                                if (item?.browsable == true || (!page.localFolder && item != null && MediaDownload.offer(item.url))) {
                                     addView(text("⋮", 24f, 0).apply {
                                         gravity = android.view.Gravity.CENTER
                                         contentDescription = "Options: " + item.name
                                         isFocusable = false
                                         setOnClickListener { anchor ->
                                             PopupMenu(this@MainActivity, anchor).apply {
-                                                if (DownloadAvailability.find(contentResolver, StreamLibrary.list(settings()), item.url) != null)
-                                                    menu.add("Downloaded").isEnabled = false
-                                                else menu.add("Download").setOnMenuItemClickListener {
-                                                    requestMediaDownload(item.url, item.name)
-                                                    true
+                                                if (item.browsable) {
+                                                    val child = ContentNavigation.child(settings(), page, item)
+                                                    if (child != null) {
+                                                        menu.add("Open").setOnMenuItemClickListener {
+                                                            openMediaPage(child) { openMediaPage(page, back) }; true
+                                                        }
+                                                        if (child.mediaPage) {
+                                                            menu.add("Refresh").setOnMenuItemClickListener {
+                                                                openMediaPage(child) { openMediaPage(page, back) }; true
+                                                            }
+                                                            menu.add("Remove cache").setOnMenuItemClickListener {
+                                                                removePageCache(child); true
+                                                            }
+                                                        }
+                                                    }
+                                                } else {
+                                                    val saved = DownloadAvailability.find(contentResolver, StreamLibrary.list(settings()), item.url)
+                                                    menu.add(if (saved == null) "Download" else "Refresh").setOnMenuItemClickListener {
+                                                        if (item.format == "ARTICLE") cacheArticle(item.url, item.name, page.id)
+                                                        else requestMediaDownload(item.url, item.name, saved?.id, page.id, saved != null)
+                                                        true
+                                                    }
+                                                    if (saved != null) menu.add("Remove cache").setOnMenuItemClickListener {
+                                                        confirmRemoveCache(saved); true
+                                                    }
                                                 }
                                                 show()
                                             }
@@ -1765,14 +1789,20 @@ class MainActivity : Activity() {
                         if (index < choices.size) selectPhoneSource(choices[index].id)
                         else {
                             val item = items[index - choices.size]
-                            val book = if (item.textFile) {
+                            if (item.browsable) {
+                                ContentNavigation.child(settings(), page, item)?.let { child ->
+                                    openMediaPage(child) { openMediaPage(page, back) }
+                                }
+                                return@setAdapter
+                            }
+                            val book = if (item.textFile && item.format != "ARTICLE") {
                                 DownloadAvailability.find(contentResolver, StreamLibrary.list(settings()), item.url)
                                     ?.takeIf { it.textFile } ?: StreamLibrary.book(settings(), item.id)
                             } else null
                             if (book != null) openBook(book) else selectPhoneSource(item.id)
                         }
-                    }.setNegativeButton("Cancel", null)
-                    if (page.mediaPage && items.any { MediaDownload.offer(it.url) })
+                    }.setNegativeButton(if (back == null) "Cancel" else "Back") { _, _ -> back?.invoke() }
+                    if (page.mediaPage && items.any { !it.browsable && MediaDownload.offer(it.url) })
                         builder.setPositiveButton("Download all", null)
                     val dialog = builder.create()
                     courseRefresh = {
@@ -1780,6 +1810,7 @@ class MainActivity : Activity() {
                         adapter.notifyDataSetChanged()
                     }
                     dialog.setOnDismissListener { courseRefresh = null }
+                    dialog.setOnCancelListener { back?.invoke() }
                     dialog.setOnShowListener {
                         dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setOnClickListener {
                             requestCourseDownload(page, items)
@@ -2011,16 +2042,18 @@ class MainActivity : Activity() {
         worker.start()
     }
 
-    private fun requestMediaDownload(address: String, name: String, replaceId: String? = null) {
+    private fun requestMediaDownload(address: String, name: String, replaceId: String? = null,
+                                     owner: String? = null, refresh: Boolean = false) {
         if (downloadJob != null || pendingDownload != null || pendingDownloadMode != null || webImport != null) return
         if (!MediaDownload.offer(address)) return
         val entries = StreamLibrary.list(settings())
-        if (DownloadAvailability.find(contentResolver, entries, address) != null) {
+        if (!refresh && DownloadAvailability.find(contentResolver, entries, address) != null) {
+            CacheOwnership.claim(this, address, owner)
             android.widget.Toast.makeText(this, "Already downloaded", android.widget.Toast.LENGTH_SHORT).show()
             return
         }
         val missing = replaceId ?: entries.firstOrNull { it.downloadSourceUrl == address }?.id
-        runUrlWork("Checking downloadable media…", { MediaDownload.inspect(address, name).copy(replaceId = missing) }) { result ->
+        runUrlWork("Checking downloadable media…", { MediaDownload.inspect(address, name).copy(replaceId = missing, owner = owner, refresh = refresh) }) { result ->
             result.fold(onSuccess = { spec ->
                 val mode = DownloadLocation.selected(settings())
                 val tree = DownloadLocation.tree(settings(), mode)
@@ -2044,7 +2077,7 @@ class MainActivity : Activity() {
     private fun requestCourseDownload(page: StreamLibrary.Station, items: List<MediaPageParser.Item>) {
         if (downloadJob != null || pendingDownload != null || pendingDownloadMode != null || webImport != null) return
         val downloads = DownloadAvailability.byUrl(contentResolver, StreamLibrary.list(settings()))
-        val candidates = items.filter { MediaDownload.offer(it.url) && it.url !in downloads }.distinctBy { it.url }
+        val candidates = items.filter { !it.browsable && MediaDownload.offer(it.url) && it.url !in downloads }.distinctBy { it.url }
         if (candidates.isEmpty()) {
             android.widget.Toast.makeText(this, "All downloadable items are already saved", android.widget.Toast.LENGTH_SHORT).show()
             return
@@ -2068,9 +2101,9 @@ class MainActivity : Activity() {
         val resolver = contentResolver
         val prefs = settings()
         val snapshot = StreamLibrary.list(prefs)
-        if (snapshot.none { it.id == page.id && it.mediaPage && it.url == page.url }) return
+        if (ContentNavigation.resolve(prefs, page.id)?.url != page.url) return
         val available = DownloadAvailability.byUrl(resolver, snapshot)
-        val queue = items.filter { MediaDownload.offer(it.url) && it.url !in available }.distinctBy { it.url }
+        val queue = items.filter { !it.browsable && MediaDownload.offer(it.url) && it.url !in available }.distinctBy { it.url }
         if (queue.isEmpty()) {
             android.widget.Toast.makeText(this, "No remaining downloadable files", android.widget.Toast.LENGTH_SHORT).show()
             return
@@ -2103,7 +2136,7 @@ class MainActivity : Activity() {
                 var destination: Uri? = null
                 val result = runCatching {
                     val spec = MediaDownload.inspect(item.url, item.name)
-                        .copy(replaceId = snapshot.firstOrNull { it.downloadSourceUrl == item.url }?.id)
+                        .copy(replaceId = snapshot.firstOrNull { it.downloadSourceUrl == item.url }?.id, owner = page.id)
                     require(!job.cancelled)
                     val uri = DownloadLocation.create(resolver, tree, spec)
                     destination = uri
@@ -2165,9 +2198,19 @@ class MainActivity : Activity() {
                 null, null, null)?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
         }.getOrNull()?.ifBlank { spec.name } ?: spec.name
         val replace = entries.firstOrNull { it.id == spec.replaceId && it.downloadSourceUrl == spec.url &&
-            !DownloadAvailability.available(contentResolver, it) }
-        val station = if (replace != null) replace.copy(url = uri.toString(), textFile = spec.textFile)
-            else StreamLibrary.newFile(uri.toString(), actualName, textFile = spec.textFile).copy(downloadSourceUrl = spec.url)
+            (spec.refresh || !DownloadAvailability.available(contentResolver, it)) }
+        val owners = setOfNotNull(spec.owner?.let(ContentNavigation::rootId))
+        if (replace != null && spec.refresh && DownloadAvailability.available(contentResolver, replace)) {
+            if (!CacheOwnership.removeCopy(this, replace)) {
+                removeIncompleteDownload(uri)
+                showDownloadError("Refresh failed: the old copy could not be removed.")
+                return
+            }
+        }
+        val station = if (replace != null) replace.copy(url = uri.toString(), textFile = spec.textFile,
+            cacheOwners = replace.cacheOwners + owners)
+            else StreamLibrary.newFile(uri.toString(), actualName, textFile = spec.textFile).copy(
+                downloadSourceUrl = spec.url, cacheOwners = owners, independent = spec.owner == null)
         val original = replace ?: entries.firstOrNull { !it.local && it.url == spec.url }
         if (original != null) PlaybackSpeed.write(prefs, station, PlaybackSpeed.read(prefs, original))
         StreamLibrary.save(prefs, if (replace == null) entries + station else entries.map { if (it.id == replace.id) station else it })
@@ -2383,7 +2426,7 @@ class MainActivity : Activity() {
             syncDownloadLocation()
             if (spec != null) createMediaDownload(spec, tree)
             else if (courseId != null) {
-                val page = StreamLibrary.list(settings()).firstOrNull { it.id == courseId && it.mediaPage }
+                val page = ContentNavigation.resolve(settings(), courseId)?.takeIf { it.mediaPage }
                 if (page != null) MediaPageDirectory.load(this, page) { result ->
                     if (!isDestroyed && !isFinishing) startCourseDownload(page, result.getOrNull().orEmpty(), tree)
                 }
