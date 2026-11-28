@@ -46,6 +46,7 @@ import com.kotarov.autoclock.media.PhoneAudioMode
 import com.kotarov.autoclock.media.CustomStreamPlayer
 import com.kotarov.autoclock.media.StreamLibrary
 import com.kotarov.autoclock.media.LibraryMediaKind
+import com.kotarov.autoclock.media.MediaDownload
 import com.kotarov.autoclock.media.PlaybackSpeed
 import com.kotarov.autoclock.media.RemotePlaybackBookmarks
 import com.kotarov.autoclock.media.StreamMetadata
@@ -98,6 +99,12 @@ class MainActivity : Activity() {
     private lateinit var playerTransport: LinearLayout
     private var fullClockDialog: android.app.Dialog? = null
     private var fullClockImage: ImageView? = null
+    private var pendingDownload: MediaDownload.Spec? = null
+    private class DownloadJob {
+        @Volatile var cancelled = false
+        var worker: Thread? = null
+    }
+    private var downloadJob: DownloadJob? = null
     private var libraryQuery = ""
     private var libraryFilter = 0
     private var renderedLibraryKey: String? = null
@@ -225,6 +232,13 @@ class MainActivity : Activity() {
         playerExpanded = savedInstanceState?.getBoolean("playerExpanded", false) ?: false
         libraryFilter = savedInstanceState?.getInt("libraryFilter", 0)?.coerceIn(0, 2) ?: 0
         libraryQuery = savedInstanceState?.getString("libraryQuery").orEmpty()
+        savedInstanceState?.getString("downloadUrl")?.let { url ->
+            val name = savedInstanceState.getString("downloadName").orEmpty()
+            val mime = savedInstanceState.getString("downloadMime").orEmpty()
+            val length = savedInstanceState.getLong("downloadLength", 0)
+            if (MediaDownload.offer(url) && name.isNotBlank() && mime.isNotBlank() && length > 0)
+                pendingDownload = MediaDownload.Spec(url, name, mime, length)
+        }
         val shell = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(this@MainActivity.background)
@@ -1248,6 +1262,12 @@ class MainActivity : Activity() {
         outState.putBoolean("playerExpanded", playerExpanded)
         outState.putInt("libraryFilter", libraryFilter)
         outState.putString("libraryQuery", libraryQuery)
+        pendingDownload?.let {
+            outState.putString("downloadUrl", it.url)
+            outState.putString("downloadName", it.name)
+            outState.putString("downloadMime", it.mime)
+            outState.putLong("downloadLength", it.length)
+        }
         super.onSaveInstanceState(outState)
     }
 
@@ -1431,7 +1451,8 @@ class MainActivity : Activity() {
                 orientation = LinearLayout.VERTICAL
                 addView(title)
                 addView(text(LibraryMediaKind.station(station).label +
-                    if (station.pinned) " · Car tab" else "", 11f, 0).apply {
+                    (if (station.downloadSourceUrl != null) " · Downloaded" else "") +
+                    (if (station.pinned) " · Car tab" else ""), 11f, 0).apply {
                     setTextColor(Color.rgb(185, 190, 199))
                     maxLines = 1
                 })
@@ -1448,6 +1469,8 @@ class MainActivity : Activity() {
                             else if (station.local) editFileName(station) else editStream(station)
                             true
                         }
+                        if (!station.local && !station.browsable && MediaDownload.offer(station.url))
+                            menu.add("Download").setOnMenuItemClickListener { requestMediaDownload(station.url, station.name); true }
                         if (station.textFile && WebTextProvider.owns(station.url)) {
                             menu.add("Refresh").setOnMenuItemClickListener { refreshArticle(station); true }
                             if (station.articleUrl != null) menu.add("Open original").setOnMenuItemClickListener {
@@ -1474,7 +1497,8 @@ class MainActivity : Activity() {
 
     private fun deleteLibrarySource(station: StreamLibrary.Station) {
         AlertDialog.Builder(this).setTitle(station.name)
-            .setMessage(if (station.browsable) "Remove folder from list?" else if (station.local) "Remove file from list?" else "Delete stream?")
+            .setMessage(if (station.downloadSourceUrl != null) "Remove from library? The downloaded file will stay in your chosen folder."
+                else if (station.browsable) "Remove folder from list?" else if (station.local) "Remove file from list?" else "Delete stream?")
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Delete") { _, _ ->
                 val prefs = settings()
@@ -1595,6 +1619,22 @@ class MainActivity : Activity() {
                                     addView(text(name, 15f, 0))
                                     addView(text(detail, 12f, 0).apply { setTextColor(Color.rgb(185, 190, 199)) })
                                 }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                                val item = items.getOrNull(position - choices.size)
+                                if (!page.localFolder && item != null && MediaDownload.offer(item.url)) {
+                                    addView(text("⋮", 24f, 0).apply {
+                                        gravity = android.view.Gravity.CENTER
+                                        contentDescription = "Options: " + item.name
+                                        setOnClickListener { anchor ->
+                                            PopupMenu(this@MainActivity, anchor).apply {
+                                                menu.add("Download").setOnMenuItemClickListener {
+                                                    requestMediaDownload(item.url, item.name)
+                                                    true
+                                                }
+                                                show()
+                                            }
+                                        }
+                                    }, LinearLayout.LayoutParams(dp(40), dp(44)))
+                                }
                             }
                         }
                     }
@@ -1831,6 +1871,118 @@ class MainActivity : Activity() {
         worker.start()
     }
 
+    private fun requestMediaDownload(address: String, name: String) {
+        if (downloadJob != null || pendingDownload != null || webImport != null) return
+        if (!MediaDownload.offer(address)) return
+        runUrlWork("Checking downloadable media…", { MediaDownload.inspect(address, name) }) { result ->
+            result.fold(onSuccess = { spec ->
+                pendingDownload = spec
+                val picker = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = spec.mime
+                    putExtra(Intent.EXTRA_TITLE, spec.name)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                        Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+                }
+                runCatching { startActivityForResult(picker, DOWNLOAD_REQUEST) }.onFailure {
+                    pendingDownload = null
+                    showDownloadError("Save As is unavailable on this device.")
+                }
+            }, onFailure = {
+                showDownloadError("This link does not provide a downloadable audio or video file with a known size. Live radio and playlists remain streaming only.")
+            })
+        }
+    }
+
+    private fun showDownloadError(message: String) {
+        if (isDestroyed || isFinishing) return
+        AlertDialog.Builder(this).setTitle("Download").setMessage(message)
+            .setPositiveButton("OK", null).show()
+    }
+
+    private fun removeIncompleteDownload(uri: Uri): Boolean {
+        val removed = runCatching { android.provider.DocumentsContract.deleteDocument(contentResolver, uri) }.getOrDefault(false)
+        runCatching { contentResolver.releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+        return removed
+    }
+
+    private fun saveMediaDownload(spec: MediaDownload.Spec, uri: Uri) {
+        if (!CustomStreamPlayer.validLocal(uri.toString())) return
+        val resolver = contentResolver
+        // Only a read grant is retained; the user owns the new document.
+        val granted = runCatching {
+            resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }.isSuccess
+        if (!granted) {
+            val removed = removeIncompleteDownload(uri)
+            showDownloadError("Cannot retain access to this file." +
+                if (removed) "" else " Check the selected location for an empty file.")
+            return
+        }
+        val job = DownloadJob()
+        downloadJob = job
+        val info = text("Preparing…", 14f, dp(8))
+        val bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            isIndeterminate = false
+        }
+        val fields = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(12), dp(20), dp(12))
+            addView(info)
+            addView(bar, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(12)))
+        }
+        val dialog = AlertDialog.Builder(this).setTitle(spec.name)
+            .setView(fields).setCancelable(false).setNegativeButton("Cancel", null).create()
+        val worker = Thread({
+            val result = runCatching {
+                MediaDownload.save(resolver, uri, spec, { job.cancelled }) { bytes, total ->
+                    messageHandler.post {
+                        if (downloadJob === job && !job.cancelled && !isDestroyed) {
+                            bar.progress = (bytes.toDouble() / total * 100).toInt().coerceIn(0, 100)
+                            info.text = String.format(java.util.Locale.ROOT, "%.1f / %.1f MB",
+                                bytes / 1048576.0, total / 1048576.0)
+                        }
+                    }
+                }
+            }
+            messageHandler.post {
+                if (downloadJob === job) downloadJob = null
+                if (!isDestroyed && !isFinishing) dialog.dismiss()
+                if (job.cancelled || result.isFailure || isDestroyed || isFinishing) {
+                    val removed = removeIncompleteDownload(uri)
+                    if (!isDestroyed && !isFinishing) {
+                        if (!removed) showDownloadError("Download incomplete. Please remove the partial file from the selected folder.")
+                        else if (!job.cancelled) showDownloadError("Download failed. No incomplete file was kept.")
+                    }
+                } else {
+                    val actualName = runCatching {
+                        resolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
+                            null, null, null)?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+                    }.getOrNull()?.ifBlank { spec.name } ?: spec.name
+                    val station = StreamLibrary.newFile(uri.toString(), actualName)
+                        .copy(downloadSourceUrl = spec.url)
+                    val prefs = settings()
+                    val original = StreamLibrary.list(prefs).firstOrNull { !it.local && it.url == spec.url }
+                    if (original != null) PlaybackSpeed.write(prefs, station, PlaybackSpeed.read(prefs, original))
+                    saveLibrarySource(station)
+                    android.widget.Toast.makeText(this, "Saved to selected folder and added to library", android.widget.Toast.LENGTH_LONG).show()
+                }
+            }
+        }, "AutoClockMediaDownload")
+        job.worker = worker
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener {
+                job.cancelled = true
+                worker.interrupt()
+                info.text = "Cancelling…"
+                dialog.getButton(AlertDialog.BUTTON_NEGATIVE).isEnabled = false
+            }
+        }
+        dialog.show()
+        worker.start()
+    }
+
     private fun pickFolder() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
@@ -1878,6 +2030,12 @@ class MainActivity : Activity() {
     @Deprecated("Android document picker callback")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == DOWNLOAD_REQUEST) {
+            val spec = pendingDownload
+            pendingDownload = null
+            if (resultCode == RESULT_OK && spec != null) data?.data?.let { saveMediaDownload(spec, it) }
+            return
+        }
         if (resultCode != RESULT_OK) return
         if (requestCode == FOLDER_REQUEST) { data?.data?.let { addLocalFolder(it) }; return }
         if (requestCode != FILE_REQUEST) return
@@ -2228,6 +2386,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        downloadJob?.let { it.cancelled = true; it.worker?.interrupt() }
         fullClockDialog?.dismiss()
         webImport?.interrupt()
         webImport = null
@@ -2257,5 +2416,6 @@ class MainActivity : Activity() {
         private const val CALL_PERMISSION_REQUEST = 7403
         private const val FILE_REQUEST = 7402
         private const val FOLDER_REQUEST = 7404
+        private const val DOWNLOAD_REQUEST = 7405
     }
 }
