@@ -32,6 +32,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
     private lateinit var prefs: SharedPreferences
     private var activeSource: StreamLibrary.Station? = null
     private var folderRequest = 0L
+    private val followedArticles = LinkedHashSet<String>()
     private val playMode = BuildConfig.PLAY_MEDIA_MODE
     private var requestedPlayback = false
     private var focusInterrupted = false
@@ -242,6 +243,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                 override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
                     if (!playMode && (!externalClient || session.currentControllerInfo.packageName == packageName)) phonePlaybackRequested = true
                     val request = ++folderRequest
+                    followedArticles.clear()
                     val folderChoice = FolderNavigation.parse(mediaId)
                     if (folderChoice != null) {
                         if (!playMode) playFolder(folderChoice, request)
@@ -1100,6 +1102,11 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
                     advanceFolder(folder, station)
                     return@sync
                 }
+                val parent = StreamLibrary.selectedParent(prefs)
+                if (parent?.mediaPage == true && station?.articleUrl != null && liteRequested) {
+                    advanceArticle(parent, station)
+                    return@sync
+                }
                 setWeatherEnabled(false)
             }
             if (!externalClient && error != "Media ended") setWeatherEnabled(false)
@@ -1112,6 +1119,37 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         }
         publishPlaybackState()
         refreshPositionSubtitle()
+    }
+
+    private fun advanceArticle(parent: StreamLibrary.Station, ended: StreamLibrary.Station) {
+        val request = folderRequest
+        val source = ended.articleUrl ?: return setWeatherEnabled(false)
+        followedArticles.add(source.trimEnd('/'))
+        fun current(): Boolean = clientActive && liteRequested && request == folderRequest && activeSource?.id == ended.id
+        fun advance(next: MediaPageParser.Item?) {
+            if (!current()) return
+            if (next == null || next.url.trimEnd('/') in followedArticles || followedArticles.size >= 1000) {
+                setWeatherEnabled(false)
+                return
+            }
+            val child = ContentNavigation.child(prefs, parent, next)
+            if (child == null) { setWeatherEnabled(false); return }
+            MediaPageDirectory.load(this, child) { result ->
+                if (current()) {
+                    val read = result.getOrNull()?.firstOrNull { it.format == "ARTICLE" && !it.browsable }
+                    if (read != null && selectSource(read.id)) {
+                        followedArticles.add(next.url.trimEnd('/'))
+                        setWeatherEnabled(true)
+                    } else setWeatherEnabled(false)
+                }
+            }
+        }
+        // Only explicit next-chapter/page links are followed; never crawl menus.
+        handler.post {
+            val next = MediaPageDirectory.nextPage(parent)
+            if (next != null) advance(next)
+            else MediaPageDirectory.load(this, parent) { advance(it.getOrNull()?.firstOrNull { row -> row.browsable && row.next }) }
+        }
     }
 
     private fun advanceFolder(folder: StreamLibrary.Station, ended: StreamLibrary.Station) {
