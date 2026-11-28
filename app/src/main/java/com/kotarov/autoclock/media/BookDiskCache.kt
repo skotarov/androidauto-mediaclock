@@ -13,10 +13,14 @@ internal object BookDiskCache {
     private const val MAX_AGE = 7L * 24 * 60 * 60 * 1000
     data class Hit(val file: File, val length: Int, val sample: String)
     private val pinned = HashMap<File, Int>()
+    private val removeOnRelease = HashSet<File>()
     private fun pin(file: File) { pinned[file] = (pinned[file] ?: 0) + 1 }
     @Synchronized fun release(file: File) {
         val count = pinned[file] ?: return
-        if (count <= 1) pinned.remove(file) else pinned[file] = count - 1
+        if (count <= 1) {
+            pinned.remove(file)
+            if (removeOnRelease.remove(file)) file.delete()
+        } else pinned[file] = count - 1
     }
     private fun valid(file: File): Boolean = file.isFile && file.length() > 0 && file.length() % 2L == 0L && file.length() <= LIMIT
     @Synchronized fun contains(dir: File, key: String): Boolean {
@@ -41,10 +45,23 @@ internal object BookDiskCache {
             }
         }.getOrNull()
     }
+    fun removeSource(context: Context, url: String) {
+        val fingerprint = fingerprint(context, Uri.parse(url), CancellationSignal()) ?: return
+        val dir = File(context.cacheDir, "text-reading")
+        val keys = BookFormat.values().map { key(fingerprint, it.name + ":v2") } +
+            listOf(key(fingerprint, "PDF:native"), key(fingerprint, "PDF:pdfbox"))
+        synchronized(this) {
+            keys.forEach { k ->
+                val file = File(dir, "cache-$k.utf16")
+                if (pinned.containsKey(file)) removeOnRelease.add(file) else file.delete()
+            }
+        }
+    }
+
     @Synchronized fun read(dir: File, key: String, pinActive: Boolean = false): Hit? {
         prune(dir)
         val file = File(dir, "cache-$key.utf16")
-        if (!valid(file)) return null
+        if (!valid(file) || file in removeOnRelease) return null
         return runCatching {
             val length = (file.length() / 2).toInt()
             val sample = RandomAccessFile(file, "r").use { input -> String(CharArray(minOf(4000, length)) { input.readChar() }) }
