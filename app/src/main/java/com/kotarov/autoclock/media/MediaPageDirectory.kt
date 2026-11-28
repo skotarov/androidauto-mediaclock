@@ -37,14 +37,14 @@ internal object MediaPageDirectory {
         (0 until a.length()).mapNotNull { i ->
             val o = a.getJSONObject(i)
             val url = o.getString("url")
-            if (url !in downloads) null else MediaPageParser.Item(o.getString("id"), o.getString("name"), url, o.getString("format"))
+            if (url !in downloads) null else MediaPageParser.Item(o.getString("id"), o.getString("name"), url, o.getString("format"), o.optBoolean("textFile", false))
         }
     }.getOrDefault(emptyList())
 
     private fun remember(context: Context, page: StreamLibrary.Station, items: List<MediaPageParser.Item>) {
         val a = JSONArray()
-        items.filter { MediaDownload.offer(it.url) && !it.textFile }.take(1000).forEach {
-            a.put(JSONObject().put("id", it.id).put("name", it.name).put("url", it.url).put("format", it.format))
+        items.filter { MediaDownload.offer(it.url) }.take(1000).forEach {
+            a.put(JSONObject().put("id", it.id).put("name", it.name).put("url", it.url).put("format", it.format).put("textFile", it.textFile))
         }
         context.getSharedPreferences("offline_page_index_v163", Context.MODE_PRIVATE).edit()
             .putString(page.id, JSONObject().put("url", page.url).put("items", a).toString()).apply()
