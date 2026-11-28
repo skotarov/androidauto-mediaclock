@@ -16,7 +16,8 @@ object StreamLibrary {
     const val ALERT_ID = "autoclock_clock"
     data class Station(val id: String, val name: String, val url: String, val icon: String = "", val local: Boolean = false,
         val textFile: Boolean = false, val language: String = "auto", val mediaPage: Boolean = false, val localFolder: Boolean = false, val pinned: Boolean = false,
-        val articleUrl: String? = null, val downloadSourceUrl: String? = null) {
+        val articleUrl: String? = null, val downloadSourceUrl: String? = null,
+        val cacheOwners: Set<String> = emptySet(), val independent: Boolean = true) {
         val browsable: Boolean get() = mediaPage || localFolder
         fun bitmap(): Bitmap? = if (icon.isBlank()) null else runCatching {
             val bytes = Base64.decode(icon, Base64.DEFAULT)
@@ -46,9 +47,11 @@ object StreamLibrary {
                 // Keep saved entries visible even when the source is currently invalid.
                 // Playback and network access still validate the address at use time.
                 Station(id, o.optString("name").ifBlank { defaultName(url) },
-                    url, "", local, local && o.optBoolean("textFile", false), o.optString("language", "auto"), !local && o.optBoolean("mediaPage", false), local && o.optBoolean("localFolder", false), o.optBoolean("pinned", false),
-                    o.optString("articleUrl").takeIf { local && WebReader.valid(it) },
-                    o.optString("downloadSourceUrl").takeIf { local && CustomStreamPlayer.valid(it) })
+                    url, "", local, o.optBoolean("textFile", false), o.optString("language", "auto"), !local && o.optBoolean("mediaPage", false), local && o.optBoolean("localFolder", false), o.optBoolean("pinned", false),
+                    o.optString("articleUrl").takeIf { WebReader.valid(it) },
+                    o.optString("downloadSourceUrl").takeIf { local && CustomStreamPlayer.valid(it) },
+                    o.optJSONArray("cacheOwners")?.let { a -> (0 until a.length()).mapNotNull { a.optString(it).takeIf(String::isNotBlank) }.toSet() } ?: emptySet(),
+                    o.optBoolean("independent", true))
             }
         }.getOrDefault(emptyList())
         cachedRaw = raw
@@ -66,17 +69,23 @@ object StreamLibrary {
         val o = JSONObject(raw)
         val id = o.getString("id")
         if (id != prefs.getString(KEY_SELECTED, ALERT_ID)) return@runCatching null
-        val folder = list(prefs).firstOrNull { it.browsable && it.id == o.getString("parent") &&
-            it.url == o.getString("pageUrl") } ?: return@runCatching null
+        val folder = ContentNavigation.resolve(prefs, o.getString("parent"))
+            ?.takeIf { it.url == o.getString("pageUrl") } ?: return@runCatching null
         val url = o.getString("url")
         if (!(if (folder.localFolder) CustomStreamPlayer.validLocal(url) else CustomStreamPlayer.valid(url))) return@runCatching null
         val name = o.getString("name")
         val textFile = o.optBoolean("textFile", false) ||
             (folder.localFolder && BookFormat.detect(name, null) != null)
-        folder.id to Station(id, name, url, local = folder.localFolder, textFile = textFile, language = "auto")
+        val article = o.optBoolean("article", false)
+        val offlineId = o.optString("offlineId")
+        val offline = list(prefs).firstOrNull { it.id == offlineId && it.local &&
+            (it.downloadSourceUrl == url || it.articleUrl == url) }
+        folder.id to if (offline != null) offline.copy(id = id, name = name)
+            else Station(id, name, url, local = folder.localFolder, textFile = textFile, language = "auto",
+                articleUrl = url.takeIf { article })
     }.getOrNull()
     fun selectedFolder(prefs: SharedPreferences): Station? = selectedChild(prefs)?.first?.let { id ->
-        list(prefs).firstOrNull { it.id == id && it.localFolder }
+        ContentNavigation.resolve(prefs, id)?.takeIf { it.localFolder }
     }
     private fun folderKey(folder: Station): String = "folder_position_v139:" + folder.id
     fun folderPosition(prefs: SharedPreferences, folder: Station): String? {
@@ -89,25 +98,30 @@ object StreamLibrary {
         prefs.edit().putString(folderKey(folder), "").apply()
     }
     fun selectedRootId(prefs: SharedPreferences): String =
-        selectedChild(prefs)?.first ?: prefs.getString(KEY_SELECTED, ALERT_ID).orEmpty()
+        selectedChild(prefs)?.first?.let(ContentNavigation::rootId) ?: prefs.getString(KEY_SELECTED, ALERT_ID).orEmpty()
+
+    internal fun selectedParent(prefs: SharedPreferences): Station? =
+        selectedChild(prefs)?.first?.let { ContentNavigation.resolve(prefs, it) }
     internal fun book(prefs: SharedPreferences, id: String): Station? {
         list(prefs).firstOrNull { it.id == id && it.textFile && !it.browsable }?.let { return it }
         selected(prefs)?.takeIf { it.id == id && it.textFile }?.let { return it }
         val hit = MediaPageDirectory.find(id) ?: return null
-        if (!hit.item.textFile || !list(prefs).any { it.localFolder && it.id == hit.parent.id && it.url == hit.parent.url }) return null
+        if (!hit.item.textFile || hit.item.browsable ||
+            ContentNavigation.resolve(prefs, hit.parent.id)?.takeIf { it.localFolder && it.url == hit.parent.url } == null) return null
         return Station(id, hit.item.name, hit.item.url, local = true, textFile = true)
     }
-    fun select(prefs: SharedPreferences, id: String?): Boolean {
+    fun select(prefs: SharedPreferences, id: String?, offline: Station? = null): Boolean {
         if (id == null) return false
         if (id == ALERT_ID || list(prefs).any { it.id == id && !it.browsable }) {
             prefs.edit().remove(KEY_CHILD).putString(KEY_SELECTED, id).apply()
             return true
         }
         val hit = MediaPageDirectory.find(id)
-        if (hit != null && list(prefs).any { it.browsable && it.id == hit.parent.id && it.url == hit.parent.url }) {
+        if (hit != null && !hit.item.browsable && ContentNavigation.resolve(prefs, hit.parent.id)?.url == hit.parent.url) {
             val item = hit.item
             val o = JSONObject().put("id", item.id).put("parent", hit.parent.id).put("pageUrl", hit.parent.url)
                 .put("url", item.url).put("name", item.name).put("textFile", item.textFile)
+                .put("article", item.format == "ARTICLE").put("offlineId", offline?.id ?: "")
             prefs.edit().putString(KEY_CHILD, o.toString()).putString(KEY_SELECTED, item.id).apply {
                 if (hit.parent.localFolder) putString(folderKey(hit.parent), item.id)
             }.apply()
@@ -120,14 +134,16 @@ object StreamLibrary {
         stations.forEach { s ->
             a.put(JSONObject().put("id", s.id).put("name", s.name).put("url", s.url).put("icon", "").put("local", s.local).put("textFile", s.textFile).put("language", s.language).put("mediaPage", s.mediaPage).put("localFolder", s.localFolder).put("pinned", s.pinned)
                 .put("articleUrl", s.articleUrl ?: "")
-                .put("downloadSourceUrl", s.downloadSourceUrl ?: ""))
+                .put("downloadSourceUrl", s.downloadSourceUrl ?: "")
+                .put("cacheOwners", JSONArray(s.cacheOwners.toList())).put("independent", s.independent))
         }
         val edit = prefs.edit().putString(KEY_LIST, a.toString())
         list(prefs).filter { old -> old.localFolder && stations.none { it.id == old.id && it.url == old.url && it.localFolder } }
             .forEach { edit.remove(folderKey(it)) }
         val child = selectedChild(prefs)
         val keepChild = child != null && stations.any { next ->
-            next.browsable && next.id == child.first && list(prefs).any { old -> old.id == next.id && old.url == next.url }
+            next.browsable && next.id == ContentNavigation.rootId(child.first) &&
+                list(prefs).any { old -> old.id == next.id && old.url == next.url }
         }
         if (!keepChild && stations.none { it.id == prefs.getString(KEY_SELECTED, ALERT_ID) && !it.browsable })
             edit.remove(KEY_CHILD).putString(KEY_SELECTED, ALERT_ID)
