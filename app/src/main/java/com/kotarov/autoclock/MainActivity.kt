@@ -1448,6 +1448,14 @@ class MainActivity : Activity() {
                             else if (station.local) editFileName(station) else editStream(station)
                             true
                         }
+                        if (station.textFile && WebTextProvider.owns(station.url)) {
+                            menu.add("Refresh").setOnMenuItemClickListener { refreshArticle(station); true }
+                            if (station.articleUrl != null) menu.add("Open original").setOnMenuItemClickListener {
+                                runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(station.articleUrl))) }
+                                    .onFailure { android.widget.Toast.makeText(this@MainActivity, "No browser available", android.widget.Toast.LENGTH_SHORT).show() }
+                                true
+                            }
+                        }
                         if (!BuildConfig.PLAY_MEDIA_MODE && CarLibraryTabs.eligible(station))
                             menu.add(if (station.pinned) "Unpin from car tabs" else "Pin to car tabs")
                                 .setOnMenuItemClickListener { toggleCarPin(station.id); true }
@@ -1687,9 +1695,9 @@ class MainActivity : Activity() {
             "Read article" -> {
                 if (!WebReader.valid(address)) return
                 val cached = info?.article
-                if (cached != null) saveArticle(cached, name)
+                if (cached != null) saveArticle(cached, name, address)
                 else runUrlWork("Extracting article text…", { WebReader.fetch(address) }) { result ->
-                    result.fold(onSuccess = { saveArticle(it, name) }, onFailure = {
+                    result.fold(onSuccess = { saveArticle(it, name, address) }, onFailure = {
                         AlertDialog.Builder(this).setTitle("Reader Mode")
                             .setMessage("No readable article found, or the page is unavailable.")
                             .setPositiveButton("OK", null).show()
@@ -1711,11 +1719,11 @@ class MainActivity : Activity() {
         renderStreams()
     }
 
-    private fun saveArticle(page: WebReader.Page, name: String) {
+    private fun saveArticle(page: WebReader.Page, name: String, address: String) {
         runCatching {
             val uri = WebTextProvider.save(this, page.text)
             try {
-                saveLibrarySource(StreamLibrary.newFile(uri, name.ifBlank { page.title }, textFile = true))
+                saveLibrarySource(StreamLibrary.newFile(uri, name.ifBlank { page.title }, textFile = true).copy(articleUrl = address))
             } catch (e: Exception) {
                 WebTextProvider.delete(this, uri)
                 throw e
@@ -1725,6 +1733,74 @@ class MainActivity : Activity() {
                 .setMessage("Could not save article. Check available storage.")
                 .setPositiveButton("OK", null).show()
         }
+    }
+
+    private fun refreshArticle(station: StreamLibrary.Station) {
+        if (webImport != null) return
+        val address = station.articleUrl
+        if (address != null && WebReader.valid(address)) {
+            fetchArticleReplacement(station, address)
+            return
+        }
+        // Older imports stored only the extracted text. Let the user attach
+        // the missing original URL without deleting favorites or the entry.
+        val input = android.widget.EditText(this).apply {
+            hint = "https://..."
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
+            setSingleLine(true)
+        }
+        val dialog = AlertDialog.Builder(this).setTitle("Original article URL")
+            .setMessage("This older article has no saved original address. Enter it to refresh the text.")
+            .setView(input).setNegativeButton("Cancel", null).setPositiveButton("Refresh", null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val url = input.text.toString().trim()
+                if (!WebReader.valid(url)) {
+                    input.error = "Enter a valid HTTPS address"
+                    return@setOnClickListener
+                }
+                dialog.dismiss()
+                fetchArticleReplacement(station, url)
+            }
+        }
+        dialog.show()
+    }
+
+    private fun fetchArticleReplacement(station: StreamLibrary.Station, address: String) {
+        runUrlWork("Refreshing article…", { WebReader.fetch(address) }) { result ->
+            result.fold(onSuccess = { page ->
+                val prefs = settings()
+                val entries = StreamLibrary.list(prefs)
+                val old = entries.firstOrNull { it.id == station.id && it.url == station.url }
+                    ?: return@fold
+                runCatching {
+                    val uri = WebTextProvider.save(this, page.text)
+                    val updated = old.copy(url = uri, articleUrl = address)
+                    try {
+                        // A new URI prevents an existing TTS reader from reusing
+                        // stale text and offsets. Preserve source-specific speed.
+                        PlaybackSpeed.write(prefs, updated, PlaybackSpeed.read(prefs, old))
+                        StreamLibrary.save(prefs, entries.map { if (it.id == old.id) updated else it })
+                    } catch (e: Exception) {
+                        WebTextProvider.delete(this, uri)
+                        throw e
+                    }
+                    if (entries.none { it.id != old.id && it.url == old.url }) {
+                        WebTextProvider.delete(this, old.url)
+                        prefs.edit().remove(PlaybackSpeed.sourceKey(old.url)).apply()
+                        getSharedPreferences("text_bookmarks", MODE_PRIVATE).edit().remove(old.url).apply()
+                    }
+                    renderStreams()
+                    android.widget.Toast.makeText(this, "Article refreshed", android.widget.Toast.LENGTH_SHORT).show()
+                }.onFailure { showArticleRefreshError() }
+            }, onFailure = { showArticleRefreshError() })
+        }
+    }
+
+    private fun showArticleRefreshError() {
+        AlertDialog.Builder(this).setTitle("Reader Mode")
+            .setMessage("Could not refresh the article. The previously saved text is still available.")
+            .setPositiveButton("OK", null).show()
     }
 
     private fun <T> runUrlWork(message: String, work: () -> T, done: (Result<T>) -> Unit) {
