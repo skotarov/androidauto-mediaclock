@@ -34,8 +34,12 @@ internal object MediaPageParser {
     }.getOrNull()
     data class Inspection(val items: List<Item> = emptyList(), val article: WebReader.Page? = null,
         val direct: Boolean = false, val streamName: String? = null, val document: Boolean = false) {
-        fun suggested(): List<String> = if (document) listOf("Browse media") else if (direct) listOf("Stream") else
-            listOfNotNull("Read article".takeIf { article != null }, "Browse media".takeIf { items.isNotEmpty() })
+        fun suggested(): List<String> = when {
+            document -> listOf("Browse website")
+            direct -> listOf("Stream")
+            items.any { it.browsable && !it.next } -> listOfNotNull("Browse website", "Read article".takeIf { article != null })
+            else -> listOfNotNull("Read article".takeIf { article != null }, "Browse website".takeIf { items.any { it.format != "ARTICLE" } })
+        }
     }
 
     fun fetch(parent: String, address: String, allLinks: Boolean = false): List<Item> = download(parent, address, false, allLinks).items
@@ -98,9 +102,13 @@ internal object MediaPageParser {
                     val items = parse(parent, uri.toString(), "", mime, doc)
                     val article = runCatching { WebReader.extract(doc.clone(), uri.host) }.getOrNull()
                     // One explicit Read page action, separate from its outgoing links.
-                    val read = article?.let { Item(itemId(parent, address), it.title, address, "ARTICLE", textFile = true) }
                     val navigation = navigationLinks(parent, uri.toString(), doc, items.map { it.url }.toSet(), allLinks)
-                    return Inspection(listOfNotNull(read) + items + navigation, article)
+                    val read = article?.let { Item(itemId(parent, address), "Read page: " + it.title, address, "ARTICLE", textFile = true) }
+                    // A collection is first a list of its contents, not a long introductory article.
+                    val catalog = navigation.count { !it.next } >= 3
+                    val rows = if (catalog) navigation + items + listOfNotNull(read)
+                        else listOfNotNull(read) + items + navigation
+                    return Inspection(rows, article)
                 }
                 val text = RadioText.decode(bytes, charset, mime.contains("json"))
                 val items = parse(parent, uri.toString(), text, mime)
@@ -117,6 +125,8 @@ internal object MediaPageParser {
     internal fun navigationLinks(parent: String, base: String, doc: org.jsoup.nodes.Document,
                                  existing: Set<String> = emptySet(), all: Boolean = false): List<Item> {
         val result = LinkedHashMap<String, Item>()
+        val ranks = mutableMapOf<String, Int>()
+        val genericLabel = Regex("(?iu)^(read(?: more| now)?|view(?: more)?|open|click here|here|more|continue reading|четете(?: сега| още)?|прочетете(?: сега| още)?|вижте(?: още)?|тук|още|отвори)[\\s»›→:!]*$")
         val excluded = Regex("(?iu)(^|[\\s_-])(menu|navbar|footer|sidebar|cookie|consent|advert|ads|social|share|comment|related|breadcrumb|login|search|widget)([\\s_-]|$)")
         val junk = Regex("(?iu)^(home|about|contact|privacy(?: policy)?|terms|login|sign in|register|search|начало|за нас|контакти|вход|регистрация|търсене|прочети още|read more)$")
         val nextPattern = Regex("(?iu)^(next(?: (?:post|chapter|page))?|следващ[аои]?(?: (?:глава|страница|публикация))?|напред)[\\s»›→:]*$")
@@ -127,16 +137,30 @@ internal object MediaPageParser {
                 !ContentNavigation.sameSite(base, url) || blockedPath.containsMatchIn(URI(url).path.orEmpty())) continue
             if (ext(url) in extensions || ext(url) in documents - setOf("html","htm","xhtml")) continue
             if (ext(url) in setOf("jpg","jpeg","png","gif","svg","webp","zip","css","js","ico","xml")) continue
-            val label = a.text().ifBlank { a.attr("title") }.ifBlank { a.attr("aria-label") }.trim()
+            val heading = a.closest("h1,h2,h3,h4,h5,h6")
+            val label = a.text().ifBlank { a.attr("title") }.ifBlank { a.attr("aria-label") }
+                .ifBlank { a.selectFirst("img[alt]")?.attr("alt").orEmpty() }.trim()
             val next = a.attr("rel").split(' ').any { it.equals("next",true) } ||
                 nextPattern.matches(label) || a.parents().any { it.className().contains("nav-next",true) || it.className().contains("post-next",true) }
             val noise = a.parents().any { it.tagName() in setOf("header","footer","aside","nav") ||
                 excluded.containsMatchIn(it.id() + " " + it.className()) }
             if (!all && !next && (noise || label.length < 2 || junk.matches(label))) continue
             if (label.isBlank() && !next && !all) continue
-            val name = if (next && label.isBlank()) "Next chapter" else label.ifBlank { StreamLibrary.defaultName(url) }
-            result[url] = Item(itemId(parent, url), name.take(128), url, "WEB", browsable = true, next = next)
-            if (result.size >= 300) break
+            val generic = label.isBlank() || genericLabel.matches(label)
+            val name = if (next && generic) "Next chapter" else if (generic) StreamLibrary.defaultName(url) else label
+            val rank = when {
+                heading != null && !generic -> 4
+                !generic && a.text().isNotBlank() -> 3
+                !generic -> 2
+                else -> 1
+            }
+            val key = url.trimEnd('/')
+            val old = result[key]
+            if (old == null && result.size >= 300) continue
+            if (old == null || rank > (ranks[key] ?: 0)) {
+                result[key] = Item(itemId(parent, url), name.take(128), url, "WEB", browsable = true, next = next || old?.next == true)
+                ranks[key] = rank
+            } else if (next && !old.next) result[key] = old.copy(next = true)
         }
         return result.values.toList()
     }
