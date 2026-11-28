@@ -25,7 +25,24 @@ internal object MediaPageDirectory {
     // Automatic advancement uses the same ordered snapshot the user opened.
     // Explicit opening still refreshes, and a process restart can rebuild it.
     fun folderSnapshot(page: StreamLibrary.Station): List<MediaPageParser.Item>? =
-        if (page.localFolder) cache[page.id]?.takeIf { it.parent.url == page.url }?.items else null
+        if (page.localFolder) cache[page.id]?.takeIf { it.parent.url == page.url }?.items?.filterNot { it.browsable } else null
+
+    fun nextPage(parent: StreamLibrary.Station): MediaPageParser.Item? =
+        cache[parent.id]?.items?.firstOrNull { it.browsable && it.next }
+
+    fun cachedPage(context: Context, id: String): Boolean =
+        context.getSharedPreferences("offline_page_index_v163", Context.MODE_PRIVATE).contains(id)
+
+    fun linkedRoots(context: Context, url: String): Set<String> {
+        val prefs = context.getSharedPreferences("offline_page_index_v163", Context.MODE_PRIVATE)
+        return prefs.all.mapNotNull { (key, value) ->
+            val matched = runCatching {
+                val a = JSONObject(value as String).getJSONArray("items")
+                (0 until a.length()).any { a.getJSONObject(it).optString("url") == url }
+            }.getOrDefault(false)
+            if (matched) ContentNavigation.rootId(key) else null
+        }.toSet()
+    }
 
     private fun saved(context: Context, page: StreamLibrary.Station): List<MediaPageParser.Item> = runCatching {
         val prefs = context.getSharedPreferences("offline_page_index_v163", Context.MODE_PRIVATE)
@@ -37,21 +54,33 @@ internal object MediaPageDirectory {
         (0 until a.length()).mapNotNull { i ->
             val o = a.getJSONObject(i)
             val url = o.getString("url")
-            if (url !in downloads) null else MediaPageParser.Item(o.getString("id"), o.getString("name"), url, o.getString("format"), o.optBoolean("textFile", false))
+            val browsable = o.optBoolean("browsable", false)
+            if (url !in downloads && !browsable) null else MediaPageParser.Item(
+                o.getString("id"), o.getString("name"), url, o.getString("format"),
+                o.optBoolean("textFile", false), browsable, o.optBoolean("next", false))
         }
     }.getOrDefault(emptyList())
 
     private fun remember(context: Context, page: StreamLibrary.Station, items: List<MediaPageParser.Item>) {
         val a = JSONArray()
-        items.filter { MediaDownload.offer(it.url) }.take(1000).forEach {
-            a.put(JSONObject().put("id", it.id).put("name", it.name).put("url", it.url).put("format", it.format).put("textFile", it.textFile))
+        items.filter { it.browsable || MediaDownload.offer(it.url) }.take(1000).forEach {
+            a.put(JSONObject().put("id", it.id).put("name", it.name).put("url", it.url).put("format", it.format).put("textFile", it.textFile).put("browsable", it.browsable).put("next", it.next))
         }
         context.getSharedPreferences("offline_page_index_v163", Context.MODE_PRIVATE).edit()
             .putString(page.id, JSONObject().put("url", page.url).put("items", a).toString()).apply()
     }
 
     fun forget(context: Context, id: String) {
-        context.getSharedPreferences("offline_page_index_v163", Context.MODE_PRIVATE).edit().remove(id).apply()
+        val prefs = context.getSharedPreferences("offline_page_index_v163", Context.MODE_PRIVATE)
+        val edit = prefs.edit()
+        if (ContentNavigation.rootId(id) == id) {
+            prefs.all.keys.filter { ContentNavigation.rootId(it) == id }.forEach { edit.remove(it) }
+            cache.keys.filter { ContentNavigation.rootId(it) == id }.toList().forEach { cache.remove(it) }
+        } else {
+            edit.remove(id)
+            cache.remove(id)
+        }
+        edit.apply()
     }
 
     fun load(context: Context, page: StreamLibrary.Station, done: (Result<List<MediaPageParser.Item>>) -> Unit) {
