@@ -1836,7 +1836,7 @@ class MainActivity : Activity() {
 
     private fun openMediaPage(page: StreamLibrary.Station, allLinks: Boolean = false, back: (() -> Unit)? = null) {
         var cancelled = false
-        val progress = AlertDialog.Builder(this).setTitle(page.name).setMessage("Finding media…")
+        val progress = AlertDialog.Builder(this).setTitle(page.name).setMessage(if (page.localFolder) "Finding files…" else "Finding page contents…")
             .setNegativeButton(if (back == null) "Cancel" else "Back") { _, _ -> cancelled = true; back?.invoke() }
             .setOnCancelListener { cancelled = true; back?.invoke() }.create()
         progress.show()
@@ -1846,10 +1846,14 @@ class MainActivity : Activity() {
                 checkedDownloadSources = null
                 renderStreams()
                 val items = result.getOrNull().orEmpty()
-                if (items.isEmpty()) AlertDialog.Builder(this).setTitle(page.name)
-                    .setMessage(if (page.localFolder) "No files found, or folder unavailable." else "No direct playable media found, or page unavailable.")
-                    .setPositiveButton("OK") { _, _ -> back?.invoke() }.show()
-                else {
+                if (items.isEmpty()) {
+                    val empty = AlertDialog.Builder(this).setTitle(page.name)
+                        .setMessage(if (page.localFolder) "No files found, or folder unavailable." else "No readable content or links found, or page unavailable.")
+                        .setNegativeButton(if (back == null) "Close" else "Back") { _, _ -> back?.invoke() }
+                    if (page.mediaPage && !allLinks) empty.setPositiveButton("Show all links") { _, _ -> openMediaPage(page, true, back) }
+                    else empty.setPositiveButton("Retry") { _, _ -> openMediaPage(page, allLinks, back) }
+                    empty.show()
+                } else {
                     val choices = if (page.localFolder && !BuildConfig.PLAY_MEDIA_MODE && items.any { !it.browsable }) FolderNavigation.choices(page.id) else emptyList()
                     val rows = choices.map { Triple(it.title, "Folder playback", R.drawable.ic_source_folder) } +
                         items.map { item ->
@@ -2046,10 +2050,10 @@ class MainActivity : Activity() {
     }
 
     private fun chooseUrlType(address: String, name: String, info: MediaPageParser.Inspection?, checked: Boolean) {
-        val options = if (WebReader.valid(address)) listOf("Read article", "Browse media", "Stream") else listOf("Stream")
+        val options = if (WebReader.valid(address)) listOf("Browse website", "Read article", "Stream") else listOf("Stream")
         val suggested = info?.suggested().orEmpty()
         val ordered = (suggested.filter { it in options } + options).distinct()
-        val heading = if (checked && suggested.isEmpty()) "URL not recognized — choose type" else "Choose URL type"
+        val heading = if (checked && suggested.isEmpty()) "Choose URL type — use Browse website for catalogs" else "Choose URL type"
         AlertDialog.Builder(this).setTitle(heading)
             .setItems(ordered.toTypedArray()) { _, index -> saveUrlType(address, name, ordered[index], info) }
             .setNegativeButton("Cancel", null).show()
@@ -2060,16 +2064,26 @@ class MainActivity : Activity() {
             "Read article" -> {
                 if (!WebReader.valid(address)) return
                 val cached = info?.article
+                if (info?.items?.count { it.browsable && !it.next }?.let { it >= 3 } == true) {
+                    AlertDialog.Builder(this).setTitle("This page contains a list of links")
+                        .setMessage("Browse website opens its contents; Read article reads only the text of this page.")
+                        .setNegativeButton("Read article") { _, _ ->
+                            if (cached != null) saveArticle(cached, name, address)
+                            else saveUrlType(address, name, "Read article", null)
+                        }.setPositiveButton("Browse website") { _, _ -> saveUrlType(address, name, "Browse website", info) }.show()
+                    return
+                }
                 if (cached != null) saveArticle(cached, name, address)
                 else runUrlWork("Extracting article text…", { WebReader.fetch(address) }) { result ->
                     result.fold(onSuccess = { saveArticle(it, name, address) }, onFailure = {
                         AlertDialog.Builder(this).setTitle("Reader Mode")
-                            .setMessage("No readable article found, or the page is unavailable.")
-                            .setPositiveButton("OK", null).show()
+                            .setMessage("No readable article found. If this is a catalog, book index or page with links, use Browse website instead.")
+                            .setNegativeButton("Cancel", null)
+                            .setPositiveButton("Browse website") { _, _ -> saveUrlType(address, name, "Browse website", null) }.show()
                     })
                 }
             }
-            "Browse media" -> {
+            "Browse website", "Browse media" -> {
                 if (!WebReader.valid(address)) return
                 saveLibrarySource(StreamLibrary.newMediaPage(address, name.ifBlank { StreamLibrary.defaultName(address) }))
             }
