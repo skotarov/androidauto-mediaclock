@@ -8,7 +8,7 @@ import java.util.Locale
 
 /** Explicit finite media download to a user-created SAF document, not an app cache. */
 internal object MediaDownload {
-    data class Spec(val url: String, val name: String, val mime: String, val length: Long)
+    data class Spec(val url: String, val name: String, val mime: String, val length: Long, val replaceId: String? = null)
 
     private val mimeByExtension = mapOf(
         "mp3" to "audio/mpeg", "mp2" to "audio/mpeg", "m4a" to "audio/mp4",
