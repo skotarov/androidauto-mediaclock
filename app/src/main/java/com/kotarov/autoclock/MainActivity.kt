@@ -1765,11 +1765,14 @@ class MainActivity : Activity() {
                         if (index < choices.size) selectPhoneSource(choices[index].id)
                         else {
                             val item = items[index - choices.size]
-                            val book = if (item.textFile) StreamLibrary.book(settings(), item.id) else null
+                            val book = if (item.textFile) {
+                                DownloadAvailability.find(contentResolver, StreamLibrary.list(settings()), item.url)
+                                    ?.takeIf { it.textFile } ?: StreamLibrary.book(settings(), item.id)
+                            } else null
                             if (book != null) openBook(book) else selectPhoneSource(item.id)
                         }
                     }.setNegativeButton("Cancel", null)
-                    if (page.mediaPage && items.any { !it.textFile && MediaDownload.offer(it.url) })
+                    if (page.mediaPage && items.any { MediaDownload.offer(it.url) })
                         builder.setPositiveButton("Download all", null)
                     val dialog = builder.create()
                     courseRefresh = {
@@ -2033,7 +2036,7 @@ class MainActivity : Activity() {
                         }.show()
                 }
             }, onFailure = {
-                showDownloadError("This link does not provide a downloadable audio or video file with a known size. Live radio and playlists remain streaming only.")
+                showDownloadError("This link does not provide a downloadable audio, video or readable document with a known size. Live radio and playlists remain streaming only.")
             })
         }
     }
@@ -2041,7 +2044,7 @@ class MainActivity : Activity() {
     private fun requestCourseDownload(page: StreamLibrary.Station, items: List<MediaPageParser.Item>) {
         if (downloadJob != null || pendingDownload != null || pendingDownloadMode != null || webImport != null) return
         val downloads = DownloadAvailability.byUrl(contentResolver, StreamLibrary.list(settings()))
-        val candidates = items.filter { !it.textFile && MediaDownload.offer(it.url) && it.url !in downloads }.distinctBy { it.url }
+        val candidates = items.filter { MediaDownload.offer(it.url) && it.url !in downloads }.distinctBy { it.url }
         if (candidates.isEmpty()) {
             android.widget.Toast.makeText(this, "All downloadable items are already saved", android.widget.Toast.LENGTH_SHORT).show()
             return
@@ -2067,7 +2070,7 @@ class MainActivity : Activity() {
         val snapshot = StreamLibrary.list(prefs)
         if (snapshot.none { it.id == page.id && it.mediaPage && it.url == page.url }) return
         val available = DownloadAvailability.byUrl(resolver, snapshot)
-        val queue = items.filter { !it.textFile && MediaDownload.offer(it.url) && it.url !in available }.distinctBy { it.url }
+        val queue = items.filter { MediaDownload.offer(it.url) && it.url !in available }.distinctBy { it.url }
         if (queue.isEmpty()) {
             android.widget.Toast.makeText(this, "No remaining downloadable files", android.widget.Toast.LENGTH_SHORT).show()
             return
@@ -2163,8 +2166,8 @@ class MainActivity : Activity() {
         }.getOrNull()?.ifBlank { spec.name } ?: spec.name
         val replace = entries.firstOrNull { it.id == spec.replaceId && it.downloadSourceUrl == spec.url &&
             !DownloadAvailability.available(contentResolver, it) }
-        val station = if (replace != null) replace.copy(url = uri.toString())
-            else StreamLibrary.newFile(uri.toString(), actualName).copy(downloadSourceUrl = spec.url)
+        val station = if (replace != null) replace.copy(url = uri.toString(), textFile = spec.textFile)
+            else StreamLibrary.newFile(uri.toString(), actualName, textFile = spec.textFile).copy(downloadSourceUrl = spec.url)
         val original = replace ?: entries.firstOrNull { !it.local && it.url == spec.url }
         if (original != null) PlaybackSpeed.write(prefs, station, PlaybackSpeed.read(prefs, original))
         StreamLibrary.save(prefs, if (replace == null) entries + station else entries.map { if (it.id == replace.id) station else it })
