@@ -1369,7 +1369,11 @@ class MainActivity : Activity() {
         if (checkedDownloadSources != sources) {
             courseRefresh?.invoke()
             checkedDownloadSources = sources
-            availableDownloadIds = sources.filter { DownloadAvailability.available(contentResolver, it) }.map { it.id }.toSet()
+            availableDownloadIds = sources.filter {
+                DownloadAvailability.available(contentResolver, it) ||
+                (it.mediaPage && MediaPageDirectory.cachedPage(this, it.id)) ||
+                (it.local && it.textFile && BookDiskCache.hasSource(this, it.url))
+            }.map { it.id }.toSet()
         }
         val alertPinned = prefs.getBoolean(CarLibraryTabs.KEY_ALERT_PIN, false)
         val favorites = favoriteSources()
@@ -1498,7 +1502,8 @@ class MainActivity : Activity() {
                 orientation = LinearLayout.VERTICAL
                 addView(title)
                 addView(text(LibraryMediaKind.station(station).label +
-                    (if (downloaded) " · Downloaded" else if (station.local && (station.downloadSourceUrl != null || station.articleUrl != null)) " · File unavailable" else "") +
+                    (if (downloaded) (if (station.mediaPage || !CacheOwnership.ownsCopy(station)) " · Cached" else " · Downloaded")
+                     else if (station.local && (station.downloadSourceUrl != null || station.articleUrl != null)) " · File unavailable" else "") +
                     (if (station.pinned) " · Car tab" else ""), 11f, 0).apply {
                     setTextColor(Color.rgb(185, 190, 199))
                     maxLines = 1
@@ -1536,7 +1541,10 @@ class MainActivity : Activity() {
                             }
                         } else if (station.textFile && station.local && !station.browsable) {
                             menu.add("Remove cache").setOnMenuItemClickListener {
-                                BookDiskCache.removeSource(this@MainActivity, station.url); true
+                                BookDiskCache.removeSource(this@MainActivity, station.url)
+                                checkedDownloadSources = null
+                                renderStreams()
+                                true
                             }
                         }
                         if (station.textFile && (WebTextProvider.owns(station.url) || station.articleUrl != null)) {
@@ -1833,6 +1841,8 @@ class MainActivity : Activity() {
                             Triple(item.name, kind.label + " · " + item.format, kind.icon)
                         }
                     var downloads = if (page.mediaPage) DownloadAvailability.byUrl(contentResolver, StreamLibrary.list(settings())) else emptyMap()
+                    var localTextCache = if (page.localFolder) items.filter { it.textFile && BookDiskCache.hasSource(this, it.url) }.map { it.url }.toSet() else emptySet()
+                    var levelDialog: AlertDialog? = null
                     val adapter = object : android.widget.BaseAdapter() {
                         override fun getCount() = rows.size
                         override fun getItem(position: Int) = rows[position]
@@ -1840,7 +1850,7 @@ class MainActivity : Activity() {
                         override fun getView(position: Int, convertView: View?, parent: android.view.ViewGroup): View {
                             val (name, detail, icon) = rows[position]
                             val item = items.getOrNull(position - choices.size)
-                            val downloaded = item != null && (item.url in downloads ||
+                            val downloaded = item != null && (item.url in downloads || item.url in localTextCache ||
                                 (item.browsable && page.mediaPage && MediaPageDirectory.cachedPage(this@MainActivity, ContentNavigation.id(page.id, item.url))))
                             return LinearLayout(this@MainActivity).apply {
                                 orientation = LinearLayout.HORIZONTAL
@@ -1856,9 +1866,9 @@ class MainActivity : Activity() {
                                 addView(LinearLayout(this@MainActivity).apply {
                                     orientation = LinearLayout.VERTICAL
                                     addView(text(name, 15f, 0))
-                                    addView(text(detail + if (downloaded) (if (item?.browsable == true) " · Cached" else " · Downloaded") else "", 12f, 0).apply { setTextColor(Color.rgb(185, 190, 199)) })
+                                    addView(text(detail + if (downloaded) (if (item?.browsable == true || page.localFolder) " · Cached" else " · Downloaded") else "", 12f, 0).apply { setTextColor(Color.rgb(185, 190, 199)) })
                                 }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-                                if (item != null && (item.browsable || (!page.localFolder && MediaDownload.offer(item.url)))) {
+                                if (item != null && (item.browsable || (page.localFolder && item.textFile) || (!page.localFolder && MediaDownload.offer(item.url)))) {
                                     addView(text("⋮", 24f, 0).apply {
                                         gravity = android.view.Gravity.CENTER
                                         contentDescription = "Options: " + item.name
@@ -1869,16 +1879,25 @@ class MainActivity : Activity() {
                                                     val child = ContentNavigation.child(settings(), page, item)
                                                     if (child != null) {
                                                         menu.add("Open").setOnMenuItemClickListener {
+                                                            levelDialog?.dismiss()
                                                             openMediaPage(child) { openMediaPage(page, back) }; true
                                                         }
                                                         if (child.mediaPage) {
                                                             menu.add("Refresh").setOnMenuItemClickListener {
-                                                                openMediaPage(child) { openMediaPage(page, back) }; true
+                                                                levelDialog?.dismiss()
+                                                            openMediaPage(child) { openMediaPage(page, back) }; true
                                                             }
                                                             menu.add("Remove cache").setOnMenuItemClickListener {
                                                                 removePageCache(child); true
                                                             }
                                                         }
+                                                    }
+                                                } else if (page.localFolder) {
+                                                    menu.add("Remove cache").setOnMenuItemClickListener {
+                                                        BookDiskCache.removeSource(this@MainActivity, item.url)
+                                                        localTextCache = localTextCache - item.url
+                                                        courseRefresh?.invoke()
+                                                        true
                                                     }
                                                 } else {
                                                     val saved = DownloadAvailability.find(contentResolver, StreamLibrary.list(settings()), item.url)
@@ -1919,8 +1938,10 @@ class MainActivity : Activity() {
                     if (page.mediaPage && items.any { !it.browsable && MediaDownload.offer(it.url) })
                         builder.setPositiveButton("Download all", null)
                     val dialog = builder.create()
+                    levelDialog = dialog
                     courseRefresh = {
                         if (page.mediaPage) downloads = DownloadAvailability.byUrl(contentResolver, StreamLibrary.list(settings()))
+                        if (page.localFolder) localTextCache = items.filter { it.textFile && BookDiskCache.hasSource(this, it.url) }.map { it.url }.toSet()
                         adapter.notifyDataSetChanged()
                     }
                     dialog.setOnDismissListener { courseRefresh = null }
