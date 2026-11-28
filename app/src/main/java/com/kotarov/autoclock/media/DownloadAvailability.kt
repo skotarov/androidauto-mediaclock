@@ -1,0 +1,16 @@
+package com.kotarov.autoclock.media
+
+import android.content.ContentResolver
+import android.net.Uri
+
+/** Do not infer existence from a saved URI, or delete entries when a card is removed. */
+internal object DownloadAvailability {
+    fun available(resolver: ContentResolver, station: StreamLibrary.Station): Boolean {
+        if (station.downloadSourceUrl == null) return false
+        return runCatching {
+            resolver.openFileDescriptor(Uri.parse(station.url), "r")?.use {
+                it.statSize != 0L
+            } ?: false
+        }.getOrDefault(false)
+    }
+}
