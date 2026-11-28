@@ -190,15 +190,19 @@ internal class TextFileReader(context: Context) {
         dir.listFiles()?.filter { it.name.startsWith("book-") && it.lastModified() < cutoff }
             ?.forEach { it.delete() }
         val file = File.createTempFile("book-", ".utf16", dir)
+        var remoteFile: File? = null
         try {
             var length = 0
             val sample = StringBuilder(4000)
             val uri = Uri.parse(source)
-            val name = runCatching {
+            val remote = CustomStreamPlayer.valid(source)
+            val remoteSpec = if (remote) MediaDownload.inspect(source, StreamLibrary.defaultName(source)) else null
+            val name = remoteSpec?.name ?: runCatching {
                 app.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
                     null, null, null)?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
             }.getOrNull().orEmpty()
-            val format = BookFormat.detect(name, app.contentResolver.getType(uri)) ?: BookFormat.PLAIN
+            val format = BookFormat.detect(name, remoteSpec?.mime ?: app.contentResolver.getType(uri))
+                ?: if (remote) error("Unsupported document format") else BookFormat.PLAIN
             val backendKey = "pdf_backend:" + source
             val previousBackend = prefs.getString(backendKey, null)
             // Keep the extraction algorithm stable for bookmarks created by
@@ -207,7 +211,15 @@ internal class TextFileReader(context: Context) {
                 (!LegacyPdfExtractor.available || previousBackend == "native" || (previousBackend == null && !prefs.contains(source)))
             if (format == BookFormat.PDF && !tryNative && !LegacyPdfExtractor.available)
                 error("PDF needs Android 15 or Android 12–14 with S Extension 13; install Universal")
-            val sourceKey = BookDiskCache.fingerprint(app, uri, signal)
+            val sourceKey = if (remote) null else BookDiskCache.fingerprint(app, uri, signal)
+            if (remoteSpec != null) {
+                val limit = 64L * 1024 * 1024
+                require(remoteSpec.textFile && remoteSpec.length <= limit) { "Document too large" }
+                signal.throwIfCanceled()
+                val raw = File.createTempFile("book-remote-", ".part", dir)
+                remoteFile = raw
+                MediaDownload.saveTo(remoteSpec, { signal.isCanceled }, { _, _ -> }, limit) { raw.outputStream().buffered() }
+            }
             fun cacheKey(native: Boolean) = sourceKey?.let {
                 BookDiskCache.key(it, format.name + if (format == BookFormat.PDF) (if (native) ":native" else ":pdfbox") else ":v2")
             }
@@ -223,9 +235,7 @@ internal class TextFileReader(context: Context) {
                 sample.setLength(0)
                 if (format == BookFormat.PDF && !native)
                     LegacyPdfExtractor.init(app)
-                val afd = app.contentResolver.openAssetFileDescriptor(uri, "r", signal) ?: error("No file")
-                afd.use { descriptor ->
-                    descriptor.createInputStream().use { input ->
+                fun extractInput(input: java.io.InputStream) {
                         file.outputStream().buffered().writer(Charsets.UTF_16BE).use { output ->
                             BookExtractor.extract(format, input, dir, {
                                 signal.throwIfCanceled()
@@ -238,7 +248,12 @@ internal class TextFileReader(context: Context) {
                                 output.write(text)
                             }
                         }
-                    }
+                }
+                val raw = remoteFile
+                if (raw != null) raw.inputStream().buffered().use { extractInput(it) }
+                else {
+                    val afd = app.contentResolver.openAssetFileDescriptor(uri, "r", signal) ?: error("No file")
+                    afd.use { descriptor -> descriptor.createInputStream().use { extractInput(it) } }
                 }
             }
             var nativeUsed = tryNative
@@ -266,6 +281,8 @@ internal class TextFileReader(context: Context) {
         } catch (e: Throwable) {
             file.delete()
             throw e
+        } finally {
+            remoteFile?.delete()
         }
     }
 
