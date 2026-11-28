@@ -1688,16 +1688,18 @@ class MainActivity : Activity() {
         val entries = StreamLibrary.list(prefs)
         val root = ContentNavigation.rootId(page.id)
         val isRoot = root == page.id
+        val scope = MediaPageDirectory.subtree(this, page)
+        fun belongs(id: String) = if (isRoot) ContentNavigation.rootId(id) == root else id in scope
         val remove = mutableSetOf<String>()
         val updates = mutableMapOf<String, StreamLibrary.Station>()
         var failures = 0
         for (entry in entries) {
             if (!CacheOwnership.ownsCopy(entry) || entry.id == page.id) continue
-            val roots = CacheOwnership.roots(this, entry, entries)
-            if (!isRoot || root !in roots) continue
-            val other = roots - root
+            val owners = CacheOwnership.owners(this, entry, entries)
+            if (owners.none { belongs(it) }) continue
+            val other = owners.filterNot { belongs(it) }.toSet()
             if (entry.independent || other.isNotEmpty() || entries.any { it.id != entry.id && it.url == entry.url }) {
-                updates[entry.id] = entry.copy(cacheOwners = entry.cacheOwners - root + other)
+                updates[entry.id] = entry.copy(cacheOwners = other)
                 continue
             }
             if (CacheOwnership.removeCopy(this, entry)) remove.add(entry.id) else failures++
@@ -1707,7 +1709,17 @@ class MainActivity : Activity() {
         if (remove.isNotEmpty()) prefs.edit().putStringSet("phone_library_favorites", favoriteSources() - remove)
             .putString("phone_library_recent", recentSources().filterNot { it in remove }.joinToString("\n")).apply()
         if (failures == 0) {
-            MediaPageDirectory.forget(this, page.id)
+            val urls = MediaPageDirectory.cachedUrls(this, scope)
+            for (url in urls) {
+                val outside = MediaPageDirectory.linkedPages(this, url).any { !belongs(it) }
+                if (!outside && entries.none { it.id !in remove && it.id != page.id && it.url == url }) {
+                    BookDiskCache.removeSource(this, url)
+                    getSharedPreferences("text_bookmarks", MODE_PRIVATE).edit().remove(url).remove("pdf_backend:" + url).apply()
+                    getSharedPreferences("audio_bookmarks", MODE_PRIVATE).edit().remove(url).apply()
+                    prefs.edit().remove(PlaybackSpeed.sourceKey(url)).apply()
+                }
+            }
+            scope.forEach { MediaPageDirectory.forget(this, it) }
             if (deleting) RemotePlaybackBookmarks(this).removeRoot(page.id)
         } else showDownloadError("$failures saved files could not be removed. The source is kept so you can retry.")
         checkedDownloadSources = null
@@ -1846,7 +1858,7 @@ class MainActivity : Activity() {
                                     addView(text(name, 15f, 0))
                                     addView(text(detail + if (downloaded) (if (item?.browsable == true) " · Cached" else " · Downloaded") else "", 12f, 0).apply { setTextColor(Color.rgb(185, 190, 199)) })
                                 }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-                                if (item?.browsable == true || (!page.localFolder && item != null && MediaDownload.offer(item.url))) {
+                                if (item != null && (item.browsable || (!page.localFolder && MediaDownload.offer(item.url)))) {
                                     addView(text("⋮", 24f, 0).apply {
                                         gravity = android.view.Gravity.CENTER
                                         contentDescription = "Options: " + item.name
@@ -2179,6 +2191,7 @@ class MainActivity : Activity() {
     private fun requestCourseDownload(page: StreamLibrary.Station, items: List<MediaPageParser.Item>) {
         if (downloadJob != null || pendingDownload != null || pendingDownloadMode != null || webImport != null) return
         val downloads = DownloadAvailability.byUrl(contentResolver, StreamLibrary.list(settings()))
+        items.filter { !it.browsable && it.url in downloads }.forEach { CacheOwnership.claim(this, it.url, page.id) }
         val candidates = items.filter { !it.browsable && MediaDownload.offer(it.url) && it.url !in downloads }.distinctBy { it.url }
         if (candidates.isEmpty()) {
             android.widget.Toast.makeText(this, "All downloadable items are already saved", android.widget.Toast.LENGTH_SHORT).show()
@@ -2205,6 +2218,7 @@ class MainActivity : Activity() {
         val snapshot = StreamLibrary.list(prefs)
         if (ContentNavigation.resolve(prefs, page.id)?.url != page.url) return
         val available = DownloadAvailability.byUrl(resolver, snapshot)
+        items.filter { !it.browsable && it.url in available }.forEach { CacheOwnership.claim(this, it.url, page.id) }
         val queue = items.filter { !it.browsable && MediaDownload.offer(it.url) && it.url !in available }.distinctBy { it.url }
         if (queue.isEmpty()) {
             android.widget.Toast.makeText(this, "No remaining downloadable files", android.widget.Toast.LENGTH_SHORT).show()
@@ -2311,9 +2325,10 @@ class MainActivity : Activity() {
         }.getOrNull()?.ifBlank { spec.name } ?: spec.name
         val replace = entries.firstOrNull { it.id == spec.replaceId && CacheOwnership.original(it) == spec.url &&
             (spec.refresh || !DownloadAvailability.available(contentResolver, it)) }
-        val owners = setOfNotNull(spec.owner?.let(ContentNavigation::rootId))
+        val owners = setOfNotNull(spec.owner)
+        val savedSpeed = replace?.let { PlaybackSpeed.read(prefs, it) }
         if (replace != null && spec.refresh && DownloadAvailability.available(contentResolver, replace)) {
-            if (!CacheOwnership.removeCopy(this, replace)) {
+            if (entries.any { it.id != replace.id && it.url == replace.url } || !CacheOwnership.removeCopy(this, replace)) {
                 if (article) WebTextProvider.delete(this, uri.toString()) else removeIncompleteDownload(uri)
                 showDownloadError("Refresh failed: the old copy could not be removed.")
                 return
@@ -2326,7 +2341,7 @@ class MainActivity : Activity() {
                 articleUrl = spec.url.takeIf { article }, downloadSourceUrl = spec.url.takeUnless { article },
                 cacheOwners = owners, independent = spec.owner == null)
         val original = replace ?: entries.firstOrNull { !it.local && it.url == spec.url }
-        if (original != null) PlaybackSpeed.write(prefs, station, PlaybackSpeed.read(prefs, original))
+        if (original != null) PlaybackSpeed.write(prefs, station, savedSpeed ?: PlaybackSpeed.read(prefs, original))
         StreamLibrary.save(prefs, if (replace == null) entries + station else entries.map { if (it.id == replace.id) station else it })
         checkedDownloadSources = null
     }
