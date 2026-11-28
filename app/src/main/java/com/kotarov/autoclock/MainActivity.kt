@@ -1369,8 +1369,9 @@ class MainActivity : Activity() {
         if (checkedDownloadSources != sources) {
             courseRefresh?.invoke()
             checkedDownloadSources = sources
+            val offlineUrls = DownloadAvailability.byUrl(contentResolver, sources).keys
             availableDownloadIds = sources.filter {
-                DownloadAvailability.available(contentResolver, it) ||
+                DownloadAvailability.available(contentResolver, it) || (!it.local && !it.browsable && it.url in offlineUrls) ||
                 (it.mediaPage && MediaPageDirectory.cachedPage(this, it.id)) ||
                 (it.local && it.textFile && BookDiskCache.hasSource(this, it.url))
             }.map { it.id }.toSet()
@@ -1528,9 +1529,14 @@ class MainActivity : Activity() {
                                 true
                             }
                         }
-                        if (!station.local && !station.browsable && MediaDownload.offer(station.url) && station.articleUrl == null)
-                            menu.add("Download").setOnMenuItemClickListener { requestMediaDownload(station.url, station.name, owner = station.id); true }
-                        if (station.mediaPage) {
+                        if (!station.local && !station.browsable && MediaDownload.offer(station.url) && station.articleUrl == null) {
+                            val saved = DownloadAvailability.find(contentResolver, StreamLibrary.list(settings()), station.url)
+                            menu.add(if (saved == null) "Download" else "Refresh").setOnMenuItemClickListener {
+                                requestMediaDownload(station.url, station.name, saved?.id, station.id, saved != null); true
+                            }
+                            if (saved != null) menu.add("Remove cache").setOnMenuItemClickListener { confirmRemoveCache(saved); true }
+                        }
+                        if (station.browsable) {
                             menu.add("Refresh").setOnMenuItemClickListener { openMediaPage(station); true }
                             menu.add("Remove cache").setOnMenuItemClickListener { removePageCache(station); true }
                         }
@@ -1750,6 +1756,14 @@ class MainActivity : Activity() {
         val offline = hit?.let { DownloadAvailability.find(contentResolver, entries, it.item.url) }
         if (offline != null && hit != null) CacheOwnership.claim(this, hit.item.url, hit.parent.id)
         val entry = entries.firstOrNull { it.id == id }
+        if (entry != null && !entry.local && !entry.browsable && entry.articleUrl == null) {
+            val saved = DownloadAvailability.find(contentResolver, entries, entry.url)
+            if (saved != null) {
+                CacheOwnership.claim(this, entry.url, entry.id)
+                selectPhoneSource(saved.id)
+                return
+            }
+        }
         val source = entry?.downloadSourceUrl
         if (entry != null && source != null && !DownloadAvailability.available(contentResolver, entry)) {
             checkedDownloadSources = null
@@ -1963,7 +1977,7 @@ class MainActivity : Activity() {
     }
 
     private fun openBook(book: StreamLibrary.Station) {
-        if (BuildConfig.PLAY_MEDIA_MODE || !BookNavigation.mayHaveContents(book.name)) {
+        if (BuildConfig.PLAY_MEDIA_MODE || !book.local || !BookNavigation.mayHaveContents(book.name)) {
             selectPhoneSource(book.id)
             return
         }
