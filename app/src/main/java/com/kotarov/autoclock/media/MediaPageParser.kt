@@ -18,6 +18,7 @@ internal object MediaPageParser {
     // Only explicit HTML downloads/type hints are included.
     private fun documentFormat(url: String, type: String, explicit: Boolean): BookFormat? {
         val e = ext(url)
+        if (e in extensions || e in setOf("m3u", "pls", "asx", "xspf", "mpd")) return null
         val format = BookFormat.detect(URI(url).path.orEmpty().substringAfterLast('/'), type)
         if (format == BookFormat.HTML && !explicit) return null
         return format?.takeIf { e in documents || type.isNotBlank() }
@@ -70,7 +71,8 @@ internal object MediaPageParser {
                     mime.startsWith("video/") || (inspect && (icyName != null || conn.getHeaderField("icy-br") != null ||
                     (mime in setOf("", "application/octet-stream") && ext(uri.toString()) in extensions && ext(uri.toString()) != "m3u8")))
                 val document = documentFormat(uri.toString(), mime, false)
-                if (document != null && mime !in setOf("text/html", "application/xhtml+xml")) {
+                if (document != null && mime !in setOf("text/html", "application/xhtml+xml") &&
+                    (mime != "text/plain" || ext(uri.toString()) in documents)) {
                     return Inspection(parse(parent, uri.toString(), "", "direct:" + mime), document = true)
                 }
                 if (direct) {
