@@ -45,6 +45,20 @@ internal object BookDiskCache {
             }
         }.getOrNull()
     }
+    fun hasSource(context: Context, url: String): Boolean {
+        val dir = File(context.cacheDir, "text-reading")
+        if (dir.listFiles().orEmpty().none { it.name.startsWith("cache-") }) return false
+        val fingerprint = fingerprint(context, Uri.parse(url), CancellationSignal()) ?: return false
+        val keys = BookFormat.values().map { key(fingerprint, it.name + ":v2") } +
+            listOf(key(fingerprint, "PDF:native"), key(fingerprint, "PDF:pdfbox"))
+        synchronized(this) {
+            return keys.any { k ->
+                val file = File(dir, "cache-$k.utf16")
+                valid(file) && file !in removeOnRelease
+            }
+        }
+    }
+
     fun removeSource(context: Context, url: String) {
         val fingerprint = fingerprint(context, Uri.parse(url), CancellationSignal()) ?: return
         val dir = File(context.cacheDir, "text-reading")
