@@ -166,11 +166,26 @@ internal object WebReader {
         }
         candidates.add(body)
 
+        // Aggregate paragraph counts once instead of repeatedly walking all
+        // paragraph ancestors for every possible container.
+        data class Stats(var chars: Int = 0, var count: Int = 0)
+        val stats = java.util.IdentityHashMap<Element, Stats>()
+        all.filter { it.prose }.forEach { block ->
+            var node: Element? = block.element
+            while (node != null) {
+                if (node in candidates) {
+                    val entry = stats.getOrPut(node) { Stats() }
+                    entry.chars += block.text.length
+                    entry.count++
+                }
+                if (node === body) break
+                node = node.parent()
+            }
+        }
         data class Candidate(val el: Element, val proseChars: Int, val score: Double)
         fun candidate(el: Element): Candidate {
-            val owned = all.filter { b -> b.element === el || b.element.parents().any { it === el } }
-            val prose = owned.filter { it.prose }
-            val chars = prose.sumOf { it.text.length }
+            val stat = stats[el] ?: return Candidate(el, 0, 0.0)
+            val chars = stat.chars
             if (chars < 80) return Candidate(el, chars, 0.0)
             val total = el.text().length.coerceAtLeast(chars)
             val purity = chars.toDouble() / total
@@ -184,7 +199,7 @@ internal object WebReader {
                 else -> 1.0
             }
             return Candidate(el, chars, min(chars, 100000) * bonus *
-                (0.25 + 0.75 * purity) * (1.0 - links) * (1.0 + min(prose.size, 12) / 30.0))
+                (0.25 + 0.75 * purity) * (1.0 - links) * (1.0 + min(stat.count, 12) / 30.0))
         }
         val scored = candidates.take(1000).map(::candidate).filter { it.proseChars >= 80 && it.score > 0 }
         val best = scored.maxByOrNull { it.score }
@@ -208,6 +223,7 @@ internal object WebReader {
             val heading = tag.matches(Regex("h[1-6]"))
             if (heading && b.text.equals(title, ignoreCase = true)) return@mapIndexedNotNull null
             if ((index < first || index > last) && heading) return@mapIndexedNotNull null
+            if ((index < first || index > last) && b.linked >= 0.30) return@mapIndexedNotNull null
             if ((index < first || index > last) && tag in setOf("li", "td") && b.linked > 0.0) return@mapIndexedNotNull null
             if (b.text.length < 4 || !seen.add(b.text)) return@mapIndexedNotNull null
             b.text
