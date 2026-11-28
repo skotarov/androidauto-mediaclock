@@ -1360,8 +1360,8 @@ class MainActivity : Activity() {
         if (!::streamRows.isInitialized) return
         val prefs = settings()
         val sources = StreamLibrary.list(prefs)
-        courseRefresh?.invoke()
         if (checkedDownloadSources != sources) {
+            courseRefresh?.invoke()
             checkedDownloadSources = sources
             availableDownloadIds = sources.filter { DownloadAvailability.available(contentResolver, it) }.map { it.id }.toSet()
         }
@@ -2065,6 +2065,7 @@ class MainActivity : Activity() {
         val resolver = contentResolver
         val prefs = settings()
         val snapshot = StreamLibrary.list(prefs)
+        if (snapshot.none { it.id == page.id && it.mediaPage && it.url == page.url }) return
         val available = DownloadAvailability.byUrl(resolver, snapshot)
         val queue = items.filter { !it.textFile && MediaDownload.offer(it.url) && it.url !in available }.distinctBy { it.url }
         if (queue.isEmpty()) {
@@ -2116,7 +2117,7 @@ class MainActivity : Activity() {
                 if (result.isSuccess) {
                     val (spec, uri) = result.getOrThrow()
                     done++
-                    // Register each completed file before starting the next one.
+                    // Register each completed file in order on the main thread.
                     // Completed downloads survive cancellation and activity recreation.
                     messageHandler.post {
                         registerMediaDownload(spec, uri)
@@ -2737,6 +2738,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         downloadJob?.let { it.cancelled = true; it.worker?.interrupt() }
+        courseRefresh = null
         fullClockDialog?.dismiss()
         webImport?.interrupt()
         webImport = null
