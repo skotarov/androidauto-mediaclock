@@ -12,7 +12,16 @@ import java.util.Locale
 internal object MediaPageParser {
     data class Item(val id: String, val name: String, val url: String, val format: String, val textFile: Boolean = false)
     private const val MAX_BYTES = 2 * 1024 * 1024
-    private val extensions = setOf("mp3","aac","m4a","mp4","m4v","ogg","oga","opus","wav","flac","webm","m3u8","ts","3gp")
+    private val extensions = setOf("mp3","aac","m4a","m4b","mp4","m4v","ogg","oga","opus","wav","flac","webm","m3u8","ts","3gp","wma","aiff","amr","mkv","avi","mov")
+    private val documents = setOf("pdf","epub","fb2","docx","rtf","txt","md","markdown","html","htm","xhtml")
+    // Ordinary links to HTML pages are navigation, not document attachments.
+    // Only explicit HTML downloads/type hints are included.
+    private fun documentFormat(url: String, type: String, explicit: Boolean): BookFormat? {
+        val e = ext(url)
+        val format = BookFormat.detect(URI(url).path.orEmpty().substringAfterLast('/'), type)
+        if (format == BookFormat.HTML && !explicit) return null
+        return format?.takeIf { e in documents || type.isNotBlank() }
+    }
     private fun ext(url: String) = runCatching { URI(url).path.orEmpty().substringAfterLast('/').substringAfterLast('.', "").lowercase(Locale.ROOT) }.getOrDefault("")
     private fun allowed(value: String): Boolean = runCatching {
         val u = URI(value)
@@ -23,8 +32,8 @@ internal object MediaPageParser {
         URI(base).resolve(value.trim()).toString().takeIf { allowed(it) }
     }.getOrNull()
     data class Inspection(val items: List<Item> = emptyList(), val article: WebReader.Page? = null,
-        val direct: Boolean = false, val streamName: String? = null) {
-        fun suggested(): List<String> = if (direct) listOf("Stream") else
+        val direct: Boolean = false, val streamName: String? = null, val document: Boolean = false) {
+        fun suggested(): List<String> = if (document) listOf("Browse media") else if (direct) listOf("Stream") else
             listOfNotNull("Read article".takeIf { article != null }, "Browse media".takeIf { items.isNotEmpty() })
     }
 
@@ -60,6 +69,10 @@ internal object MediaPageParser {
                 val direct = (mime.startsWith("audio/") && !mime.contains("mpegurl") && !mime.contains("scpls")) ||
                     mime.startsWith("video/") || (inspect && (icyName != null || conn.getHeaderField("icy-br") != null ||
                     (mime in setOf("", "application/octet-stream") && ext(uri.toString()) in extensions && ext(uri.toString()) != "m3u8")))
+                val document = documentFormat(uri.toString(), mime, false)
+                if (document != null && mime !in setOf("text/html", "application/xhtml+xml")) {
+                    return Inspection(parse(parent, uri.toString(), "", "direct:" + mime), document = true)
+                }
                 if (direct) {
                     return Inspection(parse(parent, uri.toString(), "", "direct:" + mime), direct = true, streamName = icyName)
                 }
@@ -100,15 +113,18 @@ internal object MediaPageParser {
             if (items.containsKey(url)) return
             val e = ext(url)
             val t = type.substringBefore(';').lowercase(Locale.ROOT)
-            if (!explicit && e !in extensions && !t.startsWith("audio/") && !t.startsWith("video/")) return
+            val book = documentFormat(url, t, explicit || t == "text/html" || t == "application/xhtml+xml")
+            if (!explicit && book == null && e !in extensions && !t.startsWith("audio/") && !t.startsWith("video/")) return
             if (e in setOf("m3u","pls") && !t.contains("mpegurl")) return
             val label = RadioText.cleanName(name, url).trim().replace(Regex("\\s+"), " ").take(128).ifBlank {
                 runCatching { URI(url).path.orEmpty().substringAfterLast('/').ifBlank { URI(url).host } }.getOrDefault("Media").take(128)
             }
             val hash = MessageDigest.getInstance("SHA-256").digest((parent + "|" + url).toByteArray())
                 .take(16).joinToString("") { "%02x".format(it.toInt() and 255) }
-            val format = if (e in extensions) e.uppercase(Locale.ROOT) else if (t.contains("mpegurl")) "M3U8" else t.substringAfter('/', "").uppercase(Locale.ROOT).ifBlank { "STREAM" }
-            items.putIfAbsent(url, Item("webmedia:" + hash, label, url, format))
+            val format = if (book != null) {
+                if (e in documents) e.uppercase(Locale.ROOT) else book.name
+            } else if (e in extensions) e.uppercase(Locale.ROOT) else if (t.contains("mpegurl")) "M3U8" else t.substringAfter('/', "").uppercase(Locale.ROOT).ifBlank { "STREAM" }
+            items.putIfAbsent(url, Item("webmedia:" + hash, label, url, format, textFile = book != null))
         }
         val trimmed = content.trimStart('\uFEFF', ' ', '\r', '\n', '\t')
         when {
@@ -167,7 +183,13 @@ internal object MediaPageParser {
                             if (property in setOf("og:audio","og:audio:url","og:audio:secure_url","og:video","og:video:url","og:video:secure_url"))
                                 add(el.attr("content"), doc.title(), explicit = property.startsWith("og:audio"))
                         }
-                        "a" -> add(el.attr("href"), el.text().ifBlank { el.attr("title") }, el.attr("type"))
+                        "a" -> {
+                            val href = el.attr("href")
+                            val type = el.attr("type")
+                            val htmlAttachment = el.hasAttr("download") &&
+                                absolute(base, href)?.let { ext(it) in setOf("html", "htm", "xhtml") } == true
+                            add(href, el.text().ifBlank { el.attr("title") }, type, htmlAttachment)
+                        }
                         "audio", "video", "source" -> {
                             val owner = el.closest("audio, video") ?: el
                             val title = el.attr("title").ifBlank { owner.attr("title") }.ifBlank { owner.attr("aria-label") }.ifBlank { doc.title() }
