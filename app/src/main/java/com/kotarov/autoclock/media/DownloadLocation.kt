@@ -15,7 +15,7 @@ internal object DownloadLocation {
     private const val AUTHORITY = "com.android.externalstorage.documents"
     private const val FOLDER = "Travel to Awaken"
     private const val MUSIC = "Music"
-    const val MODES = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+    val MODES = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
 
     fun selected(prefs: SharedPreferences): String =
         if (prefs.getString(KEY, INTERNAL) == CARD) CARD else INTERNAL
