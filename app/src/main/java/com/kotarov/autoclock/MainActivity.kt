@@ -241,7 +241,7 @@ class MainActivity : Activity() {
             val name = state.getString("downloadName").orEmpty()
             val mime = state.getString("downloadMime").orEmpty()
             val length = state.getLong("downloadLength", 0)
-            if (MediaDownload.offer(url) && name.isNotBlank() && mime.isNotBlank() && length > 0)
+            if (pendingDownloadMode != null && MediaDownload.offer(url) && name.isNotBlank() && mime.isNotBlank() && length > 0)
                 pendingDownload = MediaDownload.Spec(url, name, mime, length)
         }
         val shell = LinearLayout(this).apply {
@@ -1942,7 +1942,7 @@ class MainActivity : Activity() {
     }
 
     private fun requestMediaDownload(address: String, name: String) {
-        if (downloadJob != null || pendingDownload != null || webImport != null) return
+        if (downloadJob != null || pendingDownload != null || pendingDownloadMode != null || webImport != null) return
         if (!MediaDownload.offer(address)) return
         runUrlWork("Checking downloadable media…", { MediaDownload.inspect(address, name) }) { result ->
             result.fold(onSuccess = { spec ->
@@ -1951,12 +1951,13 @@ class MainActivity : Activity() {
                 if (tree != null && DownloadLocation.hasAccess(contentResolver, tree, mode)) {
                     createMediaDownload(spec, tree)
                 } else {
-                    pendingDownload = spec
                     AlertDialog.Builder(this).setTitle("Download location")
                         .setMessage("Allow access to Music on the selected storage once. Future downloads go to Music/Travel to Awaken automatically.")
-                        .setNegativeButton("Cancel") { _, _ -> pendingDownload = null }
-                        .setOnCancelListener { pendingDownload = null }
-                        .setPositiveButton("Allow") { _, _ -> openDownloadTree(mode) }.show()
+                        .setNegativeButton("Cancel", null)
+                        .setPositiveButton("Allow") { _, _ ->
+                            pendingDownload = spec
+                            openDownloadTree(mode)
+                        }.show()
                 }
             }, onFailure = {
                 showDownloadError("This link does not provide a downloadable audio or video file with a known size. Live radio and playlists remain streaming only.")
