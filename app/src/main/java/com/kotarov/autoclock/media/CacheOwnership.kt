@@ -29,10 +29,10 @@ internal object CacheOwnership {
         return removed
     }
 
-    fun roots(context: Context, s: StreamLibrary.Station, entries: List<StreamLibrary.Station>): Set<String> {
+    fun owners(context: Context, s: StreamLibrary.Station, entries: List<StreamLibrary.Station>): Set<String> {
         val existing = entries.map { it.id }.toSet()
-        return (s.cacheOwners + (original(s)?.let { MediaPageDirectory.linkedRoots(context, it) } ?: emptySet()))
-            .intersect(existing)
+        return (s.cacheOwners + (original(s)?.let { MediaPageDirectory.linkedPages(context, it) } ?: emptySet()))
+            .filter { ContentNavigation.rootId(it) in existing }.toSet()
     }
 
     fun claim(context: Context, url: String, root: String?) {
@@ -40,7 +40,7 @@ internal object CacheOwnership {
         val entries = StreamLibrary.list(prefs)
         val station = DownloadAvailability.find(context.contentResolver, entries, url) ?: return
         val updated = if (root == null) station.copy(independent = true)
-            else station.copy(cacheOwners = station.cacheOwners + ContentNavigation.rootId(root))
+            else station.copy(cacheOwners = station.cacheOwners + root)
         if (station != updated) StreamLibrary.save(prefs, entries.map { if (it.id == station.id) updated else it })
     }
 }
