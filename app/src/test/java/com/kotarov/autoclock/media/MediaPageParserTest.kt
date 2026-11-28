@@ -50,4 +50,21 @@ class MediaPageParserTest {
         assertTrue(items.drop(1).all { it.textFile })
         assertFalse(items.any { it.name == "Home" })
     }
+    @Test fun significantLinksKeepChaptersAndExcludeSiteFurniture() {
+        val base = "https://example.org/books/"
+        val doc = org.jsoup.Jsoup.parse("""
+            <header><a href="/home/">Home</a></header>
+            <main><a href="/books/one/">First book</a><a href="/books/two/">Second book</a>
+              <a href="/notes.pdf">PDF</a><a href="/books/one/">Duplicate</a>
+              <a href="https://other.example/book/">External</a></main>
+            <nav class="post-navigation"><a rel="next" href="/books/three/">Next chapter</a></nav>
+            <aside class="advertisement"><a href="/sale/">Sale</a></aside>
+        """.trimIndent(), base)
+        val rows = MediaPageParser.navigationLinks("root", base, doc)
+        assertEquals(3, rows.size)
+        assertTrue(rows.all { it.browsable })
+        assertEquals("https://example.org/books/three/", rows.last().url)
+        assertTrue(rows.last().next)
+        assertTrue(MediaPageParser.navigationLinks("root", base, doc, all = true).size > rows.size)
+    }
 }
