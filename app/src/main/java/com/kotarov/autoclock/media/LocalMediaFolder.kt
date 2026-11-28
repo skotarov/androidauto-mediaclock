@@ -9,12 +9,12 @@ import java.util.Locale
 
 /** List every direct file in the user-selected SAF folder; format detection is not a visibility filter. */
 internal object LocalMediaFolder {
-    private data class Candidate(val id: String, val name: String, val ext: String, val sortName: String, val book: BookFormat?)
+    private data class Candidate(val id: String, val name: String, val ext: String, val sortName: String, val book: BookFormat?, val directory: Boolean)
     private val order = compareBy<Candidate> { it.sortName }.thenBy { it.id }
     fun list(context: Context, folder: StreamLibrary.Station): List<MediaPageParser.Item> {
         val tree = Uri.parse(folder.url)
         require(DocumentsContract.isTreeUri(tree))
-        val root = DocumentsContract.getTreeDocumentId(tree)
+        val root = runCatching { DocumentsContract.getDocumentId(tree) }.getOrElse { DocumentsContract.getTreeDocumentId(tree) }
         val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, root)
         val columns = arrayOf(Document.COLUMN_DOCUMENT_ID, Document.COLUMN_DISPLAY_NAME, Document.COLUMN_MIME_TYPE)
         val candidates = ArrayList<Candidate>()
@@ -24,17 +24,17 @@ internal object LocalMediaFolder {
                 val name = cursor.getString(1)?.takeIf { it.isNotBlank() } ?: id.substringAfterLast('/').substringAfterLast(':').ifBlank { id }
                 val mime = cursor.getString(2).orEmpty().lowercase(Locale.ROOT)
                 val ext = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
-                if (mime == Document.MIME_TYPE_DIR) continue
-                val book = BookFormat.detect(name, mime)
-                candidates.add(Candidate(id, name, ext, name.lowercase(Locale.ROOT), book))
+                val directory = mime == Document.MIME_TYPE_DIR
+                val book = if (directory) null else BookFormat.detect(name, mime)
+                candidates.add(Candidate(id, name, ext, name.lowercase(Locale.ROOT), book, directory))
             }
         } ?: error("Folder unavailable")
-        return candidates.sortedWith(order).map { item ->
+        return candidates.sortedWith(compareByDescending<Candidate> { it.directory }.then(order)).map { item ->
             val uri = DocumentsContract.buildDocumentUriUsingTree(tree, item.id).toString()
             val hash = MessageDigest.getInstance("SHA-256").digest((folder.id + "|" + uri).toByteArray())
                 .take(16).joinToString("") { "%02x".format(it.toInt() and 255) }
             val format = item.ext.uppercase(Locale.ROOT).ifBlank { item.book?.name ?: "MEDIA" }
-            MediaPageParser.Item("foldermedia:" + hash, item.name, uri, format, textFile = item.book != null)
+            MediaPageParser.Item("foldermedia:" + hash, item.name, uri, if (item.directory) "FOLDER" else format, textFile = item.book != null, browsable = item.directory)
         }
     }
 }
