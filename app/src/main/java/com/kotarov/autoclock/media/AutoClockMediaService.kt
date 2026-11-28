@@ -562,6 +562,7 @@ class AutoClockMediaService : MediaBrowserServiceCompat() {
         if (!playMode) {
             notifyChildrenChanged(CarLibraryTabs.LIBRARY_ID)
             for (limit in 1..CarLibraryTabs.MAX_TABS) notifyChildrenChanged(CarLibraryTabs.rootId(limit))
+            StreamLibrary.list(prefs).filter { it.mediaPage }.forEach { notifyChildrenChanged(it.id) }
         }
     }
 
